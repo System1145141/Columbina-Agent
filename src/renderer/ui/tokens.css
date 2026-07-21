@@ -1,0 +1,167 @@
+:root {
+  /* ===== Surfaces (deep dark blue) ===== */
+  --rb-bg-0: #050812;
+  --rb-bg-1: #0a0f24;
+  --rb-bg-2: #11183a;
+  --rb-bg-3: #192154;
+  --rb-bg-elevated: #222c66;
+
+  /* ===== Brand blue scale (replaces pink) ===== */
+  --rb-blue-50:  #ebf4ff;
+  --rb-blue-100: #c7d9fe;
+  --rb-blue-200: #93b4fc;
+  --rb-blue-300: #6090fa;
+  --rb-blue-400: #3b7bf6;
+  --rb-blue-500: #2563eb;   /* primary brand */
+  --rb-blue-600: #1d4ed8;
+  --rb-blue-700: #1e3bb3;
+  --rb-blue-glow: #3b82f6;
+
+  /* ===== Cyan accent ===== */
+  --rb-cyan-400: #22d3ee;
+  --rb-cyan-500: #06b6d4;
+
+  /* ===== Indigo accent (gradient endpoint) ===== */
+  --rb-indigo-400: #818cf8;
+  --rb-indigo-500: #6366f1;
+  --rb-indigo-600: #4f46e5;
+
+  /* ===== Text ===== */
+  --rb-text-strong:  #f1f5ff;
+  --rb-text-default: #d9e2f7;
+  --rb-text-muted:   #94a3c7;
+  --rb-text-faint:   #647189;
+  --rb-text-on-blue: #ffffff;
+
+  /* ===== Borders ===== */
+  --rb-border-faint:  rgba(59, 130, 246, 0.08);
+  --rb-border-soft:   rgba(59, 130, 246, 0.16);
+  --rb-border-strong: rgba(59, 130, 246, 0.36);
+  --rb-border-grid:   rgba(99, 102, 241, 0.10);
+
+  /* ===== Gradient ===== */
+  --rb-grad-blue: linear-gradient(135deg, #2563eb 0%, #6366f1 100%);
+  --rb-grad-blue-hot: linear-gradient(135deg, #3b82f6 0%, #2563eb 50%, #6366f1 100%);
+  --rb-grad-bg: radial-gradient(ellipse at top, #11183a 0%, #050812 60%);
+
+  /* ===== Glow ===== */
+  --rb-glow-blue: 0 0 20px rgba(59, 130, 246, 0.35);
+  --rb-glow-soft: 0 0 12px rgba(59, 130, 246, 0.18);
+  --rb-glow-indigo: 0 0 24px rgba(99, 102, 241, 0.28);
+
+  /* ===== Radius ===== */
+  --rb-radius-xs: 4px;
+  --rb-radius-sm: 6px;
+  --rb-radius-md: 8px;
+  --rb-radius-lg: 12px;
+  --rb-radius-xl: 16px;
+  --rb-radius-xxl: 20px;
+  --rb-radius-xxxl: 24px;
+  --rb-radius-hero: 32px;
+  --rb-radius-full: 9999px;
+
+  /* ===== Spacing ===== */
+  --rb-space-xxs: 4px;
+  --rb-space-xs:  8px;
+  --rb-space-sm:  12px;
+  --rb-space-md:  16px;
+  --rb-space-lg:  20px;
+  --rb-space-xl:  24px;
+  --rb-space-xxl: 32px;
+  --rb-space-xxxl: 40px;
+  --rb-space-section: 64px;
+
+  /* ===== Typography ===== */
+  --rb-font-sans: "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI",
+                  "PingFang SC", "Microsoft YaHei", sans-serif;
+  --rb-font-mono: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular,
+                  Menlo, Consolas, monospace;
+  --rb-letter-spacing: 0.7px;
+
+  --rb-text-hero:    600 80px/1.10 var(--rb-font-sans);
+  --rb-text-display: 600 56px/1.10 var(--rb-font-sans);
+  --rb-text-h1:      600 40px/1.20 var(--rb-font-sans);
+  --rb-text-h2:      600 32px/1.25 var(--rb-font-sans);
+  --rb-text-h3:      600 24px/1.30 var(--rb-font-sans);
+  --rb-text-title:   600 20px/1.40 var(--rb-font-sans);
+  --rb-text-body:    400 16px/1.50 var(--rb-font-sans);
+  --rb-text-body-em: 500 16px/1.50 var(--rb-font-sans);
+  --rb-text-small:   400 14px/1.50 var(--rb-font-sans);
+  --rb-text-small-em:500 14px/1.50 var(--rb-font-sans);
+  --rb-text-caption: 400 13px/1.70 var(--rb-font-sans);
+  --rb-text-micro:   400 12px/1.50 var(--rb-font-sans);
+  --rb-text-btn:     600 14px/1.40 var(--rb-font-sans);
+  --rb-text-mono:    400 13px/1.50 var(--rb-font-mono);
+  --rb-text-mono-em: 500 13px/1.50 var(--rb-font-mono);
+
+  /* ===== Shadows ===== */
+  --rb-shadow-card:    0 4px 16px rgba(0, 0, 0, 0.35),
+                       0 1px 2px rgba(0, 0, 0, 0.25);
+  --rb-shadow-elevated:0 12px 40px rgba(0, 0, 0, 0.55),
+                       0 0 0 1px rgba(59, 130, 246, 0.10);
+  --rb-shadow-blue:    0 8px 32px rgba(59, 130, 246, 0.35);
+
+  /* ===== Component primitives ===== */
+  --rb-card-bg:        transparent;
+  --rb-divider-light:  rgba(0, 0, 0, 0.08);
+  --rb-hover-light:    rgba(0, 0, 0, 0.04);
+  --rb-active-light:   rgba(0, 0, 0, 0.08);
+  --rb-input-bg:       rgba(255, 255, 255, 0.06);
+  --rb-input-border:   rgba(59, 130, 246, 0.16);
+  --rb-input-text:     #d9e2f7;
+  --rb-input-placeholder: rgba(217, 226, 247, 0.48);
+  --rb-slider-track:   rgba(255, 255, 255, 0.18);
+  --rb-slider-fill:    #2563eb;
+  --rb-slider-thumb:   #ffffff;
+  --rb-toggle-off:     rgba(255, 255, 255, 0.18);
+  --rb-toggle-on:      #2563eb;
+  --rb-scroll-thumb:   rgba(255, 255, 255, 0.20);
+  --rb-scroll-thumb-hover: rgba(255, 255, 255, 0.32);
+
+  /* ===== Settings / surface overlays ===== */
+  --rb-surface-overlay:        rgba(255, 255, 255, 0.055);
+  --rb-surface-overlay-hover:  rgba(255, 255, 255, 0.10);
+  --rb-surface-overlay-mist:   rgba(255, 255, 255, 0.035);
+  --rb-surface-overlay-mid:    rgba(255, 255, 255, 0.08);
+  --rb-surface-overlay-strong: rgba(255, 255, 255, 0.12);
+
+  /* ===== Brand accent (pink/purple decorative → theme-aware) ===== */
+  --rb-accent-border:        rgba(255, 182, 220, 0.14);
+  --rb-accent-border-soft:   rgba(255, 182, 220, 0.22);
+  --rb-accent-border-hover:  rgba(255, 182, 220, 0.34);
+  --rb-accent-border-strong: rgba(255, 182, 220, 0.45);
+
+  --rb-accent-bg-subtle: rgba(236, 72, 153, 0.10);
+  --rb-accent-bg:        rgba(236, 72, 153, 0.16);
+  --rb-accent-bg-hover:  rgba(236, 72, 153, 0.22);
+
+  --rb-accent-glow:      rgba(236, 72, 153, 0.24);
+  --rb-accent-glow-soft: rgba(236, 72, 153, 0.15);
+
+  --rb-accent-gradient:    linear-gradient(135deg, rgba(255, 110, 199, 0.88), rgba(168, 85, 247, 0.82));
+  --rb-accent-gradient-hot: linear-gradient(135deg, rgba(255, 110, 199, 0.90), rgba(168, 85, 247, 0.86));
+
+  --rb-text-accent:        rgba(235, 229, 245, 0.70);
+  --rb-text-accent-muted:  rgba(235, 229, 245, 0.50);
+  --rb-text-accent-faint:  rgba(235, 229, 245, 0.34);
+
+  /* ===== Backward-compat aliases (renamed pink→blue) ===== */
+  --rb-pink-50:  var(--rb-blue-50);
+  --rb-pink-100: var(--rb-blue-100);
+  --rb-pink-200: var(--rb-blue-200);
+  --rb-pink-300: var(--rb-blue-300);
+  --rb-pink-400: var(--rb-blue-400);
+  --rb-pink-500: var(--rb-blue-500);
+  --rb-pink-600: var(--rb-blue-600);
+  --rb-pink-700: var(--rb-blue-700);
+  --rb-pink-glow: var(--rb-blue-glow);
+  --rb-violet-400: var(--rb-indigo-400);
+  --rb-violet-500: var(--rb-indigo-500);
+  --rb-violet-600: var(--rb-indigo-600);
+  --rb-text-on-pink: var(--rb-text-on-blue);
+  --rb-glow-pink: var(--rb-glow-blue);
+  --rb-glow-violet: var(--rb-glow-indigo);
+  --rb-shadow-pink: var(--rb-shadow-blue);
+  --rb-grad-pink: var(--rb-grad-blue);
+  --rb-grad-pink-hot: var(--rb-grad-blue-hot);
+}
