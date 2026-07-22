@@ -25,7 +25,8 @@ export async function initRAG(
   ragMode: "auto" | "local" | "cloud" = "auto",
   cloudBaseUrl?: string,
   cloudApiKey?: string,
-  embeddingModel?: string
+  embeddingModel?: string,
+  lang?: string,
 ): Promise<void> {
   const dataDir = getDataDir();
   provider = getEmbeddingProvider(ragMode, cloudBaseUrl, cloudApiKey, embeddingModel);
@@ -38,7 +39,7 @@ export async function initRAG(
     path.join(app.getAppPath(), "prompts", "worldbook"),
     { stateFile: path.join(app.getPath("userData"), "worldbook-state.json") }
   );
-  await worldbook.loadFromDirectory();
+  await worldbook.loadFromDirectory(lang);
 
   // 把实体图谱中的已有实体名灌入 jieba 自定义词典
   // 防止 "昔涟"、"小鹿" 等 AI 伴侣核心名词被错误切分

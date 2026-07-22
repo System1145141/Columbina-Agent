@@ -196,11 +196,13 @@ const FRONTEND_REPLY_TIMEOUT_MS = 35000;
  * Avatar source per role. Empty string = use the gradient placeholder
  * baked into the CSS background of `.msg--user .msg__avatar`.
  *
- * Model side: agent 的 PNG，由 CSS border-radius: 50% 自动裁圆。
+ * Model side: role-dependent — Columbina.jpg for columbina role, Sandrone.jpg for sandrone.
  * User side: 暂留空，等设置页里上传用户头像后再把 user 改成 file:// 或 data: URL。
  */
-const AVATAR_SRC: Record<Role, string> = {
-  model: resolveAsset("avatars/columbina-avatar.png"),
+const AVATAR_SRC = {
+  get model() {
+    return resolveAsset(`avatars/${currentRole === "sandrone" ? "Sandrone" : "Columbina"}.jpg`);
+  },
   user: "",
 };
 

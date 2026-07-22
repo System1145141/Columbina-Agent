@@ -168,24 +168,42 @@ export class WorldbookManager {
   }
 
   // Load all .md files from the worldbook directory
-  async loadFromDirectory(): Promise<void> {
+  async loadFromDirectory(lang?: string): Promise<void> {
     if (!fs.existsSync(this.worldbookDir)) {
       console.warn("[Worldbook] directory not found:", this.worldbookDir);
       return;
     }
 
-    const files = fs.readdirSync(this.worldbookDir).filter((f) => f.endsWith(".md"));
-    if (files.length === 0) {
-      console.warn("[Worldbook] no .md files found in:", this.worldbookDir);
+    // 收集所有 .md 文件：先扫根目录，再扫语言子目录
+    const mdFiles: string[] = [];
+
+    // 根目录 .md 文件
+    const rootFiles = fs.readdirSync(this.worldbookDir, { withFileTypes: true })
+      .filter((d) => d.isFile() && d.name.endsWith(".md"))
+      .map((d) => path.join(this.worldbookDir, d.name));
+    mdFiles.push(...rootFiles);
+
+    // 语言子目录 .md 文件（递归）
+    if (lang) {
+      const langDir = path.join(this.worldbookDir, lang);
+      if (fs.existsSync(langDir) && fs.statSync(langDir).isDirectory()) {
+        const langFiles = fs.readdirSync(langDir, { withFileTypes: true })
+          .filter((d) => d.isFile() && d.name.endsWith(".md"))
+          .map((d) => path.join(langDir, d.name));
+        mdFiles.push(...langFiles);
+      }
+    }
+
+    if (mdFiles.length === 0) {
+      console.warn("[Worldbook] no .md files found in:", this.worldbookDir, lang ? `(lang=${lang})` : "");
       return;
     }
 
     const allEntries: WorldbookEntry[] = [];
 
-    for (const file of files) {
-      const filePath = path.join(this.worldbookDir, file);
+    for (const filePath of mdFiles) {
       const content = fs.readFileSync(filePath, "utf8");
-      const entries = this.parseMarkdown(content, file);
+      const entries = this.parseMarkdown(content, path.basename(filePath));
       allEntries.push(...entries);
     }
 
@@ -203,7 +221,7 @@ export class WorldbookManager {
     // v1 持久化 seam：预留，暂为空（重启回 0）
     this.loadState();
 
-    console.log(`[Worldbook] loaded ${allEntries.length} entries from ${files.length} files; DMAE state initialized for ${this.state.size} non-permanent entries`);
+    console.log(`[Worldbook] loaded ${allEntries.length} entries from ${mdFiles.length} files; DMAE state initialized for ${this.state.size} non-permanent entries`);
   }
 
   // 从内存 entries 加载（不读 fs）：simulator / 测试用。

@@ -3981,7 +3981,7 @@ app.whenReady().then(async () => {
   console.log("[Columbina] 当前 agent 权限档位:", getCurrentLevel());
   try {
     const modelSettings = loadModelSettings();
-    await initRAG("auto", undefined, undefined, modelSettings.embeddingModel);
+    await initRAG("auto", undefined, undefined, modelSettings.embeddingModel, langToPromptDir(loadGeneralSettings().language));
       // 初始化 MCP Manager；scheduler 启动前等待一次，避免近即时任务早于 MCP 工具恢复。
       await initMcpManager();
       console.log("[Columbina] RAG initialized OK");
