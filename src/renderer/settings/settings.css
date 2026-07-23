@@ -99,7 +99,7 @@ body {
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 120ms ease;
 }
 
-.nav-item span {
+.nav-item > span:first-child {
   width: 18px;
   text-align: center;
   filter: drop-shadow(0 0 5px var(--rb-accent-glow-soft));
