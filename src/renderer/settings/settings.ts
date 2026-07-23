@@ -20,13 +20,13 @@ function _initModalOverlay(): void {
     '<div class="cy-modal" role="alertdialog" aria-modal="true">',
     '  <div class="cy-modal__head">',
     '    <span class="cy-modal__icon" id="cy-modal-icon">📌</span>',
-    '    <h3 class="cy-modal__title" id="cy-modal-title">提示</h3>',
+    '    <h3 class="cy-modal__title" id="cy-modal-title">' + t("settingsExtra.modalTitle") + '</h3>',
     '  </div>',
     '  <hr class="cy-modal__divider">',
-    '  <p class="cy-modal__body" id="cy-modal-message">确认执行此操作吗？</p>',
+    '  <p class="cy-modal__body" id="cy-modal-message">' + t("settingsExtra.modalConfirmMessage") + '</p>',
     '  <div class="cy-modal__actions">',
-    '    <button type="button" class="ghost-btn" id="cy-modal-cancel">取消</button>',
-    '    <button type="button" class="btn-primary" id="cy-modal-confirm">确定</button>',
+    '    <button type="button" class="ghost-btn" id="cy-modal-cancel">' + t("common.cancel") + '</button>',
+    '    <button type="button" class="btn-primary" id="cy-modal-confirm">' + t("common.confirm") + '</button>',
     '  </div>',
     '</div>',
   ].join("\n");
@@ -44,8 +44,8 @@ function showModal (options: { title: string; message: string; icon?: string; co
   iconEl.textContent = options.icon || "📌";
   titleEl.textContent = options.title;
   msgEl.textContent = options.message;
-  cancelBtn.textContent = options.cancelText || "取消";
-  confirmBtn.textContent = options.confirmText || "确定";
+  cancelBtn.textContent = options.cancelText || t("common.cancel");
+  confirmBtn.textContent = options.confirmText || t("common.confirm");
   _cyModalOverlay.classList.remove("is-hidden");
   return new Promise(function (resolve) {
     var cleanup = function (result: boolean) {
@@ -72,15 +72,15 @@ function _initInputOverlay(): void {
     '<div class="cy-modal" role="dialog" aria-modal="true" style="width:min(420px,90vw);">',
     '  <div class="cy-modal__head">',
     '    <span class="cy-modal__icon" id="cy-input-icon">✏️</span>',
-    '    <h3 class="cy-modal__title" id="cy-input-title">请输入</h3>',
+    '    <h3 class="cy-modal__title" id="cy-input-title">' + t("settingsExtra.inputTitle") + '</h3>',
     '  </div>',
     '  <hr class="cy-modal__divider">',
     '  <p class="cy-modal__body" id="cy-input-message"></p>',
     '  <input type="text" id="cy-input-field" autocomplete="off" spellcheck="false"',
     '    style="width:100%;box-sizing:border-box;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.18);background:rgba(0,0,0,0.32);color:var(--rb-text-strong,#fff);font-family:inherit;font-size:13px;outline:none;margin-bottom:12px;" />',
     '  <div class="cy-modal__actions">',
-    '    <button type="button" class="ghost-btn" id="cy-input-cancel">取消</button>',
-    '    <button type="button" class="btn-primary" id="cy-input-confirm">确定</button>',
+    '    <button type="button" class="ghost-btn" id="cy-input-cancel">' + t("common.cancel") + '</button>',
+    '    <button type="button" class="btn-primary" id="cy-input-confirm">' + t("common.confirm") + '</button>',
     '  </div>',
     '</div>',
   ].join("\n");
@@ -109,8 +109,8 @@ function showInputModal(options: {
   msgEl.textContent = options.message;
   inputEl.value = options.defaultValue || "";
   inputEl.placeholder = options.placeholder || "";
-  cancelBtn.textContent = options.cancelText || "取消";
-  confirmBtn.textContent = options.confirmText || "确定";
+  cancelBtn.textContent = options.cancelText || t("common.cancel");
+  confirmBtn.textContent = options.confirmText || t("common.confirm");
   _cyInputOverlay.classList.remove("is-hidden");
   setTimeout(() => inputEl.focus(), 30);
   return new Promise((resolve) => {
@@ -566,7 +566,7 @@ function fillModelPresetOptions(): void {
   modelPresetSelect.replaceChildren();
   const manual = document.createElement("option");
   manual.value = "";
-  manual.textContent = "手动配置";
+  manual.textContent = t("api.manualConfig");
   modelPresetSelect.appendChild(manual);
   for (const preset of MODEL_PRESETS) {
     if (preset.disabled) continue;
@@ -616,11 +616,11 @@ function renderModelList(): void {
     const del = document.createElement("button");
     del.type = "button";
     del.className = "model-entry__delete";
-    del.textContent = "删除";
+    del.textContent = t("common.delete");
     del.addEventListener("click", () => {
       modelEntries = modelEntries.filter((m) => m.id !== entry.id);
       renderModelList();
-      setSaveStatus("有未保存的更改");
+      setSaveStatus(t("settingsExtra.unsavedChanges"));
     });
 
     div.appendChild(info);
@@ -710,7 +710,7 @@ function saveModelFromDialog(): void {
 
   closeModelDialog();
   renderModelList();
-  setSaveStatus("有未保存的更改");
+  setSaveStatus(t("settingsExtra.unsavedChanges"));
 }
 
 addModelBtn.addEventListener("click", () => openModelDialog());
@@ -876,12 +876,12 @@ async function loadConfig(): Promise<void> {
     const threshold = cfg.stickerSimilarityThreshold ?? 0.55;
     stickerThresholdInput.value = String(threshold);
     stickerThresholdVal.textContent = threshold.toFixed(2);
-    setSaveStatus("等待保存");
-    setColumbinaSaveStatus("等待保存");
+    setSaveStatus(t("settingsExtra.waitingSave"));
+    setColumbinaSaveStatus(t("settingsExtra.waitingSave"));
   } catch {
     fillModelPresetOptions();
-    setSaveStatus("读取配置失败", "is-error");
-    setColumbinaSaveStatus("读取配置失败", "is-error");
+    setSaveStatus(t("settingsExtra.readConfigFailed"), "is-error");
+    setColumbinaSaveStatus(t("settingsExtra.readConfigFailed"), "is-error");
   }
 }
 
@@ -902,9 +902,9 @@ async function loadGeneralSettings(): Promise<void> {
     launchAtLoginInput.checked = cfg.launchAtLogin;
     applyUiThemeSelection(normalizeUiTheme(cfg.uiTheme));
     applyLanguageSelection((cfg.language as Lang) ?? "zh-CN");
-    setGeneralSaveStatus("等待保存");
+    setGeneralSaveStatus(t("settingsExtra.waitingSave"));
   } catch {
-    setGeneralSaveStatus("读取设置失败", "is-error");
+    setGeneralSaveStatus(t("settingsExtra.readSettingsFailed"), "is-error");
   }
 }
 
@@ -913,25 +913,25 @@ runtimeSyncSelect.querySelectorAll<HTMLButtonElement>(".option-block").forEach((
     const value = button.dataset.value as "off" | "local" | "llm";
     applyRuntimeSyncSelection(value);
     window.settings?.previewRuntimeSync(value);
-    setColumbinaSaveStatus("有未保存的更改");
+    setColumbinaSaveStatus(t("settingsExtra.unsavedChanges"));
   });
 });
 
 stickerEnabledInput.addEventListener("change", () => {
-  setCyreneSaveStatus("有未保存的更改");
+  setCyreneSaveStatus(t("settingsExtra.unsavedChanges"));
 });
 
 stickerSizeSelect.querySelectorAll<HTMLButtonElement>(".option-block").forEach((button) => {
   button.addEventListener("click", () => {
     const value = button.dataset.value;
     applyStickerSizeSelection(value === "small" || value === "large" ? value : "standard");
-    setCyreneSaveStatus("有未保存的更改");
+    setCyreneSaveStatus(t("settingsExtra.unsavedChanges"));
   });
 });
 
 stickerThresholdInput.addEventListener("input", () => {
   stickerThresholdVal.textContent = parseFloat(stickerThresholdInput.value).toFixed(2);
-  setColumbinaSaveStatus("有未保存的更改");
+  setColumbinaSaveStatus(t("settingsExtra.unsavedChanges"));
 });
 
 sidebarVisibleInput.addEventListener("change", () => {
@@ -948,16 +948,16 @@ tasksVisibleInput.addEventListener("change", () => {
 
 musicEnabledInput.addEventListener("change", () => {
   syncMusicPlayback();
-  setGeneralSaveStatus("有未保存的更改");
+  setGeneralSaveStatus(t("settingsExtra.unsavedChanges"));
 });
 
 musicVolumeInput.addEventListener("input", () => {
   syncMusicPlayback();
-  setGeneralSaveStatus("有未保存的更改");
+  setGeneralSaveStatus(t("settingsExtra.unsavedChanges"));
 });
 
-soundEnabledInput.addEventListener("change", () => setGeneralSaveStatus("有未保存的更改"));
-soundVolumeInput.addEventListener("input", () => setGeneralSaveStatus("有未保存的更改"));
+soundEnabledInput.addEventListener("change", () => setGeneralSaveStatus(t("settingsExtra.unsavedChanges")));
+soundVolumeInput.addEventListener("input", () => setGeneralSaveStatus(t("settingsExtra.unsavedChanges")));
 
 petAlwaysOnTopInput.addEventListener("change", () => window.settings?.setPetAlwaysOnTop(petAlwaysOnTopInput.checked));
 petVisibleInput.addEventListener("change", () => window.settings?.setPetVisible(petVisibleInput.checked));
@@ -972,7 +972,7 @@ uiThemeSelect.querySelectorAll<HTMLButtonElement>(".option-block").forEach((butt
   button.addEventListener("click", () => {
     const theme = normalizeUiTheme(button.dataset.theme);
     applyUiThemeSelection(theme);
-    setGeneralSaveStatus("有未保存的更改");
+    setGeneralSaveStatus(t("settingsExtra.unsavedChanges"));
   });
 });
 
@@ -985,7 +985,7 @@ async function switchLanguage(lang: Lang): Promise<void> {
   // 更新标题栏
   sectionTitle.textContent = t(`nav.${currentSection}`, lang);
   sectionHint.textContent = t(`${currentSection}.hint`, lang);
-  setGeneralSaveStatus("有未保存的更改");
+  setGeneralSaveStatus(t("settingsExtra.unsavedChanges"));
 }
 
 let currentSection = "general";
@@ -1004,11 +1004,11 @@ openStickerManagerBtn.addEventListener("click", async () => {
     const result = await window.settings?.openStickerManager();
     if (!result?.ok) {
       console.error("[settings] open sticker manager failed", result?.error);
-      window.alert("表情包管理窗口打开失败，请查看终端日志。" + (result?.error ? `\n${result.error}` : ""));
+      window.alert(t("settingsExtra.stickerManagerOpenFailed") + (result?.error ? `\n${result.error}` : ""));
     }
   } catch (error) {
     console.error("[settings] open sticker manager error", error);
-    window.alert("表情包管理窗口打开失败，请查看终端日志。");
+    window.alert(t("settingsExtra.stickerManagerOpenFailed"));
   }
 });
 
@@ -1027,7 +1027,7 @@ let stickerAddPickedPath: string | null = null;
 
 function openStickerAddModal(): void {
   stickerAddPickedPath = null;
-  stickerAddFileName.textContent = "未选择";
+  stickerAddFileName.textContent = t("settingsExtra.noFileSelected");
   stickerAddId.value = "";
   stickerAddDesc.value = "";
   stickerAddPhrases.value = "";
@@ -1059,30 +1059,30 @@ stickerAddConfirm.addEventListener("click", async () => {
   stickerAddError.classList.add("is-hidden");
 
   if (!stickerAddPickedPath) {
-    stickerAddError.textContent = "请先选择图片文件";
+    stickerAddError.textContent = t("settingsExtra.pickImageFirst");
     stickerAddError.classList.remove("is-hidden");
     return;
   }
   const id = stickerAddId.value.trim();
   if (!id) {
-    stickerAddError.textContent = "请填写英文名称";
+    stickerAddError.textContent = t("settingsExtra.fillEnglishName");
     stickerAddError.classList.remove("is-hidden");
     return;
   }
   if (!/^[a-zA-Z0-9_-]+$/.test(id)) {
-    stickerAddError.textContent = "名称只能用英文字母、数字、下划线和连字符";
+    stickerAddError.textContent = t("settingsExtra.invalidName");
     stickerAddError.classList.remove("is-hidden");
     return;
   }
   const description = stickerAddDesc.value.trim();
   if (!description) {
-    stickerAddError.textContent = "请填写图片描述";
+    stickerAddError.textContent = t("settingsExtra.fillDescription");
     stickerAddError.classList.remove("is-hidden");
     return;
   }
   const phrases = stickerAddPhrases.value.split("\n").map((s) => s.trim()).filter(Boolean);
   if (phrases.length === 0) {
-    stickerAddError.textContent = "请至少写一行相近语义";
+    stickerAddError.textContent = t("settingsExtra.fillPhrases");
     stickerAddError.classList.remove("is-hidden");
     return;
   }
@@ -1091,7 +1091,7 @@ stickerAddConfirm.addEventListener("click", async () => {
     await window.settings?.stickerAdd?.({ sourcePath: stickerAddPickedPath, id, description, phrases });
     closeStickerAddModal();
   } catch (err) {
-    stickerAddError.textContent = "添加失败：" + (err as Error).message;
+    stickerAddError.textContent = t("settingsExtra.addFailed") + (err as Error).message;
     stickerAddError.classList.remove("is-hidden");
   }
 });
@@ -1519,9 +1519,9 @@ function parseCommandLine(input: string): { command: string; args: string[] } {
 pluginAddBtn?.addEventListener("click", async () => {
   console.log("[settings] ＋ 按钮被点击，弹出输入框…");
   const command = await showInputModal({
-    title: "添加 MCP Server",
-    message: "输入启动命令，例如：node C:\\my-mcp-server\\index.js",
-    placeholder: "node path\\to\\server.js --flag",
+    title: t("settingsExtra.mcpAddTitle"),
+    message: t("settingsExtra.mcpAddMessage"),
+    placeholder: t("settingsExtra.mcpAddPlaceholder"),
     icon: "🧩",
   });
   if (!command || !command.trim()) {
@@ -1530,16 +1530,16 @@ pluginAddBtn?.addEventListener("click", async () => {
   }
 
   const nameInput = await showInputModal({
-    title: "MCP Server 名称",
-    message: "给这个 MCP server 起个名字（仅用于展示）",
-    placeholder: "例如：天气工具",
+    title: t("settingsExtra.mcpNameTitle"),
+    message: t("settingsExtra.mcpNameMessage"),
+    placeholder: t("settingsExtra.mcpNamePlaceholder"),
     icon: "🏷️",
   });
-  const name = (nameInput && nameInput.trim()) || "未命名 MCP";
+  const name = (nameInput && nameInput.trim()) || t("settingsExtra.mcpUnnamed");
   const serverId = "mcp-" + Date.now();
   const parsed = parseCommandLine(command.trim());
   if (!parsed.command) {
-    await showModal({ title: "添加失败", message: "请输入有效的启动命令", icon: "⚠️" });
+    await showModal({ title: t("settingsExtra.mcpAddFailedTitle"), message: t("settingsExtra.mcpAddFailedMessage"), icon: "⚠️" });
     return;
   }
 
@@ -1557,30 +1557,30 @@ pluginAddBtn?.addEventListener("click", async () => {
     if (result?.ok) {
       console.log("[settings] MCP server 添加成功，工具数:", result.toolIds?.length);
       await showModal({
-        title: "添加成功",
-        message: '"' + name + '" 已连接，发现 ' + (result.toolIds?.length || 0) + " 个工具。详情见终端日志。",
+        title: t("settingsExtra.mcpAddSuccessTitle"),
+        message: t("settingsExtra.mcpAddSuccessMessage").replace("{name}", name).replace("{count}", String(result.toolIds?.length || 0)),
         icon: "✅",
       });
     } else {
       console.error("[settings] MCP server 添加失败:", result?.error);
       await showModal({
-        title: "添加失败",
-        message: (result?.error || "未知错误") + "（详情见终端日志）",
+        title: t("settingsExtra.mcpAddFailedTitle"),
+        message: (result?.error || t("settingsExtra.mcpUnknownError")) + t("settingsExtra.mcpCheckLog"),
         icon: "⚠️",
       });
     }
   } catch (err) {
     console.error("[settings] MCP server 添加异常:", err);
     await showModal({
-      title: "添加异常",
-      message: "调用过程中发生错误，详情见终端日志。",
+      title: t("settingsExtra.mcpAddErrorTitle"),
+      message: t("settingsExtra.mcpAddErrorMessage"),
       icon: "⚠️",
     });
   }
 });
 
 clearChatHistoryBtn.addEventListener("click", async () => {
-  if (!window.confirm("清空所有聊天会话？\n此操作会删除全部历史对话，无法恢复。")) return;
+  if (!window.confirm(t("settingsExtra.confirmClearAllChat"))) return;
   try {
     const sessions = await window.chatStore?.list();
     if (sessions && sessions.length > 0) {
@@ -1589,10 +1589,10 @@ clearChatHistoryBtn.addEventListener("click", async () => {
         await window.chatStore?.delete(s.id);
       }
     }
-    setGeneralSaveStatus("所有聊天会话已清空", "is-ok");
+    setGeneralSaveStatus(t("settingsExtra.allChatCleared"), "is-ok");
   } catch (err) {
     console.warn("[settings] 清空聊天会话失败:", err);
-    setGeneralSaveStatus("清空失败，请查看终端日志", "is-error");
+    setGeneralSaveStatus(t("settingsExtra.clearChatFailed"), "is-error");
   }
 });
 
@@ -1608,20 +1608,20 @@ function isValidTimeOfDay(value: string): boolean {
 }
 
 function formatSchedulerDate(value: string | null | undefined): string {
-  if (!value) return "未安排";
+  if (!value) return t("settingsExtra.notScheduled");
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "时间无效";
+  if (Number.isNaN(date.getTime())) return t("settingsExtra.invalidTime");
   return date.toLocaleString();
 }
 
 function describeSchedule(schedule: ScheduleConfig): string {
-  if (schedule.kind === "once") return "仅一次 " + formatSchedulerDate(schedule.runAt);
-  if (schedule.kind === "daily") return "每天 " + schedule.timeOfDay;
+  if (schedule.kind === "once") return t("tasks.frequencyOnce") + " " + formatSchedulerDate(schedule.runAt);
+  if (schedule.kind === "daily") return t("tasks.frequencyDaily") + " " + schedule.timeOfDay;
   if (schedule.kind === "weekly") {
-    const names = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+    const names = [t("tasks.weekdaySun"), t("tasks.weekdayMon"), t("tasks.weekdayTue"), t("tasks.weekdayWed"), t("tasks.weekdayThu"), t("tasks.weekdayFri"), t("tasks.weekdaySat")];
     return `${names[schedule.dayOfWeek]} ${schedule.timeOfDay}`;
   }
-  return `每隔 ${schedule.every} ${schedule.unit === "minutes" ? "分钟" : "小时"}`;
+  return `每隔 ${schedule.every} ${schedule.unit === "minutes" ? t("tasks.unitMinutes") : t("tasks.unitHours")}`;
 }
 
 function setSchedulerStatus(text: string, className = ""): void {
@@ -1643,7 +1643,7 @@ function renderSchedulerTools(selectedIds: string[] = []): void {
     checkbox.checked = selected.has(tool.id);
     checkbox.addEventListener("change", updateSchedulerConditionalFields);
     const copy = document.createElement("span");
-    copy.textContent = `${tool.name} (${tool.id}) · ${tool.risk}${tool.enabled ? "" : " · 已全局禁用"}`;
+    copy.textContent = `${tool.name} (${tool.id}) · ${tool.risk}${tool.enabled ? "" : " · " + t("settingsExtra.globallyDisabled")}`;
     label.appendChild(checkbox);
     label.appendChild(copy);
     schedulerToolPicker.appendChild(label);
@@ -1669,37 +1669,37 @@ async function renderSchedulerList(): Promise<void> {
     if (strong) strong.textContent = task.title;
     const badge = card.querySelector(".scheduler-badge") as HTMLSpanElement | null;
     if (badge) {
-      badge.textContent = task.enabled ? "已启用" : "已停用";
+      badge.textContent = task.enabled ? t("settingsExtra.enabled") : t("settingsExtra.disabled");
       badge.classList.toggle("is-disabled", !task.enabled);
     }
     const meta = card.querySelector(".scheduler-card__meta");
-    if (meta) meta.textContent = `${describeSchedule(task.schedule)} · 下次运行：${formatSchedulerDate(task.nextFireAt)} · 工具：${task.toolMode === "all-enabled" ? "全部已启用工具" : task.allowedToolIds.join(", ") || "无"}`;
+    if (meta) meta.textContent = `${describeSchedule(task.schedule)} · ${t("settingsExtra.nextRunAt")}${formatSchedulerDate(task.nextFireAt)} · ${t("settingsExtra.toolsLabel")}${task.toolMode === "all-enabled" ? t("settingsExtra.allToolsEnabled") : task.allowedToolIds.join(", ") || t("settingsExtra.none")}`;
     const actions = card.querySelector(".scheduler-card__actions") as HTMLDivElement | null;
     if (actions) {
       const fireBtn = document.createElement("button");
       fireBtn.type = "button";
       fireBtn.className = "ghost-btn";
-      fireBtn.textContent = "立即运行";
+      fireBtn.textContent = t("settingsExtra.runNow");
       fireBtn.addEventListener("click", () => void fireSchedulerTask(task.id));
       const editBtn = document.createElement("button");
       editBtn.type = "button";
       editBtn.className = "ghost-btn";
-      editBtn.textContent = "编辑";
+      editBtn.textContent = t("common.edit");
       editBtn.addEventListener("click", () => void openSchedulerEditor(task));
       const toggleBtn = document.createElement("button");
       toggleBtn.type = "button";
       toggleBtn.className = "ghost-btn";
-      toggleBtn.textContent = task.enabled ? "停用" : "启用";
+      toggleBtn.textContent = task.enabled ? t("settingsExtra.stopTask") : t("settingsExtra.startTask");
       toggleBtn.addEventListener("click", () => void toggleSchedulerTask(task.id, !task.enabled));
       const historyBtn = document.createElement("button");
       historyBtn.type = "button";
       historyBtn.className = "ghost-btn";
-      historyBtn.textContent = "历史";
+      historyBtn.textContent = t("settingsExtra.history");
       historyBtn.addEventListener("click", () => void toggleSchedulerHistory(task.id, card));
       const deleteBtn = document.createElement("button");
       deleteBtn.type = "button";
       deleteBtn.className = "ghost-btn";
-      deleteBtn.textContent = "删除";
+      deleteBtn.textContent = t("common.delete");
       deleteBtn.addEventListener("click", () => void deleteSchedulerTask(task.id));
       actions.append(fireBtn, editBtn, toggleBtn, historyBtn, deleteBtn);
     }
@@ -1709,7 +1709,7 @@ async function renderSchedulerList(): Promise<void> {
 
 generalForm.addEventListener("submit", async (e) => {
   e.preventDefault();
-  setGeneralSaveStatus("保存中…");
+  setGeneralSaveStatus(t("settingsExtra.saving"));
   try {
     await window.settings!.saveGeneral({
       musicEnabled: musicEnabledInput.checked,
@@ -1725,26 +1725,26 @@ generalForm.addEventListener("submit", async (e) => {
       language: getLang(),
       uiTheme: getUiThemeValue(),
     });
-    setGeneralSaveStatus("已保存", "is-ok");
+    setGeneralSaveStatus(t("settingsExtra.saved"), "is-ok");
   } catch {
-    setGeneralSaveStatus("保存失败", "is-error");
+    setGeneralSaveStatus(t("settingsExtra.saveFailed"), "is-error");
   }
 });
 
 columbinaPanel.addEventListener("submit", async (e) => {
   e.preventDefault();
-  setColumbinaSaveStatus("保存中…");
+  setColumbinaSaveStatus(t("settingsExtra.saving"));
   try {
     await window.settings!.saveConfig({ runtimeSync: getRuntimeSyncValue(), stickerEnabled: stickerEnabledInput.checked, stickerSize: getStickerSizeValue(), stickerSimilarityThreshold: parseFloat(stickerThresholdInput.value) });
-    setColumbinaSaveStatus("已保存", "is-ok");
+    setColumbinaSaveStatus(t("settingsExtra.saved"), "is-ok");
   } catch {
-    setColumbinaSaveStatus("保存失败", "is-error");
+    setColumbinaSaveStatus(t("settingsExtra.saveFailed"), "is-error");
   }
 });
 
 apiForm.addEventListener("submit", async (e) => {
   e.preventDefault();
-  setSaveStatus("保存中…");
+  setSaveStatus(t("settingsExtra.saving"));
   try {
     await window.settings!.saveConfig({
       models: modelEntries,
@@ -1753,9 +1753,9 @@ apiForm.addEventListener("submit", async (e) => {
       stickerSize: getStickerSizeValue(),
       stickerSimilarityThreshold: parseFloat(stickerThresholdInput.value) || 0.55,
     });
-    setSaveStatus("已保存", "is-ok");
+    setSaveStatus(t("settingsExtra.saved"), "is-ok");
   } catch {
-    setSaveStatus("保存失败", "is-error");
+    setSaveStatus(t("settingsExtra.saveFailed"), "is-error");
   }
 });
 
@@ -1778,7 +1778,7 @@ async function openSchedulerEditor(task?: ScheduledTask): Promise<void> {
     const toolsResult = await window.cyreneScheduler!.getTools();
     if (toolsResult.ok) schedulerTools = toolsResult.value ?? [];
   }
-  if (schedulerEditorTitle) schedulerEditorTitle.textContent = task ? "编辑定时任务" : "新建定时任务";
+  if (schedulerEditorTitle) schedulerEditorTitle.textContent = task ? t("settingsExtra.editTask") : t("settingsExtra.newTask");
   if (schedulerTitleInput) schedulerTitleInput.value = task?.title ?? "";
   if (schedulerPromptInput) schedulerPromptInput.value = task?.prompt ?? "";
   if (schedulerEnabledInput) schedulerEnabledInput.checked = task?.enabled ?? true;
@@ -1798,7 +1798,7 @@ async function openSchedulerEditor(task?: ScheduledTask): Promise<void> {
   if (schedulerToolLimitInput) schedulerToolLimitInput.checked = task?.toolMode === "allow-list";
   renderSchedulerTools(task?.allowedToolIds ?? []);
   updateSchedulerConditionalFields();
-  setSchedulerStatus("等待操作");
+  setSchedulerStatus(t("settingsExtra.statusWaitingOp"));
 }
 
 function closeSchedulerEditor(): void {
@@ -1822,29 +1822,29 @@ function collectSchedule(): ScheduleConfig {
   const kind = schedulerKindInput?.value ?? "daily";
   if (kind === "once") {
     const value = schedulerOnceRunAtInput?.value;
-    if (!value) throw new Error("请选择一次性运行时间");
+    if (!value) throw new Error(t("settingsExtra.pickRunTime"));
     const runAt = new Date(value);
-    if (Number.isNaN(runAt.getTime())) throw new Error("一次性运行时间无效");
-    if (runAt.getTime() <= Date.now()) throw new Error("一次性任务时间必须晚于当前时间");
+    if (Number.isNaN(runAt.getTime())) throw new Error(t("settingsExtra.invalidOnceTime"));
+    if (runAt.getTime() <= Date.now()) throw new Error(t("settingsExtra.afterNowTime"));
     return { kind: "once", runAt: runAt.toISOString() };
   }
   if (kind === "weekly") {
     const timeOfDay = schedulerTimeOfDayInput?.value || "08:00";
-    if (!isValidTimeOfDay(timeOfDay)) throw new Error("每周时间格式必须是 HH:mm");
+    if (!isValidTimeOfDay(timeOfDay)) throw new Error(t("settingsExtra.weeklyTimeFormat"));
     const dayOfWeek = Number(schedulerDayOfWeekInput?.value ?? 1);
-    if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) throw new Error("星期必须是周一到周日");
+    if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) throw new Error(t("settingsExtra.invalidWeekday"));
     return { kind: "weekly", dayOfWeek: dayOfWeek as 0 | 1 | 2 | 3 | 4 | 5 | 6, timeOfDay };
   }
   if (kind === "interval") {
     const every = Number(schedulerIntervalEveryInput?.value ?? 1);
     const unit = schedulerIntervalUnitInput?.value === "hours" ? "hours" : "minutes";
-    if (!Number.isInteger(every) || every <= 0) throw new Error("间隔必须是正整数");
-    if (unit === "minutes" && every > 1440) throw new Error("分钟间隔不能超过 1440");
-    if (unit === "hours" && every > 168) throw new Error("小时间隔不能超过 168");
+    if (!Number.isInteger(every) || every <= 0) throw new Error(t("settingsExtra.invalidInterval"));
+    if (unit === "minutes" && every > 1440) throw new Error(t("settingsExtra.intervalMinuteLimit"));
+    if (unit === "hours" && every > 168) throw new Error(t("settingsExtra.intervalHourLimit"));
     return { kind: "interval", every, unit };
   }
   const timeOfDay = schedulerTimeOfDayInput?.value || "08:00";
-  if (!isValidTimeOfDay(timeOfDay)) throw new Error("每日时间格式必须是 HH:mm");
+  if (!isValidTimeOfDay(timeOfDay)) throw new Error(t("settingsExtra.dailyTimeFormat"));
   return { kind: "daily", timeOfDay };
 }
 
@@ -1855,11 +1855,11 @@ function collectAllowedToolIds(): string[] {
 
 async function saveSchedulerTask(): Promise<void> {
   try {
-    setSchedulerStatus("保存中…");
+    setSchedulerStatus(t("settingsExtra.saving"));
     const title = (schedulerTitleInput?.value ?? "").trim();
     const prompt = (schedulerPromptInput?.value ?? "").trim();
-    if (!title) throw new Error("标题不能为空");
-    if (!prompt) throw new Error("提示词不能为空");
+    if (!title) throw new Error(t("settingsExtra.titleRequired"));
+    if (!prompt) throw new Error(t("settingsExtra.promptRequired"));
     const input = {
       title,
       prompt,
@@ -1871,7 +1871,7 @@ async function saveSchedulerTask(): Promise<void> {
     const result = editingSchedulerTaskId
       ? await window.columbinaScheduler!.update(editingSchedulerTaskId, input)
       : await window.columbinaScheduler!.add(input);
-    if (!result.ok) throw new Error(result.error ?? "保存失败");
+    if (!result.ok) throw new Error(result.error ?? t("settingsExtra.saveFailed"));
     await loadSchedulerPanel();
     closeSchedulerEditor();
   } catch (err) {
@@ -1881,20 +1881,20 @@ async function saveSchedulerTask(): Promise<void> {
 
 async function toggleSchedulerTask(id: string, enabled: boolean): Promise<void> {
   const result = await window.columbinaScheduler!.toggle(id, enabled);
-  if (!result.ok) window.alert(result.error ?? "切换失败");
+  if (!result.ok) window.alert(result.error ?? t("settingsExtra.toggleFailed"));
   await loadSchedulerPanel();
 }
 
 async function fireSchedulerTask(id: string): Promise<void> {
   const result = await window.columbinaScheduler!.fireNow(id);
-  if (!result.ok) window.alert(result.reason === "task already running" ? "该任务正在运行中" : (result.error ?? result.reason ?? "立即运行失败"));
+  if (!result.ok) window.alert(result.reason === "task already running" ? t("settingsExtra.taskIsRunning") : (result.error ?? result.reason ?? t("settingsExtra.taskRunNowFailed")));
 }
 
 async function deleteSchedulerTask(id: string): Promise<void> {
-  const ok = await showModal({ title: "删除定时任务", message: "确定删除这个定时任务吗？", icon: "🗑️", confirmText: "删除" });
+  const ok = await showModal({ title: t("settingsExtra.deleteTask"), message: t("settingsExtra.confirmDeleteTask"), icon: "🗑️", confirmText: t("common.delete") });
   if (!ok) return;
   const result = await window.cyreneScheduler!.delete(id);
-  if (!result.ok) window.alert(result.error ?? "删除失败");
+  if (!result.ok) window.alert(result.error ?? t("settingsExtra.taskDeleteFailed"));
   await loadSchedulerPanel();
 }
 
@@ -1909,7 +1909,7 @@ async function toggleSchedulerHistory(taskId: string, card: Element): Promise<vo
   const rows = result.value ?? [];
   box.replaceChildren();
   if (!result.ok || rows.length === 0) {
-    box.textContent = result.ok ? "暂无运行历史" : (result.error ?? "读取历史失败");
+    box.textContent = result.ok ? t("settingsExtra.noRunHistory") : (result.error ?? t("settingsExtra.readHistoryFailed"));
   } else {
     for (const row of rows) {
       const div = document.createElement("div");
@@ -1995,7 +1995,7 @@ function switchSection(section: string): void {
   ) {
     placeholderIcon.textContent = label.emoji;
     placeholderTitle.textContent = label.title;
-    placeholderCopy.textContent = "这个模块先占位，等核心聊天与 API 接通后再继续扩展。";
+    placeholderCopy.textContent = t("placeholder.copy");
   }
 
   document.querySelectorAll(".nav-item").forEach((el) => {
@@ -2060,8 +2060,8 @@ function initGameBotPluginCard(): void {
     const refs = await gb!.listRefs(currentRecipe);
     if (refsListEl) {
       refsListEl.innerHTML = refs.length
-        ? "已就位参考图：" + refs.map((r) => "<code>" + r + "</code>").join(" ")
-        : "（目录还没有参考图，把裁好的小图按命名放进上方目录）";
+        ? t("settingsExtra.gameBotRefsReady") + refs.map((r) => "<code>" + r + "</code>").join(" ")
+        : t("settingsExtra.gameBotRefsEmpty");
     }
   }
 
@@ -2103,9 +2103,9 @@ function initGameBotPluginCard(): void {
 
   startBtn?.addEventListener("click", async () => {
     const r = await gb.start();
-    appendLog(r.ok ? "代肝已启动" : "启动失败: " + (r.error ?? ""));
+    appendLog(r.ok ? t("settingsExtra.gameBotStarted") : t("settingsExtra.gameBotStartFailed") + (r.error ?? ""));
   });
-  stopBtn?.addEventListener("click", () => { void gb.stop(); appendLog("已请求停止"); });
+  stopBtn?.addEventListener("click", () => { void gb.stop(); appendLog(t("settingsExtra.gameBotStopped")); });
 
   gb.onProgress((info) => {
     const i = info as { index: number; total: number; desc: string };
@@ -2156,7 +2156,7 @@ function renderChannelStatus(el: HTMLElement | null, phase: string, message?: st
     else if (phase === "config_missing") dot.classList.add("channels-status__dot--config_missing");
     else dot.classList.add("channels-status__dot--offline");
   }
-  if (text) text.textContent = message ?? (phase === "running" ? "运行中" : phase === "starting" ? "启动中" : phase === "config_missing" ? "配置缺失" : phase === "error" ? "错误" : "未启用");
+  if (text) text.textContent = message ?? (phase === "running" ? t("settingsExtra.channelRunning") : phase === "starting" ? t("settingsExtra.channelStarting") : phase === "config_missing" ? t("settingsExtra.channelConfigMissing") : phase === "error" ? t("settingsExtra.channelError") : t("settingsExtra.channelDisabled"));
 }
 
 async function loadChannelsPanel(): Promise<void> {
@@ -2178,8 +2178,8 @@ async function loadChannelsPanel(): Promise<void> {
     if (channelsFeishuAppSecretEl) {
       channelsFeishuAppSecretEl.value = "";
       channelsFeishuAppSecretEl.placeholder = cfg.feishu.appSecret
-        ? "已保存（输入新值会覆盖）"
-        : "点击保存配置时加密保存";
+        ? t("settingsExtra.channelSavedOverwrite")
+        : t("settingsExtra.channelSavedEncrypted");
     }
 
     // 拉一次渠道状态
@@ -2243,7 +2243,7 @@ async function loadChannelsPanel(): Promise<void> {
 
   // 保存配置（secret 用 safeStorage 加密后落盘 + 触发长连接重连）
   channelsFeishuSaveBtn?.addEventListener("click", async () => {
-    setFeishuFeedback("info", "保存并连接中...");
+    setFeishuFeedback("info", t("settingsExtra.channelSaveConnecting"));
     const patch: Record<string, unknown> = {
       feishu: {
         enabled: channelsFeishuEnabledEl?.checked ?? false,
@@ -2258,11 +2258,11 @@ async function loadChannelsPanel(): Promise<void> {
       await window.settings.channelsSaveConfig(patch);
       // 保存后立即触发飞书 adapter 重建 + 重连长连接
       await window.settings.channelsRestart();
-      setFeishuFeedback("ok", "已保存，飞书长连接正在建立…");
+      setFeishuFeedback("ok", t("settingsExtra.channelSavedConnected"));
       // 清空输入框（已落盘），并把 placeholder 切到"已保存"
       if (channelsFeishuAppSecretEl) {
         channelsFeishuAppSecretEl.value = "";
-        channelsFeishuAppSecretEl.placeholder = "已保存（输入新值会覆盖）";
+        channelsFeishuAppSecretEl.placeholder = t("settingsExtra.channelSavedOverwrite");
       }
     } catch (err) {
       setFeishuFeedback("err", err instanceof Error ? err.message : String(err));
@@ -2314,28 +2314,28 @@ async function loadChannelsPanel(): Promise<void> {
   window.settings.onChannelsWechatQrcode((dataUrl) => {
     console.log("[WechatSettings] QR event received, dataUrl prefix:", dataUrl?.slice(0, 40), "len:", dataUrl?.length);
     showWechatQr(dataUrl);
-    setWechatFeedback("info", "请用微信扫描二维码");
+    setWechatFeedback("info", t("settingsExtra.channelWechatScanQr"));
   });
   // 订阅 Main 推送的登录结果（成功 / 失败 / 二维码过期）
   window.settings.onChannelsWechatLoginDone((payload) => {
     hideWechatQr();
     if (payload.ok) {
-      setWechatFeedback("ok", `已登录（botId=${payload.botId ?? "?"}）`);
+      setWechatFeedback("ok", t("settingsExtra.channelWechatLoginOk").replace("{id}", payload.botId ?? "?"));
     } else {
-      setWechatFeedback("err", `登录失败：${payload.error ?? "未知错误"}`);
+      setWechatFeedback("err", t("settingsExtra.channelWechatLoginFailed") + (payload.error ?? t("settingsExtra.unknownError")));
     }
   });
 
   channelsWechatLoginBtn?.addEventListener("click", async () => {
     hideWechatQr();
-    setWechatFeedback("info", "正在启动扫码…");
+    setWechatFeedback("info", t("settingsExtra.channelWechatStarting"));
     try {
       const result = await window.settings.channelsWechatLoginStart();
       if (result.ok) {
         // 二维码由 onChannelsWechatQrcode 推过来并显示；这里只刷个轻提示
-        setWechatFeedback("info", "等待二维码推送…");
+        setWechatFeedback("info", t("settingsExtra.channelWechatWaitingQr"));
       } else {
-        setWechatFeedback("err", result.error ?? "启动失败");
+        setWechatFeedback("err", result.error ?? t("settingsExtra.channelWechatStartFailed"));
       }
     } catch (err) {
       setWechatFeedback("err", err instanceof Error ? err.message : String(err));
@@ -2344,10 +2344,10 @@ async function loadChannelsPanel(): Promise<void> {
 
   // 重启连接
   channelsWechatRestartBtn?.addEventListener("click", async () => {
-    setWechatFeedback("info", "重启连接中…");
+    setWechatFeedback("info", t("settingsExtra.channelRestarting"));
     try {
       await window.settings.channelsRestart();
-      setWechatFeedback("ok", "已重启");
+      setWechatFeedback("ok", t("settingsExtra.channelRestarted"));
     } catch (err) {
       setWechatFeedback("err", err instanceof Error ? err.message : String(err));
     }
@@ -2382,7 +2382,7 @@ interface LogEntry {
 function renderChannelsLog(entries: LogEntry[]): void {
   if (!channelsLogListEl) return;
   if (entries.length === 0) {
-    channelsLogListEl.innerHTML = '<p class="empty-hint">暂无消息。</p>';
+    channelsLogListEl.innerHTML = '<p class="empty-hint">' + t("settingsExtra.channelLogEmpty") + '</p>';
     return;
   }
   const html = entries
@@ -2391,7 +2391,7 @@ function renderChannelsLog(entries: LogEntry[]): void {
       const hh = String(t.getHours()).padStart(2, "0");
       const mm = String(t.getMinutes()).padStart(2, "0");
       const ss = String(t.getSeconds()).padStart(2, "0");
-      const dir = e.dir === "incoming" ? "← 收到" : "→ 回复";
+      const dir = e.dir === "incoming" ? t("settingsExtra.channelDirIncoming") : t("settingsExtra.channelDirReply");
       const who = e.senderName ? `${e.senderName} (${e.senderId})` : e.senderId;
       const safe = (s: string) =>
         s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -2416,7 +2416,7 @@ async function refreshChannelsLog(): Promise<void> {
 
 channelsLogRefreshBtn?.addEventListener("click", () => void refreshChannelsLog());
 channelsLogClearBtn?.addEventListener("click", async () => {
-  if (!confirm("确认清空所有 bot 消息日志？")) return;
+  if (!confirm(t("settingsExtra.channelConfirmClearLog"))) return;
   await window.settings.channelsLogClear();
   await refreshChannelsLog();
 });
@@ -2473,7 +2473,7 @@ window.settings?.onSwitchSection?.((section) => {
         if (result?.ok) {
           console.log("[settings] embedding switched to", value, "cleared:", result.clearedEntries);
           if (result.clearedEntries && result.clearedEntries > 0) {
-            window.alert("已切换至 " + (value === "bgem3" ? "BGE-M3" : "MiniLM") + "。由于向量维度不同，已清除 " + result.clearedEntries + " 条旧向量记忆。");
+            window.alert(t("settingsExtra.memorySwitchModel").replace("{model}", value === "bgem3" ? "BGE-M3" : "MiniLM").replace("{n}", String(result.clearedEntries)));
           }
         } else {
           // Rollback on failure
@@ -2483,7 +2483,7 @@ window.settings?.onSwitchSection?.((section) => {
             prevCard?.classList.add("is-active");
             localStorage.setItem(KEY, previousValue);
           }
-          window.alert("切换失败：" + (result?.error || "未知错误"));
+          window.alert(t("settingsExtra.memorySwitchFailed") + (result?.error || t("settingsExtra.unknownError")));
         }
       } catch (err) {
         // Rollback on error
@@ -2537,12 +2537,12 @@ window.settings?.onSwitchSection?.((section) => {
   try {
     const status = await (window as any).settings?.getRerankerStatus?.();
     if (!status) return;
-    if (lightEl) lightEl.textContent = status.light ? "已下载 · 约 23MB" : "未下载 · 可选";
-    if (standardEl) standardEl.textContent = status.standard ? "已下载 · 约 279MB" : "未下载 · 可选";
+    if (lightEl) lightEl.textContent = status.light ? t("settingsExtra.modelDownloadedSize").replace("{size}", "23MB") : t("settingsExtra.modelNotDownloadedOptional");
+    if (standardEl) standardEl.textContent = status.standard ? t("settingsExtra.modelDownloadedSize").replace("{size}", "279MB") : t("settingsExtra.modelNotDownloadedOptional");
   } catch (err) {
     console.warn("[Reranker] status check failed:", err);
-    if (lightEl) lightEl.textContent = "状态未知";
-    if (standardEl) standardEl.textContent = "状态未知";
+    if (lightEl) lightEl.textContent = t("settingsExtra.modelStatusUnknown");
+    if (standardEl) standardEl.textContent = t("settingsExtra.modelStatusUnknown");
   }
 })();
 
@@ -2553,16 +2553,16 @@ window.settings?.onSwitchSection?.((section) => {
   try {
     const status = await window.modelConfig?.getModelInstallStatus?.();
     if (!status) {
-      if (bgem3El) bgem3El.textContent = "状态未知";
-      if (minilmEl) minilmEl.textContent = "状态未知";
+      if (bgem3El) bgem3El.textContent = t("settingsExtra.modelStatusUnknown");
+      if (minilmEl) minilmEl.textContent = t("settingsExtra.modelStatusUnknown");
       return;
     }
-    if (bgem3El) bgem3El.textContent = status.embedding?.bgem3 ? "已下载 · 约 570MB" : "未下载";
-    if (minilmEl) minilmEl.textContent = status.embedding?.minilm ? "已下载 · 约 23MB" : "未下载";
+    if (bgem3El) bgem3El.textContent = status.embedding?.bgem3 ? t("settingsExtra.modelDownloadedSize").replace("{size}", "570MB") : t("settingsExtra.modelNotDownloaded");
+    if (minilmEl) minilmEl.textContent = status.embedding?.minilm ? t("settingsExtra.modelDownloadedSize").replace("{size}", "23MB") : t("settingsExtra.modelNotDownloaded");
   } catch (err) {
     console.warn("[Embedding] status check failed:", err);
-    if (bgem3El) bgem3El.textContent = "状态未知";
-    if (minilmEl) minilmEl.textContent = "状态未知";
+    if (bgem3El) bgem3El.textContent = t("settingsExtra.modelStatusUnknown");
+    if (minilmEl) minilmEl.textContent = t("settingsExtra.modelStatusUnknown");
   }
 })();
 
@@ -2597,7 +2597,7 @@ window.settings?.onSwitchSection?.((section) => {
       ov = document.createElement("div");
       ov.id = "cy-modal-overlay";
       ov.className = "cy-modal-overlay is-hidden";
-      ov.innerHTML = '<div class="cy-modal" role="alertdialog" aria-modal="true"><div class="cy-modal__head"><span class="cy-modal__icon" id="cy-modal-icon">📌</span><h3 class="cy-modal__title" id="cy-modal-title">提示</h3></div><hr class="cy-modal__divider"><p class="cy-modal__body" id="cy-modal-message">确认执行此操作吗？</p><div class="cy-modal__actions"><button type="button" class="ghost-btn" id="cy-modal-cancel">取消</button><button type="button" class="btn-primary" id="cy-modal-confirm">确定</button></div></div>';
+      ov.innerHTML = '<div class="cy-modal" role="alertdialog" aria-modal="true"><div class="cy-modal__head"><span class="cy-modal__icon" id="cy-modal-icon">📌</span><h3 class="cy-modal__title" id="cy-modal-title">' + t("settingsExtra.modalTitle") + '</h3></div><hr class="cy-modal__divider"><p class="cy-modal__body" id="cy-modal-message">' + t("settingsExtra.modalConfirmMessage") + '</p><div class="cy-modal__actions"><button type="button" class="ghost-btn" id="cy-modal-cancel">' + t("common.cancel") + '</button><button type="button" class="btn-primary" id="cy-modal-confirm">' + t("common.confirm") + '</button></div></div>';
       document.body.appendChild(ov);
     }
     var iconEl = ov.querySelector("#cy-modal-icon") as HTMLElement;
@@ -2608,8 +2608,8 @@ window.settings?.onSwitchSection?.((section) => {
     iconEl.textContent = opts.icon || "📌";
     titleEl.textContent = opts.title;
     msgEl.textContent = opts.message;
-    cancelBtn.textContent = opts.cancelText || "取消";
-    confirmBtn.textContent = opts.confirmText || "确定";
+    cancelBtn.textContent = opts.cancelText || t("common.cancel");
+    confirmBtn.textContent = opts.confirmText || t("common.confirm");
     ov.classList.remove("is-hidden");
     return new Promise(function (resolve) {
       var cleanup = function (result: boolean) {
@@ -2627,21 +2627,21 @@ window.settings?.onSwitchSection?.((section) => {
   deleteBtn?.addEventListener("click", async () => {
     const model = getSelectedModel();
     const name = model === "minilm" ? "MiniLM" : "BGE-M3";
-    var confirmed = await _showModal({ title: "删 除 模 型", message: "确 定 删 除 " + name + " 模 型 缓 存？下 次 使 用 需 重 新 下 载。", icon: "⚠️", confirmText: "删 除", cancelText: "取 消" });
+    var confirmed = await _showModal({ title: t("settingsExtra.deleteModelTitle"), message: t("settingsExtra.deleteModelMessage").replace("{name}", name), icon: "⚠️", confirmText: t("common.delete"), cancelText: t("common.cancel") });
     if (!confirmed) return;
     deleteBtn.disabled = true;
-    deleteBtn.textContent = "\u5220\u9664\u4E2D\u2026";
+    deleteBtn.textContent = t("settingsExtra.deleting");
     try {
       const result = await window.settings?.deleteEmbeddingModel?.(model);
       if (result?.ok) {
-        deleteBtn.textContent = "\u2705 \u5DF2\u5220\u9664";
+        deleteBtn.textContent = t("settingsExtra.deleteSuccess");
         setTimeout(() => location.reload(), 800);
       } else {
-        deleteBtn.textContent = "\u274C \u5931\u8D25";
+        deleteBtn.textContent = t("settingsExtra.deleteFailedShort");
         deleteBtn.disabled = false;
       }
     } catch (err) {
-      deleteBtn.textContent = "\u274C \u5931\u8D25";
+      deleteBtn.textContent = t("settingsExtra.deleteFailedShort");
       deleteBtn.disabled = false;
     }
   });
@@ -2671,10 +2671,10 @@ window.settings?.onSwitchSection?.((section) => {
 (function () {
   const updateBtn = document.getElementById("embedding-update-btn") as HTMLButtonElement | null;
   updateBtn?.addEventListener("click", () => {
-    updateBtn.textContent = "已是最新版本";
+    updateBtn.textContent = t("settingsExtra.alreadyLatest");
     updateBtn.disabled = true;
     setTimeout(() => {
-      updateBtn.textContent = "检查更新";
+      updateBtn.textContent = t("columbina.rag.checkUpdate");
       updateBtn.disabled = false;
     }, 2000);
   });
@@ -2728,9 +2728,9 @@ function showAvatar(dataUrl: string | null): void {
 }
 
 function formatDateTime(timestamp: number): string {
-  if (!timestamp) return "暂无时间";
+  if (!timestamp) return t("settingsExtra.memoryNoTime");
   const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return "暂无时间";
+  if (Number.isNaN(date.getTime())) return t("settingsExtra.memoryNoTime");
   return date.toLocaleString("zh-CN", {
     year: "numeric",
     month: "2-digit",
@@ -2800,11 +2800,11 @@ function renderL2List(query = ""): void {
     memoryL2List,
     filtered.map((item) => ({
       title: item.content,
-      body: item.triggerText ? `触发片段：${item.triggerText}` : "无触发片段",
-      meta: `状态：${item.status} · 权重：${item.weight.toFixed(1)} · 创建于：${formatDateTime(item.createdAt)}`,
+      body: item.triggerText ? t("settingsExtra.memoryTriggerSnippet") + item.triggerText : t("settingsExtra.noTriggerText"),
+      meta: t("settingsExtra.memoryStatus") + item.status + " · " + t("settingsExtra.memoryWeight") + item.weight.toFixed(1) + " · " + t("settingsExtra.memoryCreatedAt") + formatDateTime(item.createdAt),
     })),
-    normalized ? "没有匹配的事件记忆" : "暂无事件记忆",
-    normalized ? "换个关键词试试" : "聊天后 Columbina 会自动提炼重要信息",
+    normalized ? t("settingsExtra.memoryNoMatch") : t("memory.l2.empty"),
+    normalized ? t("settingsExtra.tryDifferentKeyword") : t("memory.l2.emptyHint"),
   );
 }
 
@@ -2831,17 +2831,17 @@ async function loadMemoryPanel(): Promise<void> {
     renderInfoList(
       memoryReflectionList,
       payload.reflections,
-      "暂无阶段总结",
-      "当前项目里 Reflection 还没真正生成落地",
+      t("settingsExtra.memoryNoReflection"),
+      t("settingsExtra.memoryReflectionHint"),
     );
 
     if (memoryL0EditBtn) memoryL0EditBtn.disabled = false;
     if (memoryL1EditBtn) memoryL1EditBtn.disabled = false;
   } catch (err) {
     console.error("[settings] load memory panel failed", err);
-    renderEmptyState(memoryL2List, "记忆读取失败", "请查看终端日志");
-    renderEmptyState(memoryImportedList, "导入知识读取失败", "请查看终端日志");
-    renderEmptyState(memoryReflectionList, "阶段总结读取失败", "请查看终端日志");
+    renderEmptyState(memoryL2List, t("settingsExtra.memoryReadFailed"), t("settingsExtra.checkTerminalLog"));
+    renderEmptyState(memoryImportedList, t("settingsExtra.memoryImportReadFailed"), t("settingsExtra.checkTerminalLog"));
+    renderEmptyState(memoryReflectionList, t("settingsExtra.memoryReflectionReadFailed"), t("settingsExtra.checkTerminalLog"));
   }
 }
 
@@ -2944,7 +2944,7 @@ function enterL0EditMode(): void {
   l0Editing = true;
   l0Snapshot = takeL0Snapshot();
   setL0FieldsDisabled(false);
-  if (memoryL0EditBtn) memoryL0EditBtn.textContent = "💾 保存";
+  if (memoryL0EditBtn) memoryL0EditBtn.textContent = t("settingsExtra.memorySave");
   if (memoryL0CancelBtn) memoryL0CancelBtn.classList.remove("is-hidden");
 }
 
@@ -2952,7 +2952,7 @@ function exitL0EditMode(): void {
   l0Editing = false;
   l0Snapshot = null;
   setL0FieldsDisabled(true);
-  if (memoryL0EditBtn) memoryL0EditBtn.textContent = "✏️ 编辑";
+  if (memoryL0EditBtn) memoryL0EditBtn.textContent = "✏️ " + t("common.edit");
   if (memoryL0CancelBtn) memoryL0CancelBtn.classList.add("is-hidden");
 }
 
@@ -2967,12 +2967,12 @@ async function saveL0(): Promise<void> {
     await loadMemoryPanel();
     exitL0EditMode();
     if (memoryL0EditBtn) {
-      memoryL0EditBtn.textContent = "✅ 已保存";
-      setTimeout(() => { if (memoryL0EditBtn && !l0Editing) memoryL0EditBtn.textContent = "✏️ 编辑"; }, 2000);
+      memoryL0EditBtn.textContent = t("settingsExtra.memorySavedOk");
+      setTimeout(() => { if (memoryL0EditBtn && !l0Editing) memoryL0EditBtn.textContent = "✏️ " + t("common.edit"); }, 2000);
     }
   } catch (err) {
     console.error("[settings] save L0 failed", err);
-    alert("保存失败，请重试");
+    alert(t("settingsExtra.memorySaveFailed"));
   }
 }
 
@@ -2992,7 +2992,7 @@ function enterL1EditMode(): void {
   l1Editing = true;
   l1Snapshot = takeL1Snapshot();
   setL1FieldsDisabled(false);
-  if (memoryL1EditBtn) memoryL1EditBtn.textContent = "💾 保存";
+  if (memoryL1EditBtn) memoryL1EditBtn.textContent = t("settingsExtra.memorySave");
   if (memoryL1CancelBtn) memoryL1CancelBtn.classList.remove("is-hidden");
 }
 
@@ -3000,7 +3000,7 @@ function exitL1EditMode(): void {
   l1Editing = false;
   l1Snapshot = null;
   setL1FieldsDisabled(true);
-  if (memoryL1EditBtn) memoryL1EditBtn.textContent = "✏️ 编辑";
+  if (memoryL1EditBtn) memoryL1EditBtn.textContent = "✏️ " + t("common.edit");
   if (memoryL1CancelBtn) memoryL1CancelBtn.classList.add("is-hidden");
 }
 
@@ -3015,12 +3015,12 @@ async function saveL1(): Promise<void> {
     await loadMemoryPanel();
     exitL1EditMode();
     if (memoryL1EditBtn) {
-      memoryL1EditBtn.textContent = "✅ 已保存";
-      setTimeout(() => { if (memoryL1EditBtn && !l1Editing) memoryL1EditBtn.textContent = "✏️ 编辑"; }, 2000);
+      memoryL1EditBtn.textContent = t("settingsExtra.memorySavedOk");
+      setTimeout(() => { if (memoryL1EditBtn && !l1Editing) memoryL1EditBtn.textContent = "✏️ " + t("common.edit"); }, 2000);
     }
   } catch (err) {
     console.error("[settings] save L1 failed", err);
-    alert("保存失败，请重试");
+    alert(t("settingsExtra.memorySaveFailed"));
   }
 }
 
@@ -3050,7 +3050,7 @@ function renderImportedDocs(): void {
   if (!memoryImportedList) return;
 
   if (list.length === 0) {
-    renderEmptyState(memoryImportedList, "暂无导入文档", "在聊天窗口上传文件后会自动索引");
+    renderEmptyState(memoryImportedList, t("settingsExtra.memoryNoImportedDoc"), t("memory.imported.emptyHint"));
     return;
   }
 
@@ -3058,8 +3058,8 @@ function renderImportedDocs(): void {
     .map((item) => {
       const importId = item.importId || "";
       const fileName = escapeHtml(item.fileName);
-      const chunkInfo = "已索引 " + item.chunkCount + " 个片段";
-      const timeInfo = "最近导入：" + formatDateTime(item.lastImportedAt);
+      const chunkInfo = t("settingsExtra.memoryIndexedChunks").replace("{n}", String(item.chunkCount));
+      const timeInfo = t("settingsExtra.memoryRecentImport") + formatDateTime(item.lastImportedAt);
       return [
         '<article class="memory-record memory-record--doc">',
         '  <div class="memory-record__main">',
@@ -3067,7 +3067,7 @@ function renderImportedDocs(): void {
         '    <p class="memory-record__body">' + escapeHtml(chunkInfo) + '</p>',
         '    <p class="memory-record__meta">' + escapeHtml(timeInfo) + '</p>',
         '  </div>',
-        '  <button type="button" class="memory-record__delete" data-import-id="' + escapeHtml(importId) + '" data-file-name="' + fileName + '" title="删除此导入文档">🗑️</button>',
+        '  <button type="button" class="memory-record__delete" data-import-id="' + escapeHtml(importId) + '" data-file-name="' + fileName + '" title="' + t("settingsExtra.deleteImportedDocTitle") + '">🗑️</button>',
         '</article>',
       ].join("\n");
     })
@@ -3080,14 +3080,14 @@ memoryImportedList?.addEventListener("click", async (event) => {
   if (!deleteBtn) return;
 
   const importId = deleteBtn.dataset.importId || "";
-  const fileName = deleteBtn.dataset.fileName || "未命名文档";
+  const fileName = deleteBtn.dataset.fileName || t("settingsExtra.unnamedDocument");
 
   const confirmed = await showModal({
-    title: "删除导入知识",
-    message: "确定删除导入知识？\n\n文件：\n《" + fileName + "》\n\n删除后不可恢复，如需使用请重新导入。",
+    title: t("settingsExtra.deleteImportedDoc"),
+    message: t("settingsExtra.deleteImportedDocConfirm").replace("{name}", fileName),
     icon: "⚠️",
-    confirmText: "删除",
-    cancelText: "取消",
+    confirmText: t("common.delete"),
+    cancelText: t("common.cancel"),
   });
 
   if (!confirmed) return;
@@ -3113,10 +3113,10 @@ const permissionBlocksWrap = document.getElementById("plugin-file-permission") a
 const permissionNote = document.getElementById("plugin-file-note") as HTMLElement | null;
 
 const PERMISSION_NOTES: Record<PermissionLevel, string> = {
-  "read-only": "只读：Columbina 不会修改本地任何文件，也不能为你安装新工具。",
-  "scoped": "指定目录：Columbina 只能在你授权的目录里读写文件（白名单后续在此面板配置）。",
-  "per-action": "每次审批：每次涉及文件或安装的操作，Columbina 都会在聊天里弹卡片让你确认。",
-  "full": "完全访问：Columbina 可以自由调用本地命令（含 git/npm/pip）。请只在你完全信任的情况下使用。",
+  "read-only": t("settingsExtra.permissionReadonly"),
+  "scoped": t("settingsExtra.permissionScopedNote"),
+  "per-action": t("settingsExtra.permissionApproval"),
+  "full": t("settingsExtra.permissionFullAccess"),
 };
 
 function paintPermissionUI(level: PermissionLevel): void {
@@ -3144,23 +3144,23 @@ async function confirmFullAccess(): Promise<boolean> {
   const cancelBtn = _cyModalOverlay.querySelector("#cy-modal-cancel") as HTMLButtonElement;
   const confirmBtn = _cyModalOverlay.querySelector("#cy-modal-confirm") as HTMLButtonElement;
   iconEl.textContent = "⚠️";
-  titleEl.textContent = "切换到完全访问？";
-  msgEl.textContent = "这意味着 Columbina 可以在你的电脑上自由执行命令，包括 git clone、npm install、删除文件等。请只在你完全信任她的判断时启用。";
-  cancelBtn.textContent = "再想想";
+  titleEl.textContent = t("settingsExtra.permissionFullSwitchTitle");
+  msgEl.textContent = t("settingsExtra.permissionFullWarning");
+  cancelBtn.textContent = t("settingsExtra.permissionFullThinkAgain");
   _cyModalOverlay.classList.remove("is-hidden");
 
   // 倒计时 5 秒强制等待
   let remain = 5;
   confirmBtn.disabled = true;
-  confirmBtn.textContent = "我了解风险（" + remain + "）";
+  confirmBtn.textContent = t("settingsExtra.permissionFullCountdown").replace("{countdown}", String(remain));
   const tick = setInterval(() => {
     remain -= 1;
     if (remain <= 0) {
       confirmBtn.disabled = false;
-      confirmBtn.textContent = "我了解风险，启用";
+      confirmBtn.textContent = t("settingsExtra.permissionFullUnderstand");
       clearInterval(tick);
     } else {
-      confirmBtn.textContent = "我了解风险（" + remain + "）";
+      confirmBtn.textContent = t("settingsExtra.permissionFullCountdown").replace("{countdown}", String(remain));
     }
   }, 1000);
 
@@ -3270,7 +3270,7 @@ async function renderSkills(): Promise<void> {
     label.className = "skill-row__info";
     const title = document.createElement("div");
     title.className = "skill-row__title";
-    title.textContent = s.name + (s.source === "user" ? " （用户）" : "");
+    title.textContent = s.name + (s.source === "user" ? t("settingsExtra.skillSourceUser") : "");
     const desc = document.createElement("div");
     desc.className = "skill-row__desc";
     const short = s.description.length > 120 ? s.description.slice(0, 120) + "…" : s.description;
@@ -3317,7 +3317,7 @@ async function renderSkills(): Promise<void> {
     gTitle.textContent = "MiniMAX-office-skills";
     const gDesc = document.createElement("span");
     gDesc.className = "skill-group__desc";
-    gDesc.textContent = "MiniMax开源的办公文档Skills合集";
+    gDesc.textContent = t("settingsExtra.skillMiniMaxDesc");
     header.appendChild(arrow);
     header.appendChild(gTitle);
     header.appendChild(gDesc);
@@ -3413,7 +3413,7 @@ function buildChatSessionItem(session: ChatSessionMetaUI): HTMLLIElement {
 
   const titleEl = document.createElement("div");
   titleEl.className = "chat-sessions__title";
-  titleEl.textContent = session.title || "新对话";
+  titleEl.textContent = session.title || t("chatWindow.newChat");
 
   const metaEl = document.createElement("div");
   metaEl.className = "chat-sessions__meta";
@@ -3440,30 +3440,30 @@ function buildChatSessionItem(session: ChatSessionMetaUI): HTMLLIElement {
   const deleteBtn = document.createElement("button");
   deleteBtn.type = "button";
   deleteBtn.className = "chat-sessions__delete";
-  deleteBtn.title = "删除会话";
-  deleteBtn.setAttribute("aria-label", "删除会话");
+  deleteBtn.title = t("settingsExtra.deleteSession");
+  deleteBtn.setAttribute("aria-label", t("settingsExtra.deleteSession"));
   deleteBtn.textContent = "🗑️";
 
   const renameBtn = document.createElement("button");
   renameBtn.type = "button";
   renameBtn.className = "chat-sessions__rename";
-  renameBtn.title = "重命名";
-  renameBtn.setAttribute("aria-label", "重命名会话");
+  renameBtn.title = t("settingsExtra.renameSession");
+  renameBtn.setAttribute("aria-label", t("settingsExtra.renameSession"));
   renameBtn.textContent = "✏️";
 
   // 编辑态确认/取消按钮（默认隐藏，进入编辑态时显示，替换 ✏️/🗑️ 的位置）
   const confirmRenameBtn = document.createElement("button");
   confirmRenameBtn.type = "button";
   confirmRenameBtn.className = "chat-sessions__confirm-rename is-hidden";
-  confirmRenameBtn.title = "确认（Enter）";
-  confirmRenameBtn.setAttribute("aria-label", "确认重命名");
+  confirmRenameBtn.title = t("settingsExtra.confirmEnter");
+  confirmRenameBtn.setAttribute("aria-label", t("settingsExtra.confirmRename"));
   confirmRenameBtn.textContent = "✓";
 
   const cancelRenameBtn = document.createElement("button");
   cancelRenameBtn.type = "button";
   cancelRenameBtn.className = "chat-sessions__cancel-rename is-hidden";
-  cancelRenameBtn.title = "取消（Esc）";
-  cancelRenameBtn.setAttribute("aria-label", "取消重命名");
+  cancelRenameBtn.title = t("settingsExtra.cancelEsc");
+  cancelRenameBtn.setAttribute("aria-label", t("settingsExtra.cancelRename"));
   cancelRenameBtn.textContent = "✕";
 
   // 右侧操作区：✏️ 🗑️（常规）/ ✓ ✕（编辑态）
@@ -3592,8 +3592,8 @@ function enterRenameMode(
 async function deleteChatSession(session: ChatSessionMetaUI): Promise<void> {
   const isActive = session.id === chatSessionsActiveId;
   const prompt = isActive
-    ? `「${session.title || "新对话"}」正在聊天窗口里打开，确定删除？\n删除后聊天窗口会跳到最新一条会话或自动新建。`
-    : `确定删除「${session.title || "新对话"}」？\n删除后无法恢复。`;
+    ? t("settingsExtra.deleteActiveSessionWarning").replace("{title}", session.title || t("chatWindow.newChat"))
+    : t("settingsExtra.deleteSessionConfirm").replace("{title}", session.title || t("chatWindow.newChat"));
   if (!window.confirm(prompt)) return;
   try {
     await window.chatStore?.delete(session.id);
@@ -3601,7 +3601,7 @@ async function deleteChatSession(session: ChatSessionMetaUI): Promise<void> {
     // 聊天窗口若在显示该会话也会通过 onChanged 自动 fallback。
   } catch (err) {
     console.warn("[settings] 删除会话失败:", err);
-    window.alert("删除失败，请查看终端日志。");
+    window.alert(t("settingsExtra.deleteSessionFailed"));
   }
 }
 
@@ -3614,7 +3614,7 @@ chatNewBtn?.addEventListener("click", async () => {
     if (session?.id) await window.chatStore.openInChatWindow(session.id);
   } catch (err) {
     console.warn("[settings] 新建会话失败:", err);
-    window.alert("新建会话失败，请查看终端日志。");
+    window.alert(t("settingsExtra.createSessionFailed"));
   }
 });
 
@@ -3726,7 +3726,7 @@ function renderTokenBarChart(data: TokenDayData[]): void {
   const avgEl = document.getElementById("token-avg-label");
   if (avgEl) {
     const avg = Math.round(data.reduce((s, d) => s + d.input + d.output, 0) / data.length);
-    avgEl.textContent = `日均 ${formatTokenShort(avg)}`;
+    avgEl.textContent = t("tasksWindow.dailyAvg").replace("{avg}", formatTokenShort(avg));
   }
 }
 
@@ -3741,10 +3741,10 @@ function showTokenTooltip(e: MouseEvent, d: TokenDayData): void {
   if (!tip) return;
   tip.innerHTML = `
     <div class="token-tooltip__date">${d.date} ${d.weekday}</div>
-    <div class="token-tooltip__row"><span>📥 输入</span><span>${d.input.toLocaleString()}</span></div>
-    <div class="token-tooltip__row"><span>📤 输出</span><span>${d.output.toLocaleString()}</span></div>
-    <div class="token-tooltip__row"><span>🎯 命中</span><span>${d.hit > 0 ? d.hit.toLocaleString() : "N/A"}</span></div>
-    <div class="token-tooltip__row"><span>❌ 未命中</span><span>${d.miss > 0 ? d.miss.toLocaleString() : "N/A"}</span></div>
+    <div class="token-tooltip__row"><span>${t("settingsExtra.tokenInput")}</span><span>${d.input.toLocaleString()}</span></div>
+    <div class="token-tooltip__row"><span>${t("settingsExtra.tokenOutput")}</span><span>${d.output.toLocaleString()}</span></div>
+    <div class="token-tooltip__row"><span>${t("settingsExtra.tokenHit")}</span><span>${d.hit > 0 ? d.hit.toLocaleString() : "N/A"}</span></div>
+    <div class="token-tooltip__row"><span>${t("settingsExtra.tokenMiss")}</span><span>${d.miss > 0 ? d.miss.toLocaleString() : "N/A"}</span></div>
   `;
   tip.hidden = false;
   moveTokenTooltip(e);
@@ -3788,7 +3788,7 @@ function renderTokenTrendChart(data: TokenDayData[]): void {
       labels,
       datasets: [
         {
-          label: "📥 输入",
+          label: t("settingsExtra.tokenInput"),
           data: inputData,
           borderColor: "#3b82f6",
           backgroundColor: "rgba(59, 130, 246, 0.15)",
@@ -3800,7 +3800,7 @@ function renderTokenTrendChart(data: TokenDayData[]): void {
           pointHoverBackgroundColor: "#3b82f6",
         },
         {
-          label: "📤 输出",
+          label: t("settingsExtra.tokenOutput"),
           data: outputData,
           borderColor: "#ff8ccc",
           backgroundColor: "rgba(255, 140, 204, 0.15)",
@@ -3844,14 +3844,14 @@ function renderTokenTrendChart(data: TokenDayData[]): void {
               const d = data[idx];
               const which = item.datasetIndex === 0 ? "input" : "output";
               const val = which === "input" ? d.input : d.output;
-              return `${which === "input" ? "📥 输入" : "📤 输出"}: ${val.toLocaleString()}`;
+              return `${which === "input" ? t("settingsExtra.tokenInput") : t("settingsExtra.tokenOutput")}: ${val.toLocaleString()}`;
             },
             afterBody: (items) => {
               const idx = items[0].dataIndex;
               const d = data[idx];
               return [
-                `🎯 命中: ${d.hit > 0 ? d.hit.toLocaleString() : "N/A"}`,
-                `❌ 未命中: ${d.miss > 0 ? d.miss.toLocaleString() : "N/A"}`,
+                `${t("settingsExtra.tokenHit")}: ${d.hit > 0 ? d.hit.toLocaleString() : "N/A"}`,
+                `${t("settingsExtra.tokenMiss")}: ${d.miss > 0 ? d.miss.toLocaleString() : "N/A"}`,
               ];
             },
           },
@@ -4008,7 +4008,6 @@ declare global {
   }
 }
 
-const TTS_TEST_TEXT = "你好，我是 Columbina，很高兴见到你。";
 
 // 获取 DOM 元素的辅助函数
 function ttsEl(id: string): HTMLInputElement {
@@ -4072,7 +4071,7 @@ async function loadTtsConfig(): Promise<void> {
   // 小米 MiMo
   ttsEl("tts-mimo-key").value = String(ttsConfig.ttsMimoKey ?? "");
   ttsEl("tts-mimo-voice-audio").value = String(ttsConfig.ttsMimoVoiceAudioPath ?? "");
-  ttsEl("tts-mimo-style").value = String(ttsConfig.ttsMimoStylePrompt ?? "温柔、自然、略带亲近感，像在轻声陪用户聊天。");
+  ttsEl("tts-mimo-style").value = String(ttsConfig.ttsMimoStylePrompt ?? t("settingsExtra.ttsDefaultStyle"));
 
   // Opener 主动开口档位
   const openerMode = String(ttsConfig.openerMode ?? "off");
@@ -4229,23 +4228,23 @@ document.getElementById("tts-gptsovits-test")?.addEventListener("click", async (
   const refAudioPath = ttsEl("tts-gptsovits-ref-audio").value.trim();
   const promptText = ttsEl("tts-gptsovits-prompt-text").value.trim();
   const format = (ttsEl("tts-gptsovits-format") as HTMLSelectElement).value as "wav" | "mp3";
-  if (!baseUrl) { window.alert("请先填写 GPT-SoVITS API 地址"); return; }
-  if (!refAudioPath) { window.alert("请先选择参考音频文件"); return; }
-  if (!promptText) { window.alert("请先填写参考音频对应的文本"); return; }
+  if (!baseUrl) { window.alert(t("settingsExtra.ttsGptsovitsUrlRequired")); return; }
+  if (!refAudioPath) { window.alert(t("settingsExtra.ttsRefAudioRequired")); return; }
+  if (!promptText) { window.alert(t("settingsExtra.ttsRefTextRequired")); return; }
 
   const btn = document.getElementById("tts-gptsovits-test") as HTMLButtonElement;
   btn.disabled = true;
-  btn.textContent = "合成中…";
+  btn.textContent = t("settingsExtra.ttsSynthesizing");
   try {
     const result = await window.tts.synthesizeGptsovits({
-      baseUrl, refAudioPath, promptText, text: TTS_TEST_TEXT, format,
+      baseUrl, refAudioPath, promptText, text: t("settingsExtra.ttsTestText"), format,
     });
     playTtsAudio(result.base64, result.format);
   } catch (err) {
-    window.alert("测试失败: " + (err instanceof Error ? err.message : String(err)));
+    window.alert(t("settingsExtra.ttsTestFailed") + (err instanceof Error ? err.message : String(err)));
   } finally {
     btn.disabled = false;
-    btn.textContent = "🔊 测试发音";
+    btn.textContent = t("settingsExtra.ttsTestButton");
   }
 });
 
@@ -4267,14 +4266,14 @@ document.getElementById("tts-custom-cloud-test")?.addEventListener("click", asyn
   const voiceId = ttsEl("tts-custom-cloud-voice").value.trim();
   const format = (ttsEl("tts-custom-cloud-format") as HTMLSelectElement).value as "wav" | "mp3";
   const timeoutMs = Number(ttsEl("tts-custom-cloud-timeout").value) || 30000;
-  if (!endpointUrl) { window.alert("请先填写自定义云端 Endpoint URL"); return; }
+  if (!endpointUrl) { window.alert(t("settingsExtra.ttsCustomCloudUrlRequired")); return; }
 
   const btn = document.getElementById("tts-custom-cloud-test") as HTMLButtonElement;
   btn.disabled = true;
-  btn.textContent = "合成中…";
+  btn.textContent = t("settingsExtra.ttsSynthesizing");
   try {
     const result = await window.tts.synthesizeCustomCloud({
-      endpointUrl, apiKey, voiceId, text: TTS_TEST_TEXT,
+      endpointUrl, apiKey, voiceId, text: t("settingsExtra.ttsTestText"),
       speed: Number(ttsEl("tts-speed").value),
       volume: Number(ttsEl("tts-volume").value),
       format,
@@ -4282,10 +4281,10 @@ document.getElementById("tts-custom-cloud-test")?.addEventListener("click", asyn
     });
     playTtsAudio(result.base64, result.format);
   } catch (err) {
-    window.alert("测试失败: " + (err instanceof Error ? err.message : String(err)));
+    window.alert(t("settingsExtra.ttsTestFailed") + (err instanceof Error ? err.message : String(err)));
   } finally {
     btn.disabled = false;
-    btn.textContent = "🔊 测试发音";
+    btn.textContent = t("settingsExtra.ttsTestButton");
   }
 });
 
@@ -4295,22 +4294,22 @@ document.getElementById("tts-mimo-test")?.addEventListener("click", async () => 
   const apiKey = ttsEl("tts-mimo-key").value.trim();
   const voiceAudioPath = ttsEl("tts-mimo-voice-audio").value.trim();
   const stylePrompt = ttsEl("tts-mimo-style").value.trim();
-  if (!apiKey) { window.alert("请先填写小米 MiMo API Key"); return; }
-  if (!voiceAudioPath) { window.alert("请先选择昔涟克隆参考音频"); return; }
+  if (!apiKey) { window.alert(t("settingsExtra.ttsMimoApiKeyRequired")); return; }
+  if (!voiceAudioPath) { window.alert(t("settingsExtra.ttsMimoRefAudioRequired")); return; }
 
   const btn = document.getElementById("tts-mimo-test") as HTMLButtonElement;
   btn.disabled = true;
-  btn.textContent = "合成中…";
+  btn.textContent = t("settingsExtra.ttsSynthesizing");
   try {
     const result = await window.tts.synthesizeMimo({
-      apiKey, voiceAudioPath, stylePrompt, text: TTS_TEST_TEXT,
+      apiKey, voiceAudioPath, stylePrompt, text: t("settingsExtra.ttsTestText"),
     });
     playTtsAudio(result.base64, result.format);
   } catch (err) {
-    window.alert("测试失败: " + (err instanceof Error ? err.message : String(err)));
+    window.alert(t("settingsExtra.ttsTestFailed") + (err instanceof Error ? err.message : String(err)));
   } finally {
     btn.disabled = false;
-    btn.textContent = "🔊 测试发音";
+    btn.textContent = t("settingsExtra.ttsTestButton");
   }
 });
 
@@ -4321,20 +4320,20 @@ document.getElementById("tts-minimax-test")?.addEventListener("click", async () 
   const voiceId = ttsEl("tts-minimax-voice").value.trim();
   const modelSelect = ttsEl("tts-minimax-model") as HTMLSelectElement;
   const model = modelSelect.value === "speech-2.8-hd" ? "speech-2.8-hd" : "speech-2.8-turbo";
-  if (!apiKey) { window.alert("请先填写 MiniMax API Key"); return; }
-  if (!voiceId) { window.alert("请先填写音色 ID（或下方复刻训练）"); return; }
+  if (!apiKey) { window.alert(t("settingsExtra.ttsMinimaxApiKeyRequired")); return; }
+  if (!voiceId) { window.alert(t("settingsExtra.ttsMinimaxVoiceIdRequired")); return; }
 
   const btn = document.getElementById("tts-minimax-test") as HTMLButtonElement;
   btn.disabled = true;
-  btn.textContent = "合成中…";
+  btn.textContent = t("settingsExtra.ttsSynthesizing");
   try {
-    const base64 = await window.tts.synthesize({ apiKey, voiceId, text: TTS_TEST_TEXT, model });
+    const base64 = await window.tts.synthesize({ apiKey, voiceId, text: t("settingsExtra.ttsTestText"), model });
     playTtsAudio(base64);
   } catch (err) {
-    window.alert("测试失败: " + (err instanceof Error ? err.message : String(err)));
+    window.alert(t("settingsExtra.ttsTestFailed") + (err instanceof Error ? err.message : String(err)));
   } finally {
     btn.disabled = false;
-    btn.textContent = "🔊 测试发音";
+    btn.textContent = t("settingsExtra.ttsTestButton");
   }
 });
 
@@ -4371,28 +4370,28 @@ document.getElementById("tts-clone-start")?.addEventListener("click", async () =
   const cloneText = ttsEl("tts-clone-text").value.trim();
   const voiceId = ttsEl("tts-clone-voice-id").value.trim();
 
-  if (!apiKey) { window.alert("请先填写 MiniMax API Key"); return; }
-  if (!cloneFile) { window.alert("请选择配音文件"); return; }
-  if (!cloneText) { window.alert("请填写复刻文本"); return; }
-  if (!voiceId) { window.alert("请填写音色命名"); return; }
+  if (!apiKey) { window.alert(t("settingsExtra.ttsMinimaxApiKeyRequired")); return; }
+  if (!cloneFile) { window.alert(t("settingsExtra.ttsCloneFileRequired")); return; }
+  if (!cloneText) { window.alert(t("settingsExtra.ttsCloneTextRequired")); return; }
+  if (!voiceId) { window.alert(t("settingsExtra.ttsCloneVoiceIdRequired")); return; }
 
   const btn = document.getElementById("tts-clone-start") as HTMLButtonElement;
   btn.disabled = true;
-  setCloneStatus("正在上传配音文件…", "loading");
+  setCloneStatus(t("settingsExtra.ttsUploadingFile"), "loading");
 
   try {
     // 步骤1: 上传配音文件
     const cloneUpload = await window.tts.upload(apiKey, cloneFile, "voice_clone");
-    setCloneStatus("配音文件上传完成 (file_id: " + cloneUpload.file_id + ")，正在上传示例音频…", "loading");
+    setCloneStatus(t("settingsExtra.ttsUploadDone") + " (file_id: " + cloneUpload.file_id + ")" + t("settingsExtra.ttsUploadingPromptAudio"), "loading");
 
     // 步骤2: 上传示例音频（可选）
     let promptFileId: string | undefined;
     if (promptFile) {
       const promptUpload = await window.tts.upload(apiKey, promptFile, "prompt_audio");
       promptFileId = promptUpload.file_id;
-      setCloneStatus("示例音频上传完成，正在训练音色…", "loading");
+      setCloneStatus(t("settingsExtra.ttsPromptAudioDone") + t("settingsExtra.ttsTrainingVoice"), "loading");
     } else {
-      setCloneStatus("正在训练音色…", "loading");
+      setCloneStatus(t("settingsExtra.ttsTrainingVoice"), "loading");
     }
 
     // 步骤3: 音色克隆
@@ -4406,7 +4405,7 @@ document.getElementById("tts-clone-start")?.addEventListener("click", async () =
     ttsEl("tts-minimax-voice").value = result.voiceId;
     void saveTtsField("ttsMinimaxVoiceId", result.voiceId);
 
-    setCloneStatus("✅ 复刻成功！音色 ID「" + result.voiceId + "」已自动填入。", "ok");
+    setCloneStatus(t("settingsExtra.ttsCloneSuccess").replace("{id}", result.voiceId), "ok");
 
     // 如果有试听音频，播放
     if (result.audioDemo) {
