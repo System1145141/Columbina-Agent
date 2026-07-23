@@ -14,14 +14,14 @@
     <header class="tasks__titlebar">
       <div class="tasks__title">
         <span class="tasks__icon" aria-hidden="true">📋</span>
-        <span class="tasks__name">今日日程</span>
-        <span class="tasks__hint">展示中 · 只读</span>
+        <span class="tasks__name" data-i18n="tasksWindow.todaySchedule">今日日程</span>
+        <span class="tasks__hint" data-i18n="tasksWindow.displayReadonly">展示中 · 只读</span>
       </div>
       <div class="tasks__titlebar-actions">
-        <button type="button" class="tasks__winbtn" id="min-btn" aria-label="最小化" title="最小化">
+        <button type="button" class="tasks__winbtn" id="min-btn" aria-label="最小化" title="最小化" data-i18n-aria="window.minimize" data-i18n-title="window.minimize">
           <svg width="9" height="2" viewBox="0 0 9 2" aria-hidden="true"><rect width="9" height="2" rx="1" fill="currentColor"/></svg>
         </button>
-        <button type="button" class="tasks__winbtn tasks__winbtn--close" id="close-btn" aria-label="关闭" title="关闭">
+        <button type="button" class="tasks__winbtn tasks__winbtn--close" id="close-btn" aria-label="关闭" title="关闭" data-i18n-aria="window.close" data-i18n-title="window.close">
           <svg width="9" height="9" viewBox="0 0 9 9" aria-hidden="true">
             <line x1="2" y1="2" x2="7" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
             <line x1="7" y1="2" x2="2" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
@@ -31,18 +31,18 @@
     </header>
 
     <main class="tasks__body">
-      <section class="schedule-panel" aria-label="今日日程概览">
+      <section class="schedule-panel" aria-label="今日日程概览" data-i18n-aria="tasksWindow.scheduleOverview">
 
         <div class="schedule-count">
           <span class="schedule-count__value" id="schedule-count">0</span>
-          <span class="schedule-count__unit">个待办日程</span>
+          <span class="schedule-count__unit" data-i18n="tasksWindow.todoCountUnit">个待办日程</span>
         </div>
 
         <div class="schedule-date" id="schedule-date">📅 —</div>
 
         <div class="schedule-usage">
           <div class="usage-info">
-            <span class="usage-label">⚡ Token 用量</span>
+            <span class="usage-label">⚡ <span data-i18n="tasksWindow.tokenUsage">Token 用量</span></span>
             <span class="usage-number" id="usage-number">0</span>
           </div>
           <div class="usage-bar" aria-hidden="true">
@@ -51,24 +51,24 @@
         </div>
 
         <div class="mini-chart" aria-hidden="true">
-          <div class="mini-chart__avg" id="mini-chart__avg"><span>日均 0</span></div>
+          <div class="mini-chart__avg" id="mini-chart__avg"><span data-i18n="tasksWindow.dailyAvg">日均 0</span></div>
           <div class="mini-chart__bars" id="mini-chart__bars"></div>
         </div>
 
-        <div class="schedule-note" id="schedule-note">📊 本周 Token 消耗趋势</div>
+        <div class="schedule-note" id="schedule-note">📊 <span data-i18n="tasksWindow.weeklyTrend">本周 Token 消耗趋势</span></div>
 
-        <section class="task-section" aria-label="定时任务列表">
-          <div class="task-section__header">⏰ 定时任务</div>
+        <section class="task-section" aria-label="定时任务列表" data-i18n-aria="tasksWindow.taskSectionAria">
+          <div class="task-section__header">⏰ <span data-i18n="tasksWindow.scheduleSection">定时任务</span></div>
           <div class="task-list" id="task-list"></div>
         </section>
       </section>
       <footer class="schedule-footer">
-        <button type="button" class="schedule-settings-btn" id="settings-btn" aria-label="任务设置">
+        <button type="button" class="schedule-settings-btn" id="settings-btn" aria-label="任务设置" data-i18n-aria="tasksWindow.taskSettingsAria">
           <span class="schedule-settings-btn__icon" aria-hidden="true">⚙️</span>
-          <span>任务设置</span>
+          <span data-i18n="tasksWindow.taskSettings">任务设置</span>
         </button>
         <hr class="schedule-footer__divider" />
-        <div class="schedule-footer__version">Columbina v0.2.0</div>
+        <div class="schedule-footer__version" data-i18n="app.version"></div>
       </footer>
     </main>
   </div>

@@ -4,6 +4,9 @@
 // 用户说话时：柱状胶囊波形跳动 + 头像外圈音量波形
 // 昔涟说话时：电波环脉冲扩散 + 波形隐藏
 import "../ui/theme";
+import { t, setLang, setI18nVars, loadLangBundle, type Lang } from "../../shared/i18n";
+import { applyI18n } from "../../shared/i18n/dom";
+import { APP_VERSION } from "../../shared/version";
 
 // ── 粒子背景 ──
 const canvas = document.getElementById("particles") as HTMLCanvasElement | null;
@@ -135,7 +138,7 @@ function updateUI(): void {
   const mic = micWaveEl;
 
   if (currentState === "LISTENING") {
-    status.textContent = "正在聆听...";
+    status.textContent = t("call.listening");
     status.className = "call__status";
     ring.classList.remove("is-active");
     wave?.classList.add("is-active");
@@ -143,7 +146,7 @@ function updateUI(): void {
     waveformMode = "listening";
     micMode = "listening";
   } else if (currentState === "THINKING") {
-    status.textContent = "Columbina 思考中...";
+    status.textContent = t("call.thinking");
     status.className = "call__status call__status--thinking";
     ring.classList.remove("is-active");
     wave?.classList.add("is-active");
@@ -151,7 +154,7 @@ function updateUI(): void {
     waveformMode = "thinking";
     micMode = "thinking";
   } else if (currentState === "SPEAKING") {
-    status.textContent = "Columbina 说话中...";
+    status.textContent = t("call.speaking");
     status.className = "call__status";
     ring.classList.add("is-active");
     wave?.classList.remove("is-active");
@@ -159,7 +162,7 @@ function updateUI(): void {
     waveformMode = "idle";
     micMode = "idle";
   } else if (currentState === "ERROR") {
-    status.textContent = "连接出错，请检查网络";
+    status.textContent = t("call.connectionError");
     status.className = "call__status call__status--error";
     ring.classList.remove("is-active");
     wave?.classList.remove("is-active");
@@ -167,7 +170,7 @@ function updateUI(): void {
     waveformMode = "idle";
     micMode = "idle";
   } else if (currentState === "ENDED") {
-    status.textContent = "通话已结束";
+    status.textContent = t("call.callEnded");
     status.className = "call__status";
     ring.classList.remove("is-active");
     wave?.classList.remove("is-active");
@@ -175,7 +178,7 @@ function updateUI(): void {
     waveformMode = "idle";
     micMode = "idle";
   } else {
-    status.textContent = "正在连接...";
+    status.textContent = t("call.connecting");
     status.className = "call__status";
     ring.classList.remove("is-active");
     wave?.classList.remove("is-active");
@@ -333,7 +336,7 @@ async function startMicrophone(): Promise<void> {
     startVAD();
   } catch (err) {
     console.error("[Call] 麦克风启动失败:", err);
-    statusEl.textContent = "无法访问麦克风，请检查权限";
+    statusEl.textContent = t("call.micAccessDenied");
     statusEl.className = "call__status call__status--error";
   }
 }
@@ -496,7 +499,7 @@ window.call?.onAsrResult((data: { partial?: string; final?: string }) => {
 });
 
 window.call?.onTtsAudio((data: { base64: string }) => {
-  renderTranscript(currentUserText, "（语音回复中）");
+  renderTranscript(currentUserText, t("chatWindow.seedSpeakHint"));
   playTtsAudio(data.base64);
 });
 
@@ -520,6 +523,18 @@ closeBtn.addEventListener("click", hangup);
 
 // ── 初始化 ──
 async function init(): Promise<void> {
+  // i18n init
+  const lang = (window as any).__LANG__ as Lang | undefined ?? "zh-CN";
+  setI18nVars({ version: APP_VERSION });
+  await loadLangBundle(lang);
+  applyI18n(lang);
+
+  // 设置页切换语言后，主进程广播要求重载
+  window.columbinaI18n?.onReload((newLang) => {
+    setLang(newLang as Lang);
+    void loadLangBundle(newLang as Lang).then(() => applyI18n(newLang as Lang));
+  });
+
   // 读 ASR 设置（VAD 阈值 + 转写开关）
   try {
     const cfg = await window.tts?.loadSettings();

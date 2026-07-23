@@ -12,13 +12,13 @@
 <body>
   <main class="sticker-shell">
     <header class="sticker-titlebar">
-      <div class="sticker-title">表情包管理</div>
+      <div class="sticker-title" data-i18n="stickerManager.stickerManager">表情包管理</div>
       <div class="sticker-actions">
-        <button type="button" class="win-btn" id="min-btn" aria-label="最小化">一</button>
-        <button type="button" class="win-btn win-btn--close" id="close-btn" aria-label="关闭">✕</button>
+        <button type="button" class="win-btn" id="min-btn" aria-label="最小化" data-i18n-aria="window.minimize">一</button>
+        <button type="button" class="win-btn win-btn--close" id="close-btn" aria-label="关闭" data-i18n-aria="window.close">✕</button>
       </div>
     </header>
-    <section class="sticker-grid" id="sticker-grid" aria-label="表情包列表"></section>
+    <section class="sticker-grid" id="sticker-grid" aria-label="表情包列表" data-i18n-aria="stickerManager.stickerList"></section>
   </main>
   <script type="module" src="./main.ts"></script>
 </body>

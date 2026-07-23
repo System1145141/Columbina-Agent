@@ -1,6 +1,9 @@
 import "../ui/base.css";
 import "./sidebar.css";
 import "../ui/theme";
+import { t, setLang, setI18nVars, loadLangBundle, type Lang } from "../../shared/i18n";
+import { applyI18n } from "../../shared/i18n/dom";
+import { APP_VERSION } from "../../shared/version";
 
 interface ModelConfig {
   mode: "auto" | "manual";
@@ -101,9 +104,9 @@ const FEELING_EMOJI: Record<RuntimeFeeling, string> = {
 
 function applyRuntimeDisabled(): void {
   statusEmojiEl.textContent = "⚙️";
-  statusLabelEl.textContent = "请到设置里开启";
+  statusLabelEl.textContent = t("sidebar.statusHint");
   feelingEmojiEl.textContent = "⚙️";
-  feelingLabelEl.textContent = "请到设置里开启";
+  feelingLabelEl.textContent = t("sidebar.feelingHint");
 }
 
 function applyRuntimeState(state: RuntimeState | null): void {
@@ -112,8 +115,8 @@ function applyRuntimeState(state: RuntimeState | null): void {
     applyRuntimeDisabled();
     return;
   }
-  const status = state?.status ?? "陪伴中";
-  const feeling = state?.feeling ?? "平静";
+  const status = state?.status ?? t("sidebar.statusDefault");
+  const feeling = state?.feeling ?? t("sidebar.feelingDefault");
   statusEmojiEl.textContent = STATUS_EMOJI[status] ?? "💬";
   statusLabelEl.textContent = status;
   feelingEmojiEl.textContent = FEELING_EMOJI[feeling] ?? "🌿";
@@ -134,10 +137,10 @@ function applyModelConfig(config: ModelConfig | null): void {
   const connected = Boolean(config?.connected);
   const wasRuntimeSyncEnabled = runtimeSyncEnabled;
   runtimeSyncEnabled = config?.runtimeSync === "local" || config?.runtimeSync === "llm";
-  onlineStatusLabel.textContent = connected ? "在线" : "离线";
+  onlineStatusLabel.textContent = connected ? t("sidebar.online") : t("sidebar.offline");
   onlineBadge?.classList.toggle("is-offline", !connected);
   // "正在喂养"显示优先级：用户昵称 > 厂商短名 > model id > 兜底
-  feedingModelEl.textContent = config?.displayName || config?.shortName || config?.model || "未选择模型";
+  feedingModelEl.textContent = config?.displayName || config?.shortName || config?.model || t("sidebar.noModel");
   if (!runtimeSyncEnabled) applyRuntimeDisabled();
   else if (!wasRuntimeSyncEnabled) applyRuntimeState(latestRuntimeState);
 }
@@ -156,8 +159,8 @@ pinBtn.addEventListener("click", async () => {
   const pinned = await window.sidebar?.toggleAlwaysOnTop();
   const isPinned = Boolean(pinned);
   pinBtn.classList.toggle("is-active", isPinned);
-  pinBtn.setAttribute("aria-label", isPinned ? "取消置顶" : "置顶");
-  pinBtn.setAttribute("title", isPinned ? "取消置顶" : "置顶");
+  pinBtn.setAttribute("aria-label", isPinned ? t("sidebar.unpin") : t("sidebar.pin"));
+  pinBtn.setAttribute("title", isPinned ? t("sidebar.unpin") : t("sidebar.pin"));
 });
 
 minBtn.addEventListener("click", () => {
@@ -203,6 +206,20 @@ openChatBtn.addEventListener("click", async () => {
   } catch (err) {
     console.warn("[sidebar] 打开聊天失败:", err);
   }
+});
+
+// i18n init
+(async () => {
+  const lang = (window as any).__LANG__ as Lang | undefined ?? "zh-CN";
+  setI18nVars({ version: APP_VERSION });
+  await loadLangBundle(lang);
+  applyI18n(lang);
+})();
+
+// 设置页切换语言后，主进程广播要求重载
+window.columbinaI18n?.onReload((lang) => {
+  setLang(lang as Lang);
+  void loadLangBundle(lang as Lang).then(() => applyI18n(lang as Lang));
 });
 
 void initModelConfig();

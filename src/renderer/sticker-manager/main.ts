@@ -2,6 +2,9 @@ import "../ui/base.css";
 import "./style.css";
 import "../ui/theme";
 import { resolveAsset } from "../../shared/renderer-base";
+import { setLang, setI18nVars, loadLangBundle, type Lang } from "../../shared/i18n";
+import { applyI18n } from "../../shared/i18n/dom";
+import { APP_VERSION } from "../../shared/version";
 
 type StickerItem = {
   id: string;
@@ -21,6 +24,9 @@ interface StickerManagerApi {
 declare global {
   interface Window {
     stickerManager?: StickerManagerApi;
+    columbinaI18n?: {
+      onReload: (callback: (lang: string) => void) => () => void;
+    };
   }
 }
 
@@ -64,6 +70,19 @@ function render(items: StickerItem[]): void {
 }
 
 async function init(): Promise<void> {
+  // i18n init
+  const lang = (window as any).__LANG__ as Lang | undefined ?? "zh-CN";
+  setI18nVars({ version: APP_VERSION });
+  setLang(lang);
+  await loadLangBundle(lang);
+  applyI18n(lang);
+
+  // 设置页切换语言后，主进程广播要求重载
+  window.columbinaI18n?.onReload((newLang) => {
+    setLang(newLang as Lang);
+    void loadLangBundle(newLang as Lang).then(() => applyI18n(newLang as Lang));
+  });
+
   const items = await window.stickerManager?.getConfig();
   render(items ?? []);
 }

@@ -1,5 +1,8 @@
 import "../ui/base.css";
 import "./chat.css";
+import { t, setLang, setI18nVars, loadLangBundle, type Lang } from "../../shared/i18n";
+import { applyI18n } from "../../shared/i18n/dom";
+import { APP_VERSION } from "../../shared/version";
 import "../ui/theme";
 import {
   CHAT_DEFAULT_IDENTITY_LABEL,
@@ -321,7 +324,7 @@ function populateModelSelect(select: HTMLSelectElement | null, models: ModelEntr
   // 占位选项
   const placeholder = document.createElement("option");
   placeholder.value = "";
-  placeholder.textContent = "选择模型…";
+  placeholder.textContent = t("chatWindow.selectModel");
   select.appendChild(placeholder);
   for (const m of models) {
     const opt = document.createElement("option");
@@ -349,8 +352,8 @@ function switchRole(role: AgentRole): void {
   // 更新空态文本
   if (emptyTextEl) {
     emptyTextEl.textContent = role === "columbina"
-      ? "哥伦比娅期待与你聊天哦 ✨"
-      : "桑多涅期待与你聊天哦 ✨";
+      ? t("chatWindow.emptyTextCol")
+      : t("chatWindow.emptyTextSan");
   }
   // 重建快捷预设（胶囊文本随角色变化）
   buildQuickPresets();
@@ -670,9 +673,9 @@ function renderTodoPanel(state: TodoState | null): void {
   const checkIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" style="width:0.75rem;height:0.75rem"><path fill-rule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clip-rule="evenodd"/></svg>`;
 
   const priorityBadge = (p: string): string => {
-    if (p === "high") return `<span class="todo-badge todo-badge--high">高优先级</span>`;
-    if (p === "medium") return `<span class="todo-badge todo-badge--medium">中优先级</span>`;
-    if (p === "low") return `<span class="todo-badge todo-badge--low">低优先级</span>`;
+    if (p === "high") return `<span class="todo-badge todo-badge--high">${t("chatWindow.todoHighPriority")}</span>`;
+    if (p === "medium") return `<span class="todo-badge todo-badge--medium">${t("chatWindow.todoMidPriority")}</span>`;
+    if (p === "low") return `<span class="todo-badge todo-badge--low">${t("chatWindow.todoLowPriority")}</span>`;
     return "";
   };
 
@@ -688,8 +691,8 @@ function renderTodoPanel(state: TodoState | null): void {
   panel.innerHTML = `
     <div class="todo-panel__header">
       <div>
-        <div class="todo-panel__title">📋 任务进度</div>
-        <div class="todo-panel__count">${done}/${total} 已完成</div>
+        <div class="todo-panel__title">${t("chatWindow.todoProgress")}</div>
+        <div class="todo-panel__count">${t("chatWindow.todoDoneCount").replace("{done}", String(done)).replace("{total}", String(total))}</div>
       </div>
       <span class="todo-panel__toggle">${wasCollapsed ? "▸" : "▾"}</span>
     </div>
@@ -789,13 +792,13 @@ function buildChoiceCardEl(data: {
   const customInput = document.createElement("input");
   customInput.type = "text";
   customInput.className = "choice-card__custom-input";
-  customInput.placeholder = "或输入自定义要求...";
+  customInput.placeholder = t("chatWindow.customPlaceholder");
   customWrap.appendChild(customInput);
 
   const customBtn = document.createElement("button");
   customBtn.type = "button";
   customBtn.className = "choice-card__custom-btn";
-  customBtn.textContent = "确认";
+  customBtn.textContent = t("chatWindow.confirm");
   customBtn.addEventListener("click", () => {
     const val = customInput.value.trim();
     if (!val) return;
@@ -882,11 +885,11 @@ function buildApprovalCardEl(req: {
   const denyBtn = document.createElement("button");
   denyBtn.type = "button";
   denyBtn.className = "approval-card__btn approval-card__btn--deny";
-  denyBtn.textContent = "拒绝";
+  denyBtn.textContent = t("chatWindow.permissionDeny");
   const allowBtn = document.createElement("button");
   allowBtn.type = "button";
   allowBtn.className = "approval-card__btn approval-card__btn--allow";
-  allowBtn.textContent = "允许";
+  allowBtn.textContent = t("chatWindow.permissionAllow");
   actions.appendChild(denyBtn);
   actions.appendChild(allowBtn);
   card.appendChild(actions);
@@ -894,7 +897,7 @@ function buildApprovalCardEl(req: {
   // 提示行（60 秒超时）
   const note = document.createElement("div");
   note.className = "approval-card__note";
-  note.textContent = "60 秒未操作自动拒绝";
+  note.textContent = t("chatWindow.permissionTimeout");
   card.appendChild(note);
 
   // 倒计时更新（每秒刷新）
@@ -902,7 +905,7 @@ function buildApprovalCardEl(req: {
   const tick = setInterval(() => {
     remaining -= 1;
     if (remaining <= 0) {
-      note.textContent = "已超时，自动拒绝";
+      note.textContent = t("chatWindow.permissionExpired");
       clearInterval(tick);
       return;
     }
@@ -915,7 +918,7 @@ function buildApprovalCardEl(req: {
     card.classList.add(allowed ? "approval-card--allowed" : "approval-card--denied");
     denyBtn.disabled = true;
     allowBtn.disabled = true;
-    note.textContent = allowed ? "已允许" : "已拒绝";
+    note.textContent = allowed ? t("chatWindow.permissionAllowedAction") : t("chatWindow.permissionDeniedAction");
     void window.settings?.resolvePermissionApproval?.(req.id, allowed);
   };
 
@@ -931,7 +934,10 @@ function buildWeatherCardEl(data: Record<string, unknown>): HTMLElement {
   card.className = "weather-card";
 
   const now = new Date();
-  const dateStr = `${now.getMonth() + 1}月${now.getDate()}日 周${"日一二三四五六"[now.getDay()]}`;
+  const m = now.getMonth() + 1;
+  const d = now.getDate();
+  const weekday = "日一二三四五六"[now.getDay()];
+  const dateStr = t("chatWindow.weatherDateFormat").replace("{month}", String(m)).replace("{day}", String(d)).replace("{weekday}", weekday);
   const timeStr = formatTime(Date.now());
 
   const temp = Number(data.temp ?? 0);
@@ -960,21 +966,21 @@ function buildWeatherCardEl(data: Record<string, unknown>): HTMLElement {
         ${data.hi != null ? `<div class="w-hilo"><span class="w-hi">↑${data.hi}°</span><span class="w-sep">|</span><span class="w-lo">↓${data.lo}°</span></div>` : ""}
       </div>
     </div>
-    <div class="w-feels">体感 ${feelsLike}°C</div>
+    <div class="w-feels">${t("chatWindow.weatherFeelsLike")} ${feelsLike}°C</div>
     <div class="w-quick">
-      <div class="w-qitem"><div class="w-qicon">💧</div><div class="w-qlabel">湿度</div><div class="w-qvalue">${humidity}%</div></div>
-      <div class="w-qitem"><div class="w-qicon">💨</div><div class="w-qlabel">风力</div><div class="w-qvalue">${windScale}</div></div>
-      <div class="w-qitem"><div class="w-qicon">🌧️</div><div class="w-qlabel">降水</div><div class="w-qvalue">${precip}mm</div></div>
-      <div class="w-qitem"><div class="w-qicon">📊</div><div class="w-qlabel">气压</div><div class="w-qvalue">${pressure || "—"}</div></div>
+      <div class="w-qitem"><div class="w-qicon">💧</div><div class="w-qlabel">${t("chatWindow.weatherHumidity")}</div><div class="w-qvalue">${humidity}%</div></div>
+      <div class="w-qitem"><div class="w-qicon">💨</div><div class="w-qlabel">${t("chatWindow.weatherWind")}</div><div class="w-qvalue">${windScale}</div></div>
+      <div class="w-qitem"><div class="w-qicon">🌧️</div><div class="w-qlabel">${t("chatWindow.weatherPrecip")}</div><div class="w-qvalue">${precip}mm</div></div>
+      <div class="w-qitem"><div class="w-qicon">📊</div><div class="w-qlabel">${t("chatWindow.weatherPressure")}</div><div class="w-qvalue">${pressure || "—"}</div></div>
     </div>
-    <button class="w-expand" type="button">查看更多 <span class="w-arrow">▼</span></button>
+    <button class="w-expand" type="button">${t("chatWindow.weatherViewMore")} <span class="w-arrow">▼</span></button>
     <div class="w-details">
       <div class="w-detail-grid">
         <div class="w-ditem"><span class="w-dicon">🌡️</span><div><div class="w-dlabel">体感温度</div><div class="w-dvalue">${feelsLike}°C</div></div></div>
         <div class="w-ditem"><span class="w-dicon">💨</span><div><div class="w-dlabel">风向风力</div><div class="w-dvalue">${windDir} ${windScale}</div></div></div>
-        <div class="w-ditem"><span class="w-dicon">🔆</span><div><div class="w-dlabel">紫外线</div><div class="w-dvalue">${uv}</div></div></div>
-        <div class="w-ditem"><span class="w-dicon">👁️</span><div><div class="w-dlabel">能见度</div><div class="w-dvalue">${visibility}</div></div></div>
-        ${aqi != null ? `<div class="w-ditem"><span class="w-dicon">🌿</span><div><div class="w-dlabel">空气质量</div><div class="w-dvalue">${aqi} ${aqiText} <span class="w-kaomoji">${kaomoji}</span></div></div></div>` : ""}
+        <div class="w-ditem"><span class="w-dicon">🔆</span><div><div class="w-dlabel">${t("chatWindow.weatherUV")}</div><div class="w-dvalue">${uv}</div></div></div>
+        <div class="w-ditem"><span class="w-dicon">👁️</span><div><div class="w-dlabel">${t("chatWindow.weatherVisibility")}</div><div class="w-dvalue">${visibility}</div></div></div>
+        ${aqi != null ? `<div class="w-ditem"><span class="w-dicon">🌿</span><div><div class="w-dlabel">${t("chatWindow.weatherAirQuality")}</div><div class="w-dvalue">${aqi} ${aqiText} <span class="w-kaomoji">${kaomoji}</span></div></div></div>` : ""}
       </div>
     </div>
     <div class="w-source"><span>${icon} ${String(data.source ?? "")}</span><span>${timeStr} 更新</span></div>
@@ -1076,7 +1082,7 @@ function render(): void {
         const sticker = document.createElement("img");
         sticker.className = "msg__sticker";
         sticker.src = stickerSrc;
-        sticker.alt = m.role === "user" ? "用户表情" : "Columbina 表情";
+        sticker.alt = m.role === "user" ? t("chatWindow.userSticker") : t("chatWindow.columbinaSticker");
         sticker.draggable = false;
         // <img> 高度异步加载，render() 末尾的滚动会在图片撑开前就执行，
         // 导致 sticker 底部被输入框挡住。加载完成后再补一次滚到底。
@@ -1099,8 +1105,8 @@ function render(): void {
       const speakBtn = document.createElement("button");
       speakBtn.type = "button";
       speakBtn.className = "msg__speak";
-      speakBtn.title = "朗读";
-      speakBtn.setAttribute("aria-label", "朗读这条消息");
+      speakBtn.title = t("chatWindow.speakButtonTitle");
+      speakBtn.setAttribute("aria-label", t("chatWindow.speakButtonAria"));
       // 用 SVG 而不是 emoji，颜色随主题走，播放时切到波形版
       speakBtn.innerHTML = SPEAK_ICON_IDLE;
       // 点击逻辑：正在播放则停止，否则开始朗读（避免重叠）
@@ -1124,8 +1130,8 @@ function render(): void {
       const copyBtn = document.createElement("button");
       copyBtn.type = "button";
       copyBtn.className = "msg__copy";
-      copyBtn.title = "复制";
-      copyBtn.setAttribute("aria-label", "复制这条消息");
+      copyBtn.title = t("chatWindow.copyButtonTitle");
+      copyBtn.setAttribute("aria-label", t("chatWindow.copyButtonAria"));
       copyBtn.innerHTML = COPY_ICON_IDLE;
       copyBtn.addEventListener("click", () => {
         const text = m.role === "user"
@@ -1139,7 +1145,7 @@ function render(): void {
           copyBtn.innerHTML = COPY_ICON_DONE;
           const label = document.createElement("span");
           label.className = "msg__copy-label";
-          label.textContent = "已复制";
+          label.textContent = t("chatWindow.copied");
           copyBtn.appendChild(label);
           window.setTimeout(() => {
             copyBtn.classList.remove("is-copied");
@@ -1186,7 +1192,7 @@ function installSchedulerEventListener(): void {
     const msg = messages.find(m => m.id === state.msgId);
     if (!msg) return;
     msg.thinking = false;
-    msg.content = state.content || state.toolLines.join("\n") || "定时任务运行中…";
+    msg.content = state.content || state.toolLines.join("\n") || t("chatWindow.scheduledTaskRunning");
     render();
   };
 
@@ -1198,7 +1204,7 @@ function installSchedulerEventListener(): void {
       messages.push({
         id: `scheduler-system-${runKey}`,
         role: "model",
-        content: `⏰ 定时任务「${value?.title ?? "未命名任务"}」已触发`,
+        content: t("chatWindow.scheduledTaskTriggered").replace("{title}", value?.title || t("chatWindow.unnamedTask")),
         at: Date.now(),
       });
       const msgId = `scheduler-model-${runKey}`;
@@ -1218,14 +1224,14 @@ function installSchedulerEventListener(): void {
     if (event.type === "TOOL_CALL_START") {
       const isKuuhenki = event.toolCallName === "召唤月灵";
       const label = isKuuhenki ? (currentRole === "sandrone" ? "法洁欧" : "月灵") : "";
-      state.toolLines.push(`${isKuuhenki ? "🌙" : "🔧"} ${isKuuhenki ? `正在召唤${label}` : "调用中"}：${event.toolCallName ?? "工具"}`);
+      state.toolLines.push(`${isKuuhenki ? "🌙" : "🔧"} ${isKuuhenki ? (currentRole === "sandrone" ? t("chatWindow.summoningFagieou") : t("chatWindow.summoningKuuhenki")) : t("chatWindow.calling") + (event.toolCallName ?? "工具")}`);
       renderState(state);
     } else if (event.type === "TOOL_CALL_RESULT") {
       const preview = (event.content ?? "").slice(0, 240);
-      state.toolLines.push(`✅ 工具结果：${preview || "完成"}`);
+      state.toolLines.push(t("chatWindow.toolResult").replace("{preview}", preview || ""));
       renderState(state);
     } else if (event.type === "TOOL_CALL_END") {
-      state.toolLines.push("✅ 工具调用完成");
+      state.toolLines.push(t("chatWindow.toolCallDone"));
       renderState(state);
     } else if (event.type === "TEXT_MESSAGE_START") {
       msg.thinking = false;
@@ -1240,7 +1246,7 @@ function installSchedulerEventListener(): void {
       streams.delete(runKey);
     } else if (event.type === "RUN_ERROR") {
       msg.thinking = false;
-      msg.content = "定时任务执行失败：" + (event.error ?? event.content ?? "未知错误");
+      msg.content = t("chatWindow.taskFailed") + (event.error ?? event.content ?? "");
       render();
       void saveSession();
       streams.delete(runKey);
@@ -2036,7 +2042,7 @@ function renderStickerPicker(): void {
   if (enabledStickers.length === 0) {
     const empty = document.createElement("div");
     empty.className = "sticker-picker__empty";
-    empty.textContent = "没有可用的表情包";
+    empty.textContent = t("chatWindow.noStickers");
     stickerPickerGrid.appendChild(empty);
     return;
   }
@@ -2138,7 +2144,7 @@ async function getModelReply(): Promise<ChatReplyPayload> {
   const payload = await withTimeout(
     window.chat.sendMessage(buildModelMessages(), getCurrentStyle()),
     FRONTEND_REPLY_TIMEOUT_MS,
-    "模型响应超时，请稍后重试。",
+    t("chatWindow.modelTimeout"),
   );
   return normalizeChatReplyPayload(payload);
 }
@@ -2160,13 +2166,13 @@ interface QuickPreset {
 
 /** 根据当前角色生成快捷预设。 */
 function getQuickPresets(): QuickPreset[] {
-  const chatLabel = currentRole === "columbina" ? "和哥伦比娅聊天" : "和桑多涅聊天";
+  const chatLabel = currentRole === "columbina" ? t("chatWindow.quickChatCol") : t("chatWindow.quickChatSan");
   return [
     { id: "chat",     label: chatLabel, icon: "💬",  mode: "chat" },
-    { id: "schedule", label: "设置定时任务", icon: "⏰", mode: "fill", prompt: "帮我设置一个定时任务：" },
-    { id: "weather",  label: "查看天气",   icon: "🌤️", mode: "fill", prompt: "帮我查一下今天的天气" },
-    { id: "document", label: "生成文档",   icon: "📄", mode: "fill", prompt: "帮我生成一份文档：" },
-    { id: "email",    label: "发送邮件",   icon: "✉️", mode: "fill", prompt: "帮我发一封邮件：" },
+    { id: "schedule", label: t("chatWindow.quickSchedule"), icon: "⏰", mode: "fill", prompt: "帮我设置一个定时任务：" },
+    { id: "weather",  label: t("chatWindow.quickWeather"),   icon: "🌤️", mode: "fill", prompt: "帮我查一下今天的天气" },
+    { id: "document", label: t("chatWindow.quickDoc"),   icon: "📄", mode: "fill", prompt: "帮我生成一份文档：" },
+    { id: "email",    label: t("chatWindow.quickEmail"),   icon: "✉️", mode: "fill", prompt: "帮我发一封邮件：" },
   ];
 }
 
@@ -2296,8 +2302,7 @@ async function triggerAgentGreeting(): Promise<void> {
               icon.textContent = isKuuhenki ? "🌙" : "🔧";
               const text = document.createElement("span");
               text.className = "msg__tool-text";
-              const kuuhenkiLabel = currentRole === "sandrone" ? "法洁欧" : "月灵";
-              text.textContent = isKuuhenki ? `正在召唤${kuuhenkiLabel}…` : "调用中：" + (event.toolCallName ?? "工具");
+              text.textContent = isKuuhenki ? (currentRole === "sandrone" ? t("chatWindow.summoningFagieou") : t("chatWindow.summoningKuuhenki")) : t("chatWindow.calling") + (event.toolCallName ?? "工具");
               tip.appendChild(icon);
               tip.appendChild(text);
               bubble.appendChild(tip);
@@ -2311,9 +2316,9 @@ async function triggerAgentGreeting(): Promise<void> {
               if (tip) {
                 const textEl = tip.querySelector(".msg__tool-text");
                 if (textEl && tip.classList.contains("msg__tool-tip--kuuhenki")) {
-                  textEl.textContent = currentRole === "sandrone" ? "法洁欧任务完成" : "月灵任务完成";
+                  textEl.textContent = currentRole === "sandrone" ? t("chatWindow.fagieouDone") : t("chatWindow.kuuhenkiDone");
                 } else if (textEl) {
-                  textEl.textContent = "已完成";
+                  textEl.textContent = t("chatWindow.done");
                 }
                 tip.classList.add("msg__tool-tip--done");
               }
@@ -2374,7 +2379,7 @@ async function triggerAgentGreeting(): Promise<void> {
       }
     });
 
-    const agentName = currentRole === "columbina" ? "和哥伦比娅聊天" : "和桑多涅聊天";
+    const agentName = currentRole === "columbina" ? t("chatWindow.quickChatCol") : t("chatWindow.quickChatSan");
     // 种子消息：不推入 messages 数组、不渲染，只作为 agent 输入触发 agent 主动开口
     const ack = await window.agui!.run({
       messages: [{ role: "user", content: `[internal] 用户点击了「${agentName}」，请你主动开口聊几句，像朋友打招呼一样自然开场。` }],
@@ -2418,12 +2423,12 @@ async function triggerAgentGreeting(): Promise<void> {
     const msg = messages.find(m => m.id === streamMsgId);
     if (msg) {
       msg.thinking = false;
-      msg.content = "连接模型失败：" + message;
+      msg.content = t("chatWindow.connectModelFailed") + message;
     } else {
       messages.push({
         id: String(Date.now() + 2),
         role: "model",
-        content: "连接模型失败：" + message,
+        content: t("chatWindow.connectModelFailed") + message,
         at: Date.now(),
       });
     }
@@ -2466,16 +2471,16 @@ async function send(): Promise<void> {
               budgetUsed += f.text.length;
             }
           }
-          hintsByKind.push(`📝 ${f.name}（附件，内容已注入本轮上下文）`);
+          hintsByKind.push(`📝 ${f.name}${t("chatWindow.attachment")}`);
           break;
         case "indexed":
-          hintsByKind.push(`📚 ${f.name}（已索引 ${f.chunks ?? 0} 段，可用 imported_docs 工具检索）`);
+          hintsByKind.push(`📚 ${f.name}${t("chatWindow.indexedChunks").replace("{n}", String(f.chunks ?? 0))}，可用 imported_docs 工具检索`);
           break;
         case "empty":
-          hintsByKind.push(`📄 ${f.name}（为空）`);
+          hintsByKind.push(`📄 ${f.name}${t("chatWindow.emptyFile")}`);
           break;
         case "unsupported":
-          hintsByKind.push(`⚠️ ${f.name}（暂不支持：${f.reason || ""}）`);
+          hintsByKind.push(`⚠️ ${f.name}${t("chatWindow.unsupportedFile")}${f.reason ? "：" + f.reason : ""}`);
           break;
       }
     }
@@ -2483,9 +2488,9 @@ async function send(): Promise<void> {
       hintsByKind.push(`⚠️ ${budgetExceeded.join("、")} 已省略部分内容（超一轮预算）`);
     }
     const fileHint = hintsByKind.length > 0
-      ? "\n\n【本轮文件】\n" + hintsByKind.join("\n")
+      ? "\n\n" + t("chatWindow.fileSection") + "\n" + hintsByKind.join("\n")
       : "";
-    const fullUserText = (text || (attachedFiles.length > 0 ? "请帮我看看这些文件" : "")) + fileHint;
+    const fullUserText = (text || (attachedFiles.length > 0 ? t("chatWindow.fileHelpPrompt") : "")) + fileHint;
 
   sending = true;
   sendBtn.disabled = true;
@@ -2593,8 +2598,7 @@ async function send(): Promise<void> {
               icon.textContent = isKuuhenki ? "🌙" : "🔧";
               const text = document.createElement("span");
               text.className = "msg__tool-text";
-              const kuuhenkiLabel = currentRole === "sandrone" ? "法洁欧" : "月灵";
-              text.textContent = isKuuhenki ? `正在召唤${kuuhenkiLabel}…` : "调用中：" + (event.toolCallName ?? "工具");
+              text.textContent = isKuuhenki ? (currentRole === "sandrone" ? t("chatWindow.summoningFagieou") : t("chatWindow.summoningKuuhenki")) : t("chatWindow.calling") + (event.toolCallName ?? "工具");
               tip.appendChild(icon);
               tip.appendChild(text);
               bubble.appendChild(tip);
@@ -2609,9 +2613,9 @@ async function send(): Promise<void> {
               if (tip) {
                 const textEl = tip.querySelector(".msg__tool-text");
                 if (textEl && tip.classList.contains("msg__tool-tip--kuuhenki")) {
-                  textEl.textContent = currentRole === "sandrone" ? "法洁欧任务完成" : "月灵任务完成";
+                  textEl.textContent = currentRole === "sandrone" ? t("chatWindow.fagieouDone") : t("chatWindow.kuuhenkiDone");
                 } else if (textEl) {
-                  textEl.textContent = "已完成";
+                  textEl.textContent = t("chatWindow.done");
                 }
                 tip.classList.add("msg__tool-tip--done");
               }
@@ -2731,12 +2735,12 @@ async function send(): Promise<void> {
     const msg = messages.find(m => m.id === streamMsgId);
     if (msg) {
       msg.thinking = false;
-      msg.content = "连接模型失败：" + message;
+      msg.content = t("chatWindow.connectModelFailed") + message;
     } else {
       messages.push({
         id: String(Date.now() + 2),
         role: "model",
-        content: "连接模型失败：" + message,
+        content: t("chatWindow.connectModelFailed") + message,
         at: Date.now(),
       });
     }
@@ -2751,7 +2755,7 @@ async function send(): Promise<void> {
 function clearChat(): void {
   if (sending) return;
   if (messages.length === 0) return;
-  const ok = window.confirm("清空当前对话？");
+  const ok = window.confirm(t("chatWindow.confirmClearChat"));
   if (!ok) return;
   messages.length = 0;
   void saveSession();
@@ -2799,7 +2803,7 @@ async function ingestDroppedFiles(files: File[]): Promise<void> {
     if (results && results.length > 0) attachedFiles = [...attachedFiles, ...results];
     updateFileTags();
   } catch (err: unknown) {
-    window.alert("文件摄入失败：" + ((err as Error)?.message || String(err)));
+    window.alert(t("chatWindow.fileIngestFailed") + ((err as Error)?.message || String(err)));
   } finally {
     attachBtn!.disabled = false;
     fileInput!.value = "";
@@ -2826,10 +2830,10 @@ async function ingestDroppedFiles(files: File[]): Promise<void> {
 	    tag.className = "chat__file-tag";
 	    const label = document.createElement("span");
 	    const icon = kindLabel[f.kind] || "📄";
-	    const detail = f.kind === "text" ? "（附件）" :
-	      f.kind === "indexed" ? `（${f.chunks ?? 0} 段）` :
-	      f.kind === "empty" ? "（空）" :
-	      "（暂不支持）";
+	    const detail = f.kind === "text" ? t("chatWindow.fileDetailAttachment") :
+	      f.kind === "indexed" ? t("chatWindow.fileDetailChunks").replace("{n}", String(f.chunks ?? 0)) :
+	      f.kind === "empty" ? t("chatWindow.fileDetailEmpty") :
+	      t("chatWindow.fileDetailUnsupported");
 	    label.textContent = `${icon} ${f.name} ${detail}`;
 	    const btn = document.createElement("button");
 	    btn.type = "button";
@@ -3055,16 +3059,24 @@ if (particlesCtx) {
 }
 
 
-// 启动：迁移老 localStorage → 选会话 → render
-// 先把用户贴纸目录拉到内存，再 bootstrap 渲染历史消息——否则首屏里
-// 纯贴纸消息（气泡已隐藏）会因 enabledStickers 还没加载而渲染成空白。
-void (async () => {
+// i18n 初始化
+(async () => {
+  const lang = (window as any).__LANG__ as Lang | undefined ?? "zh-CN";
+  setI18nVars({ version: APP_VERSION });
+  await loadLangBundle(lang);
+  applyI18n(lang);
+})().then(async () => {
+  // 设置页切换语言后，主进程广播要求重载
+  window.columbinaI18n?.onReload((lang) => {
+    setLang(lang as Lang);
+    void loadLangBundle(lang as Lang).then(() => applyI18n(lang as Lang));
+  });
   await loadEnabledStickers();
   await bootstrap();
   buildQuickPresets();
   installSchedulerEventListener();
   void initModelConfig();
-})();
+});
 
 // main → renderer：权限审批请求（per-action 档位下工具调用前）
 // 插入一张审批卡片到聊天流；用户点同意/拒绝后回传给主进程。

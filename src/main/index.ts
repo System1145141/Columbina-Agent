@@ -381,7 +381,7 @@ interface GeneralSettings {
   sidebarVisible: boolean;
   tasksVisible: boolean;
   launchAtLogin: boolean;
-  language: "zh-CN";
+  language: "zh-CN" | "en" | "ja" | "ko";
   uiTheme: "classic" | "polished-pink" | "pearl-white" | "deep-blue" | "light-blue";
   // TTS 配置
   ttsEngine: "off" | "minimax" | "gptsovits" | "custom-cloud" | "mimo";
@@ -925,7 +925,7 @@ function normalizeGeneralSettings(input: Partial<GeneralSettings> | null | undef
     sidebarVisible: windowVisibility.sidebarVisible,
     tasksVisible: windowVisibility.tasksVisible,
     launchAtLogin: Boolean(input?.launchAtLogin),
-    language: "zh-CN",
+    language: (["zh-CN", "en", "ja", "ko"].includes(input?.language as string) ? input?.language : "zh-CN") as GeneralSettings["language"],
     uiTheme: input?.uiTheme === "pearl-white" ? "pearl-white" : (input?.uiTheme === "polished-pink" || input?.uiTheme === "light-blue") ? "polished-pink" : (input?.uiTheme === "deep-blue" || input?.uiTheme === "classic") ? "classic" : "classic",
     // TTS 配置
     ttsEngine: (["off", "minimax", "gptsovits", "custom-cloud", "mimo"].includes(input?.ttsEngine as string) ? input?.ttsEngine : "off") as GeneralSettings["ttsEngine"],
@@ -1000,6 +1000,11 @@ function loadGeneralSettings(): GeneralSettings {
     console.error("[Columbina] load general settings failed:", err);
     return DEFAULT_GENERAL_SETTINGS;
   }
+}
+
+/** 供 renderer 窗口 additionalArguments 使用，确保各窗口初始语言与设置一致。 */
+function getRendererLangArgs(): string[] {
+  return [`--lang=${loadGeneralSettings().language}`];
 }
 
 function applyGeneralSettings(settings: GeneralSettings): void {
@@ -1998,6 +2003,7 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      additionalArguments: getRendererLangArgs(),
     },
   });
 
@@ -2221,6 +2227,7 @@ function createChatWindow(sessionId?: string): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      additionalArguments: getRendererLangArgs(),
     },
   });
 
@@ -2281,6 +2288,7 @@ function createSidebarWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      additionalArguments: getRendererLangArgs(),
     },
   });
 
@@ -2328,6 +2336,7 @@ function createTasksWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      additionalArguments: getRendererLangArgs(),
     },
   });
 
@@ -2383,6 +2392,7 @@ function createSettingsWindow(section?: string): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      additionalArguments: getRendererLangArgs(),
     },
   });
 
@@ -2439,6 +2449,7 @@ async function createStickerManagerWindow(): Promise<{ ok: boolean; error?: stri
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      additionalArguments: getRendererLangArgs(),
     },
   });
 
@@ -2509,6 +2520,7 @@ function createCallWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      additionalArguments: getRendererLangArgs(),
     },
   });
 
@@ -2753,6 +2765,46 @@ ipcMain.handle(IPC.UI_THEME_GET, () => {
 
 ipcMain.handle(IPC.SETTINGS_SAVE_GENERAL, (_event, settings: Partial<GeneralSettings>) => {
   return saveGeneralSettings(settings);
+});
+
+// i18n: 按语言返回翻译 JSON 包
+ipcMain.handle(IPC.I18N_GET_BUNDLE, async (_event, lang: string) => {
+  try {
+    // 生产模式：dist/shared/i18n/{lang}.json
+    const distPath = path.join(app.getAppPath(), "dist", "shared", "i18n", `${lang}.json`);
+    if (fs.existsSync(distPath)) {
+      return JSON.parse(fs.readFileSync(distPath, "utf8"));
+    }
+    // 开发模式：src/shared/i18n/{lang}.json
+    const srcPath = path.join(app.getAppPath(), "src", "shared", "i18n", `${lang}.json`);
+    if (fs.existsSync(srcPath)) {
+      return JSON.parse(fs.readFileSync(srcPath, "utf8"));
+    }
+    // 回退到中文
+    const fallbackDist = path.join(app.getAppPath(), "dist", "shared", "i18n", "zh-CN.json");
+    if (fs.existsSync(fallbackDist)) {
+      return JSON.parse(fs.readFileSync(fallbackDist, "utf8"));
+    }
+    const fallbackSrc = path.join(app.getAppPath(), "src", "shared", "i18n", "zh-CN.json");
+    if (fs.existsSync(fallbackSrc)) {
+      return JSON.parse(fs.readFileSync(fallbackSrc, "utf8"));
+    }
+    return {};
+  } catch {
+    return {};
+  }
+});
+
+// 设置页切换语言后，广播给所有 renderer 窗口要求重载语言包
+ipcMain.on(IPC.I18N_LANGUAGE_CHANGED, (_event, lang: string) => {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue;
+    try {
+      win.webContents.send(IPC.I18N_RELOAD, lang);
+    } catch {
+      // ignore
+    }
+  }
 });
 
 ipcMain.on(IPC.SETTINGS_OPEN_SIDEBAR, () => {

@@ -14,5 +14,9 @@ declare global {
       getCursorPosition: () => Promise<{ x: number; y: number } | null>;
       onPetZoom: (callback: (zoom: number) => void) => () => void;
     };
+    columbinaI18n?: {
+      notifyLanguageChanged: (lang: string) => void;
+      onReload: (callback: (lang: string) => void) => () => void;
+    };
   }
 }

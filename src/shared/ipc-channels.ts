@@ -51,6 +51,9 @@ export const IPC = {
   SETTINGS_TEST_VISION: "settings:test-vision",
   SETTINGS_GET_GENERAL: "settings:get-general",
   SETTINGS_SAVE_GENERAL: "settings:save-general",
+  I18N_GET_BUNDLE: "i18n:get-bundle",
+  I18N_LANGUAGE_CHANGED: "i18n:language-changed", // renderer → main：用户切换语言
+  I18N_RELOAD: "i18n:reload",                     // main → renderer：要求重新加载语言包
   UI_THEME_GET: "ui-theme:get",
   UI_THEME_CHANGED: "ui-theme:changed",
   SETTINGS_OPEN_SIDEBAR: "settings:open-sidebar",

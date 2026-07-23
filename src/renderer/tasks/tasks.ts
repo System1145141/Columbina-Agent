@@ -2,6 +2,9 @@ import "../ui/base.css";
 import "./tasks.css";
 import "../ui/theme";
 import { getSchedulePanelItems, type ScheduledTask } from "./task-filter";
+import { t, setLang, setI18nVars, loadLangBundle, type Lang } from "../../shared/i18n";
+import { applyI18n } from "../../shared/i18n/dom";
+import { APP_VERSION } from "../../shared/version";
 
 // ── 类型（后端契约） ──────────────────────────────────────────
 interface TokenDayData {
@@ -75,7 +78,11 @@ function renderDate(): void {
   const now = new Date();
   const el = $("schedule-date");
   if (!el) return;
-  el.textContent = `📅 ${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 · ${WEEKDAYS[now.getDay()]}`;
+  el.textContent = `📅 ` + t("tasksWindow.dateFormat")
+    .replace("{year}", String(now.getFullYear()))
+    .replace("{month}", String(now.getMonth() + 1))
+    .replace("{day}", String(now.getDate()))
+    .replace("{weekday}", WEEKDAYS[now.getDay()]);
 }
 
 // ── 渲染：今日 Token 用量 + 进度条（拉满+电流感） ────────────
@@ -165,10 +172,12 @@ function renderWeeklyBars(data7: TokenDayData[]): void {
   const avg = pastSlots.length ? Math.round(sum / pastSlots.length) : 0;
   if (avgEl) {
     const span = avgEl.querySelector("span");
-    if (span) span.textContent = `日均 ${formatTokenShort(avg)}`;
+    if (span) span.textContent = t("tasksWindow.dailyAvg").replace("{avg}", formatTokenShort(avg));
   }
   if (noteEl && peakSlot) {
-    noteEl.textContent = `📊 本周 Token 消耗趋势 ｜ 峰值 ${formatTokenShort(peakSlot.total ?? 0)}（${peakSlot.weekday}）`;
+    noteEl.textContent = t("tasksWindow.weeklyTrendDetail")
+      .replace("{peakCount}", formatTokenShort(peakSlot.total ?? 0))
+      .replace("{peakWeekday}", peakSlot.weekday);
   }
 }
 
@@ -186,7 +195,7 @@ function renderTasks(tasks: ScheduledTask[]): void {
   if (panelItems.items.length === 0) {
     const empty = document.createElement("div");
     empty.className = "task-empty";
-    empty.textContent = "暂无已启用定时任务";
+    empty.textContent = t("tasksWindow.noEnabledTasks");
     listEl.appendChild(empty);
     return;
   }
@@ -254,7 +263,19 @@ async function refreshAll(): Promise<void> {
 }
 
 // ── 启动 ──────────────────────────────────────────────────────
-function init(): void {
+async function init(): Promise<void> {
+  // i18n init
+  const lang = (window as any).__LANG__ as Lang | undefined ?? "zh-CN";
+  setI18nVars({ version: APP_VERSION });
+  await loadLangBundle(lang);
+  applyI18n(lang);
+
+  // 设置页切换语言后，主进程广播要求重载
+  window.columbinaI18n?.onReload((newLang) => {
+    setLang(newLang as Lang);
+    void loadLangBundle(newLang as Lang).then(() => applyI18n(newLang as Lang));
+  });
+
   renderDate();
   void refreshAll();
 
@@ -278,4 +299,4 @@ function init(): void {
   });
 }
 
-init();
+void init();
