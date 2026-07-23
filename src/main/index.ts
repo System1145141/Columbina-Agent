@@ -52,7 +52,7 @@ import { synthesize as mimoSynthesize } from "./tts/mimo-engine";
 import { synthesizeByEngine } from "./tts/tts-dispatcher";
 import { startOpener, stopOpener, setLive2dWindow, reloadManifest, handleBubbleClick, handleChatWindowOpened, testFire } from "./opener/opener-runner";
 import { registerAgUiIpc, type AguiRunInput } from "./agui-bridge";
-import { setWeatherConfig, setSearchConfig, loadTodos, onTodosChange, setDelegateSettings } from "./orchestrator/built-in-tools";
+import { setWeatherConfig, setSearchConfig, loadTodos, onTodosChange, setKuuhenkiSettings } from "./orchestrator/built-in-tools";
 import { registerRecallHistoryTool } from "./orchestrator/history-tools";
 import { registerDocumentTools } from "./orchestrator/document-tools";
 import { registerLifeTools, setTranslateConfig } from "./orchestrator/life-tools";
@@ -1551,7 +1551,7 @@ function langToPromptDir(lang?: string): string {
   return "cn";
 }
 
-function loadPromptFile(filename: string, identityId?: string, lang = "cn"): string {
+export function loadPromptFile(filename: string, identityId?: string, lang = "cn"): string {
   try {
     const promptDir = langToPromptDir(lang);
 
@@ -2176,8 +2176,8 @@ function createWindow(): void {
     },
   );
 
-  // 注入子代理 LLM 配置（delegate_task 工具用，复用主模型配置）
-  setDelegateSettings(() => {
+  // 注入 Kuuhenki（月灵）LLM 配置（summon_kuuhenki 工具用，复用主模型配置）
+  setKuuhenkiSettings(() => {
     const s = loadModelSettings();
     return { provider: s.provider, baseUrl: s.baseUrl, model: s.model, apiKey: s.apiKey };
   });

@@ -1216,7 +1216,8 @@ function installSchedulerEventListener(): void {
     if (!msg) return;
 
     if (event.type === "TOOL_CALL_START") {
-      state.toolLines.push(`🔧 调用中：${event.toolCallName ?? "工具"}`);
+      const isKuuhenki = event.toolCallName === "召唤月灵";
+      state.toolLines.push(`${isKuuhenki ? "🌙" : "🔧"} ${isKuuhenki ? "正在召唤月灵" : "调用中"}：${event.toolCallName ?? "工具"}`);
       renderState(state);
     } else if (event.type === "TOOL_CALL_RESULT") {
       const preview = (event.content ?? "").slice(0, 240);
@@ -2286,13 +2287,15 @@ async function triggerAgentGreeting(): Promise<void> {
               bubble.replaceChildren();
               const tip = document.createElement("div");
               tip.className = "msg__tool-tip";
+              if (event.toolCallName === "召唤月灵") tip.classList.add("msg__tool-tip--kuuhenki");
               tip.dataset.toolCallId = event.toolCallId ?? "";
               const icon = document.createElement("span");
               icon.className = "msg__tool-icon";
-              icon.textContent = "🔧";
+              const isKuuhenki = event.toolCallName === "召唤月灵";
+              icon.textContent = isKuuhenki ? "🌙" : "🔧";
               const text = document.createElement("span");
               text.className = "msg__tool-text";
-              text.textContent = "调用中：" + (event.toolCallName ?? "工具");
+              text.textContent = isKuuhenki ? "正在召唤月灵…" : "调用中：" + (event.toolCallName ?? "工具");
               tip.appendChild(icon);
               tip.appendChild(text);
               bubble.appendChild(tip);
@@ -2305,7 +2308,7 @@ async function triggerAgentGreeting(): Promise<void> {
               const tip = bubble.querySelector(".msg__tool-tip");
               if (tip) {
                 const textEl = tip.querySelector(".msg__tool-text");
-                if (textEl) textEl.textContent = "已完成";
+                if (textEl) textEl.textContent = tip.classList.contains("msg__tool-tip--kuuhenki") ? "月灵任务完成" : "已完成";
                 tip.classList.add("msg__tool-tip--done");
               }
             }
@@ -2569,20 +2572,22 @@ async function send(): Promise<void> {
         const msg = messages.find(m => m.id === streamMsgId);
         switch (event.type) {
           case "TOOL_CALL_START": {
-            // 工具调用开始：在 thinking 气泡里显示"🔧 调用中：xxx"，替换三个点
+            // 工具调用开始：在 thinking 气泡里显示工具提示
             const bubble = getStreamingBubble();
             if (bubble) {
               bubble.classList.remove("msg__bubble--thinking");
               bubble.replaceChildren();
               const tip = document.createElement("div");
               tip.className = "msg__tool-tip";
+              if (event.toolCallName === "召唤月灵") tip.classList.add("msg__tool-tip--kuuhenki");
               tip.dataset.toolCallId = event.toolCallId ?? "";
               const icon = document.createElement("span");
               icon.className = "msg__tool-icon";
-              icon.textContent = "🔧";
+              const isKuuhenki = event.toolCallName === "召唤月灵";
+              icon.textContent = isKuuhenki ? "🌙" : "🔧";
               const text = document.createElement("span");
               text.className = "msg__tool-text";
-              text.textContent = "调用中：" + (event.toolCallName ?? "工具");
+              text.textContent = isKuuhenki ? "正在召唤月灵…" : "调用中：" + (event.toolCallName ?? "工具");
               tip.appendChild(icon);
               tip.appendChild(text);
               bubble.appendChild(tip);
@@ -2590,13 +2595,13 @@ async function send(): Promise<void> {
             break;
           }
           case "TOOL_CALL_END": {
-            // 工具调用完成：把"调用中"改成"完成"，淡出准备让位给文字
+            // 工具调用完成
             const bubble = getStreamingBubble();
             if (bubble) {
               const tip = bubble.querySelector(".msg__tool-tip");
               if (tip) {
                 const textEl = tip.querySelector(".msg__tool-text");
-                if (textEl) textEl.textContent = "已完成";
+                if (textEl) textEl.textContent = tip.classList.contains("msg__tool-tip--kuuhenki") ? "月灵任务完成" : "已完成";
                 tip.classList.add("msg__tool-tip--done");
               }
             }
