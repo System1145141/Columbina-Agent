@@ -2,7 +2,7 @@ import "../ui/base.css";
 import "./tasks.css";
 import "../ui/theme";
 import { getSchedulePanelItems, type ScheduledTask } from "./task-filter";
-import { t, loadLangBundle, type Lang } from "../../shared/i18n";
+import { t, setLang, loadLangBundle, type Lang } from "../../shared/i18n";
 import { applyI18n } from "../../shared/i18n/dom";
 
 // ── 类型（后端契约） ──────────────────────────────────────────
@@ -267,6 +267,12 @@ async function init(): Promise<void> {
   const lang = (window as any).__LANG__ as Lang | undefined ?? "zh-CN";
   await loadLangBundle(lang);
   applyI18n(lang);
+
+  // 设置页切换语言后，主进程广播要求重载
+  window.columbinaI18n?.onReload((newLang) => {
+    setLang(newLang as Lang);
+    void loadLangBundle(newLang as Lang).then(() => applyI18n(newLang as Lang));
+  });
 
   renderDate();
   void refreshAll();

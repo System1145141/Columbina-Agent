@@ -2795,6 +2795,18 @@ ipcMain.handle(IPC.I18N_GET_BUNDLE, async (_event, lang: string) => {
   }
 });
 
+// 设置页切换语言后，广播给所有 renderer 窗口要求重载语言包
+ipcMain.on(IPC.I18N_LANGUAGE_CHANGED, (_event, lang: string) => {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue;
+    try {
+      win.webContents.send(IPC.I18N_RELOAD, lang);
+    } catch {
+      // ignore
+    }
+  }
+});
+
 ipcMain.on(IPC.SETTINGS_OPEN_SIDEBAR, () => {
   createSidebarWindow();
 });

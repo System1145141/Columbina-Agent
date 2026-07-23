@@ -1,6 +1,6 @@
 import "../ui/base.css";
 import "./chat.css";
-import { t, loadLangBundle, type Lang } from "../../shared/i18n";
+import { t, setLang, loadLangBundle, type Lang } from "../../shared/i18n";
 import { applyI18n } from "../../shared/i18n/dom";
 import "../ui/theme";
 import {
@@ -3064,6 +3064,11 @@ if (particlesCtx) {
   await loadLangBundle(lang);
   applyI18n(lang);
 })().then(async () => {
+  // 设置页切换语言后，主进程广播要求重载
+  window.columbinaI18n?.onReload((lang) => {
+    setLang(lang as Lang);
+    void loadLangBundle(lang as Lang).then(() => applyI18n(lang as Lang));
+  });
   await loadEnabledStickers();
   await bootstrap();
   buildQuickPresets();

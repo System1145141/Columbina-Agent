@@ -1,7 +1,7 @@
 import "../ui/base.css";
 import "./sidebar.css";
 import "../ui/theme";
-import { t, loadLangBundle, type Lang } from "../../shared/i18n";
+import { t, setLang, loadLangBundle, type Lang } from "../../shared/i18n";
 import { applyI18n } from "../../shared/i18n/dom";
 
 interface ModelConfig {
@@ -213,6 +213,12 @@ openChatBtn.addEventListener("click", async () => {
   await loadLangBundle(lang);
   applyI18n(lang);
 })();
+
+// 设置页切换语言后，主进程广播要求重载
+window.columbinaI18n?.onReload((lang) => {
+  setLang(lang as Lang);
+  void loadLangBundle(lang as Lang).then(() => applyI18n(lang as Lang));
+});
 
 void initModelConfig();
 void initRuntimeState();

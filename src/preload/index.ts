@@ -9,6 +9,17 @@ const langArg =
 const initialLang = langArg ? langArg.slice("--lang=".length) : "zh-CN";
 contextBridge.exposeInMainWorld("__LANG__", initialLang);
 
+const columbinaI18nApi = {
+  notifyLanguageChanged: (lang: string) =>
+    ipcRenderer.send(IPC.I18N_LANGUAGE_CHANGED, lang),
+  onReload: (callback: (lang: string) => void) => {
+    const listener = (_e: unknown, lang: string) => callback(lang);
+    ipcRenderer.on(IPC.I18N_RELOAD, listener);
+    return () => ipcRenderer.off(IPC.I18N_RELOAD, listener);
+  },
+};
+contextBridge.exposeInMainWorld("columbinaI18n", columbinaI18nApi);
+
 const columbinaApi = {
   minimize: () => ipcRenderer.send(IPC.WINDOW_MINIMIZE),
   hide: () => ipcRenderer.send(IPC.WINDOW_CLOSE),

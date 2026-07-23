@@ -4,7 +4,7 @@
 // 用户说话时：柱状胶囊波形跳动 + 头像外圈音量波形
 // 昔涟说话时：电波环脉冲扩散 + 波形隐藏
 import "../ui/theme";
-import { t, loadLangBundle, type Lang } from "../../shared/i18n";
+import { t, setLang, loadLangBundle, type Lang } from "../../shared/i18n";
 import { applyI18n } from "../../shared/i18n/dom";
 
 // ── 粒子背景 ──
@@ -526,6 +526,12 @@ async function init(): Promise<void> {
   const lang = (window as any).__LANG__ as Lang | undefined ?? "zh-CN";
   await loadLangBundle(lang);
   applyI18n(lang);
+
+  // 设置页切换语言后，主进程广播要求重载
+  window.columbinaI18n?.onReload((newLang) => {
+    setLang(newLang as Lang);
+    void loadLangBundle(newLang as Lang).then(() => applyI18n(newLang as Lang));
+  });
 
   // 读 ASR 设置（VAD 阈值 + 转写开关）
   try {

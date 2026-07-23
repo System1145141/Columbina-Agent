@@ -1725,6 +1725,8 @@ generalForm.addEventListener("submit", async (e) => {
       language: getLang(),
       uiTheme: getUiThemeValue(),
     });
+    // 广播语言变更，通知所有 renderer 窗口刷新
+    window.columbinaI18n?.notifyLanguageChanged(getLang());
     setGeneralSaveStatus(t("settingsExtra.saved"), "is-ok");
   } catch {
     setGeneralSaveStatus(t("settingsExtra.saveFailed"), "is-error");
@@ -2448,6 +2450,16 @@ switchSection(initialSection);
 // 监听 main 发来的切标签事件（窗口已打开时，main 不重新 loadURL，改发事件）
 window.settings?.onSwitchSection?.((section) => {
   switchSection(section);
+});
+
+// 设置页切换语言后，主进程广播要求重载（其他窗口也会收到并刷新）
+window.columbinaI18n?.onReload((lang) => {
+  if (lang === getLang()) return;
+  setLang(lang as Lang);
+  void loadLangBundle(lang as Lang).then(() => {
+    applyLanguageSelection(lang as Lang);
+    applyI18n(lang as Lang);
+  });
 });
 /* ===== RAG model card toggle (embedding only) ===== */
 (function () {
