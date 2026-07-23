@@ -1002,6 +1002,11 @@ function loadGeneralSettings(): GeneralSettings {
   }
 }
 
+/** 供 renderer 窗口 additionalArguments 使用，确保各窗口初始语言与设置一致。 */
+function getRendererLangArgs(): string[] {
+  return [`--lang=${loadGeneralSettings().language}`];
+}
+
 function applyGeneralSettings(settings: GeneralSettings): void {
   mainWindow?.setAlwaysOnTop(settings.petAlwaysOnTop, settings.petAlwaysOnTop ? "screen-saver" : "normal");
   if (settings.petVisible) mainWindow?.show();
@@ -1998,6 +2003,7 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      additionalArguments: getRendererLangArgs(),
     },
   });
 
@@ -2221,6 +2227,7 @@ function createChatWindow(sessionId?: string): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      additionalArguments: getRendererLangArgs(),
     },
   });
 
@@ -2281,6 +2288,7 @@ function createSidebarWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      additionalArguments: getRendererLangArgs(),
     },
   });
 
@@ -2328,6 +2336,7 @@ function createTasksWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      additionalArguments: getRendererLangArgs(),
     },
   });
 
@@ -2383,6 +2392,7 @@ function createSettingsWindow(section?: string): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      additionalArguments: getRendererLangArgs(),
     },
   });
 
@@ -2439,6 +2449,7 @@ async function createStickerManagerWindow(): Promise<{ ok: boolean; error?: stri
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      additionalArguments: getRendererLangArgs(),
     },
   });
 
@@ -2509,6 +2520,7 @@ function createCallWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      additionalArguments: getRendererLangArgs(),
     },
   });
 

@@ -1,6 +1,14 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { IPC } from "../shared/ipc-channels";
 
+// 主进程通过 additionalArguments 注入当前语言，供 renderer 初始化 i18n 使用。
+const langArg =
+  typeof process !== "undefined" && Array.isArray(process.argv)
+    ? process.argv.find((arg) => arg.startsWith("--lang="))
+    : undefined;
+const initialLang = langArg ? langArg.slice("--lang=".length) : "zh-CN";
+contextBridge.exposeInMainWorld("__LANG__", initialLang);
+
 const columbinaApi = {
   minimize: () => ipcRenderer.send(IPC.WINDOW_MINIMIZE),
   hide: () => ipcRenderer.send(IPC.WINDOW_CLOSE),
