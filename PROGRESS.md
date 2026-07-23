@@ -70,12 +70,26 @@
 
 ---
 
-## Phase 3：SubAgent → 月灵（未开始）
+## Phase 3：SubAgent → Kuuhenki（月灵）✅ 已完成
 
-- [ ] `src/main/orchestrator/sub-agent.ts` 重命名 + 内部 `SubAgent` / `runSubAgent` / `SubAgentResult` 改为月灵相关命名
-- [ ] `src/main/orchestrator/built-in-tools.ts` 中 `runSubAgent` 引用同步更新
-- [ ] 月灵 UI 入口（聊天界面、设置界面）
-- [ ] 月灵独立 persona + prompt
+### 已完成
+
+- [x] `sub-agent.ts` → `kuuhenki.ts`，内部全面重命名：
+  - `SubAgent` → `Kuuhenki`、`runSubAgent` → `summonKuuhenki`
+  - `SubAgentResult` → `KuuhenkiResult`、`setDelegateSettings` → `setKuuhenkiSettings`
+  - 新增 `identityId` + `lang` 参数，支持角色专属 persona
+- [x] 工具注册改名：`delegate_task`（委托子任务） → `summon_kuuhenki`（召唤月灵）
+- [x] `index.ts`：import + 调用链同步改名，`loadPromptFile` 导出给 kuuhenki 模块
+- [x] 角色专属 Kuuhenki persona 已创建：
+  - `prompts/columbina/cn/kuuhenki.md` — 哥伦比娅的月光眷属
+  - `prompts/sandrone/cn/kuuhenki.md` — 桑多涅的机械月灵（彩蛋：文件名保留 kuuhenki，内部 persona 为法洁欧 Fagieou）
+- [x] UI 月灵提示（三处 TOOL_CALL 事件处理器）：
+  - 哥伦比娅侧：🌙 "正在召唤月灵…" / "月灵任务完成"
+  - 桑多涅侧：🌙 "正在召唤法洁欧…" / "法洁欧任务完成"
+
+### 剩余
+
+- [ ] Kuuhenki 独立模型配置（目前复用主模型，可后续拆出轻量模型）
 
 ---
 
@@ -103,6 +117,7 @@ prompts/
 │   │   ├── identity.md          ✅ 已填写
 │   │   ├── soul.md              ✅ 已填写
 │   │   ├── canon_quotes.md      ✅ 已填写
+│   │   ├── kuuhenki.md           ✅ 已填写（月光眷属）
 │   │   ├── worldbook_columbina.md  ❌ 占位符
 │   │   ├── worldbook_characters.md ✅ 已填写
 │   │   └── styles/
@@ -119,6 +134,7 @@ prompts/
 │   │   ├── identity.md          ❌ 占位符
 │   │   ├── soul.md              ❌ 占位符
 │   │   ├── canon_quotes.md      ❌ 占位符
+│   │   ├── kuuhenki.md           ✅ 已填写（法洁欧 Fagieou）
 │   │   ├── worldbook_sandrone.md ❌ 占位符
 │   │   ├── worldbook_characters.md ✅ 已填写
 │   │   └── styles/
@@ -187,6 +203,15 @@ chat/main.ts
         │                 ├─ Worldbook DMAE: prompts/worldbook/{lang}/*.md
         │                 └─ L0/L1 画像: memoryStore
         │
+        │    ┌─ LLM 调用 summon_kuuhenki（召唤月灵/法洁欧）
+        │    │    ├─ summonKuuhenki(task, identityId, lang)
+        │    │    ├─ loadPromptFile("kuuhenki.md", identityId, lang)
+        │    │    │    ├─ prompts/columbina/cn/kuuhenki.md（月光眷属）
+        │    │    │    └─ prompts/sandrone/cn/kuuhenki.md（法洁欧 Fagieou）
+        │    │    ├─ 受限 FC 循环（8 轮 / 60s）
+        │    │    └─ 返回 KuuhenkiResult（summary + artifacts + key_facts）
+        │    │
+        │    └─ Chat UI: 🌙 "正在召唤月灵…" 或 "正在召唤法洁欧…"
         ▼
       ColumbinaAgent.runWithEvents({ settings, messages })
 ```

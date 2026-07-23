@@ -1217,7 +1217,8 @@ function installSchedulerEventListener(): void {
 
     if (event.type === "TOOL_CALL_START") {
       const isKuuhenki = event.toolCallName === "召唤月灵";
-      state.toolLines.push(`${isKuuhenki ? "🌙" : "🔧"} ${isKuuhenki ? "正在召唤月灵" : "调用中"}：${event.toolCallName ?? "工具"}`);
+      const label = isKuuhenki ? (currentRole === "sandrone" ? "法洁欧" : "月灵") : "";
+      state.toolLines.push(`${isKuuhenki ? "🌙" : "🔧"} ${isKuuhenki ? `正在召唤${label}` : "调用中"}：${event.toolCallName ?? "工具"}`);
       renderState(state);
     } else if (event.type === "TOOL_CALL_RESULT") {
       const preview = (event.content ?? "").slice(0, 240);
@@ -2287,15 +2288,16 @@ async function triggerAgentGreeting(): Promise<void> {
               bubble.replaceChildren();
               const tip = document.createElement("div");
               tip.className = "msg__tool-tip";
-              if (event.toolCallName === "召唤月灵") tip.classList.add("msg__tool-tip--kuuhenki");
+              const isKuuhenki = event.toolCallName === "召唤月灵";
+              if (isKuuhenki) tip.classList.add("msg__tool-tip--kuuhenki");
               tip.dataset.toolCallId = event.toolCallId ?? "";
               const icon = document.createElement("span");
               icon.className = "msg__tool-icon";
-              const isKuuhenki = event.toolCallName === "召唤月灵";
               icon.textContent = isKuuhenki ? "🌙" : "🔧";
               const text = document.createElement("span");
               text.className = "msg__tool-text";
-              text.textContent = isKuuhenki ? "正在召唤月灵…" : "调用中：" + (event.toolCallName ?? "工具");
+              const kuuhenkiLabel = currentRole === "sandrone" ? "法洁欧" : "月灵";
+              text.textContent = isKuuhenki ? `正在召唤${kuuhenkiLabel}…` : "调用中：" + (event.toolCallName ?? "工具");
               tip.appendChild(icon);
               tip.appendChild(text);
               bubble.appendChild(tip);
@@ -2308,7 +2310,11 @@ async function triggerAgentGreeting(): Promise<void> {
               const tip = bubble.querySelector(".msg__tool-tip");
               if (tip) {
                 const textEl = tip.querySelector(".msg__tool-text");
-                if (textEl) textEl.textContent = tip.classList.contains("msg__tool-tip--kuuhenki") ? "月灵任务完成" : "已完成";
+                if (textEl && tip.classList.contains("msg__tool-tip--kuuhenki")) {
+                  textEl.textContent = currentRole === "sandrone" ? "法洁欧任务完成" : "月灵任务完成";
+                } else if (textEl) {
+                  textEl.textContent = "已完成";
+                }
                 tip.classList.add("msg__tool-tip--done");
               }
             }
@@ -2579,15 +2585,16 @@ async function send(): Promise<void> {
               bubble.replaceChildren();
               const tip = document.createElement("div");
               tip.className = "msg__tool-tip";
-              if (event.toolCallName === "召唤月灵") tip.classList.add("msg__tool-tip--kuuhenki");
+              const isKuuhenki = event.toolCallName === "召唤月灵";
+              if (isKuuhenki) tip.classList.add("msg__tool-tip--kuuhenki");
               tip.dataset.toolCallId = event.toolCallId ?? "";
               const icon = document.createElement("span");
               icon.className = "msg__tool-icon";
-              const isKuuhenki = event.toolCallName === "召唤月灵";
               icon.textContent = isKuuhenki ? "🌙" : "🔧";
               const text = document.createElement("span");
               text.className = "msg__tool-text";
-              text.textContent = isKuuhenki ? "正在召唤月灵…" : "调用中：" + (event.toolCallName ?? "工具");
+              const kuuhenkiLabel = currentRole === "sandrone" ? "法洁欧" : "月灵";
+              text.textContent = isKuuhenki ? `正在召唤${kuuhenkiLabel}…` : "调用中：" + (event.toolCallName ?? "工具");
               tip.appendChild(icon);
               tip.appendChild(text);
               bubble.appendChild(tip);
@@ -2601,7 +2608,11 @@ async function send(): Promise<void> {
               const tip = bubble.querySelector(".msg__tool-tip");
               if (tip) {
                 const textEl = tip.querySelector(".msg__tool-text");
-                if (textEl) textEl.textContent = tip.classList.contains("msg__tool-tip--kuuhenki") ? "月灵任务完成" : "已完成";
+                if (textEl && tip.classList.contains("msg__tool-tip--kuuhenki")) {
+                  textEl.textContent = currentRole === "sandrone" ? "法洁欧任务完成" : "月灵任务完成";
+                } else if (textEl) {
+                  textEl.textContent = "已完成";
+                }
                 tip.classList.add("msg__tool-tip--done");
               }
             }
