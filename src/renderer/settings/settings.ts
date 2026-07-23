@@ -6,8 +6,9 @@ import {
   formatChatRelativeTime,
   type ChatSessionMetaUI,
 } from "../../shared/chat-ui";
-import { t, setLang, getLang, loadLangBundle, type Lang } from "../../shared/i18n";
+import { t, setLang, getLang, setI18nVars, loadLangBundle, type Lang } from "../../shared/i18n";
 import { applyI18n } from "../../shared/i18n/dom";
+import { APP_VERSION } from "../../shared/version";
 
 // Inline modal (to avoid Vite tree-shaking)
 let _cyModalOverlay: HTMLElement | null = null;
@@ -2429,6 +2430,7 @@ void loadChannelsPanel();
 
 // ── i18n 初始化：加载保存的语言，载入翻译包，应用翻译 ──
 (async function initI18n() {
+  setI18nVars({ version: APP_VERSION });
   try {
     const cfg = await window.settings?.getGeneral();
     const lang = (cfg?.language as Lang) ?? "zh-CN";

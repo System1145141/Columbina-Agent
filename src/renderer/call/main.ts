@@ -4,8 +4,9 @@
 // 用户说话时：柱状胶囊波形跳动 + 头像外圈音量波形
 // 昔涟说话时：电波环脉冲扩散 + 波形隐藏
 import "../ui/theme";
-import { t, setLang, loadLangBundle, type Lang } from "../../shared/i18n";
+import { t, setLang, setI18nVars, loadLangBundle, type Lang } from "../../shared/i18n";
 import { applyI18n } from "../../shared/i18n/dom";
+import { APP_VERSION } from "../../shared/version";
 
 // ── 粒子背景 ──
 const canvas = document.getElementById("particles") as HTMLCanvasElement | null;
@@ -524,6 +525,7 @@ closeBtn.addEventListener("click", hangup);
 async function init(): Promise<void> {
   // i18n init
   const lang = (window as any).__LANG__ as Lang | undefined ?? "zh-CN";
+  setI18nVars({ version: APP_VERSION });
   await loadLangBundle(lang);
   applyI18n(lang);
 

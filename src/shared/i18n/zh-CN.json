@@ -2,7 +2,7 @@
   "app": {
     "title": "Columbina · 设置",
     "brand": "Columbina",
-    "version": "Columbina v0.2.0",
+    "version": "Columbina v{{version}}",
     "settingsCenter": "设置中心"
   },
   "nav": {
@@ -81,7 +81,7 @@
     "langJA": "日文",
     "langKO": "韩语",
     "about": "关于",
-    "aboutDesc": "Columbina v0.2.0 · 轻量情感陪伴桌面 Agent"
+    "aboutDesc": "Columbina v{{version}} · 轻量情感陪伴桌面 Agent"
   },
   "columbina": {
     "title": "Columbina 设置",

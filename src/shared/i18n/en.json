@@ -1,5 +1,5 @@
 {
-  "app": { "title": "Columbina · Settings", "brand": "Columbina", "version": "Columbina v0.2.0", "settingsCenter": "Settings Center" },
+  "app": { "title": "Columbina · Settings", "brand": "Columbina", "version": "Columbina v{{version}}", "settingsCenter": "Settings Center" },
   "nav": { "ariaLabel": "Settings navigation", "memory": "Memory", "chat": "Chat", "user": "User Info", "tasks": "Scheduled Tasks", "identity": "Role", "skills": "Skills", "plugins": "Plugins", "settings": "Settings", "api": "API Settings", "columbina": "Columbina Settings", "channels": "Connect Phone", "tts": "TTS Settings", "asr": "ASR Settings", "tokens": "Token Usage", "disclaimer": "Disclaimer" },
   "api": {
     "title": "API Settings",
@@ -56,7 +56,7 @@
     "langJA": "日文",
     "langKO": "韩语",
     "about": "About",
-    "aboutDesc": "Columbina v0.2.0 · Lightweight Emotional Companion Desktop Agent"
+    "aboutDesc": "Columbina v{{version}} · Lightweight Emotional Companion Desktop Agent"
   },
   "columbina": {
     "title": "Columbina Settings",

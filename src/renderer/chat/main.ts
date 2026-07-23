@@ -1,7 +1,8 @@
 import "../ui/base.css";
 import "./chat.css";
-import { t, setLang, loadLangBundle, type Lang } from "../../shared/i18n";
+import { t, setLang, setI18nVars, loadLangBundle, type Lang } from "../../shared/i18n";
 import { applyI18n } from "../../shared/i18n/dom";
+import { APP_VERSION } from "../../shared/version";
 import "../ui/theme";
 import {
   CHAT_DEFAULT_IDENTITY_LABEL,
@@ -3061,6 +3062,7 @@ if (particlesCtx) {
 // i18n 初始化
 (async () => {
   const lang = (window as any).__LANG__ as Lang | undefined ?? "zh-CN";
+  setI18nVars({ version: APP_VERSION });
   await loadLangBundle(lang);
   applyI18n(lang);
 })().then(async () => {

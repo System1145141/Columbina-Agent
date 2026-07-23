@@ -2,8 +2,9 @@ import "../ui/base.css";
 import "./tasks.css";
 import "../ui/theme";
 import { getSchedulePanelItems, type ScheduledTask } from "./task-filter";
-import { t, setLang, loadLangBundle, type Lang } from "../../shared/i18n";
+import { t, setLang, setI18nVars, loadLangBundle, type Lang } from "../../shared/i18n";
 import { applyI18n } from "../../shared/i18n/dom";
+import { APP_VERSION } from "../../shared/version";
 
 // ── 类型（后端契约） ──────────────────────────────────────────
 interface TokenDayData {
@@ -265,6 +266,7 @@ async function refreshAll(): Promise<void> {
 async function init(): Promise<void> {
   // i18n init
   const lang = (window as any).__LANG__ as Lang | undefined ?? "zh-CN";
+  setI18nVars({ version: APP_VERSION });
   await loadLangBundle(lang);
   applyI18n(lang);
 
