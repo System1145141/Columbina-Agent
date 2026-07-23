@@ -381,7 +381,7 @@ interface GeneralSettings {
   sidebarVisible: boolean;
   tasksVisible: boolean;
   launchAtLogin: boolean;
-  language: "zh-CN";
+  language: "zh-CN" | "en" | "ja" | "ko";
   uiTheme: "classic" | "polished-pink" | "pearl-white" | "deep-blue" | "light-blue";
   // TTS 配置
   ttsEngine: "off" | "minimax" | "gptsovits" | "custom-cloud" | "mimo";
@@ -925,7 +925,7 @@ function normalizeGeneralSettings(input: Partial<GeneralSettings> | null | undef
     sidebarVisible: windowVisibility.sidebarVisible,
     tasksVisible: windowVisibility.tasksVisible,
     launchAtLogin: Boolean(input?.launchAtLogin),
-    language: "zh-CN",
+    language: (["zh-CN", "en", "ja", "ko"].includes(input?.language as string) ? input?.language : "zh-CN") as GeneralSettings["language"],
     uiTheme: input?.uiTheme === "pearl-white" ? "pearl-white" : (input?.uiTheme === "polished-pink" || input?.uiTheme === "light-blue") ? "polished-pink" : (input?.uiTheme === "deep-blue" || input?.uiTheme === "classic") ? "classic" : "classic",
     // TTS 配置
     ttsEngine: (["off", "minimax", "gptsovits", "custom-cloud", "mimo"].includes(input?.ttsEngine as string) ? input?.ttsEngine : "off") as GeneralSettings["ttsEngine"],
@@ -2753,6 +2753,34 @@ ipcMain.handle(IPC.UI_THEME_GET, () => {
 
 ipcMain.handle(IPC.SETTINGS_SAVE_GENERAL, (_event, settings: Partial<GeneralSettings>) => {
   return saveGeneralSettings(settings);
+});
+
+// i18n: 按语言返回翻译 JSON 包
+ipcMain.handle(IPC.I18N_GET_BUNDLE, async (_event, lang: string) => {
+  try {
+    // 生产模式：dist/shared/i18n/{lang}.json
+    const distPath = path.join(app.getAppPath(), "dist", "shared", "i18n", `${lang}.json`);
+    if (fs.existsSync(distPath)) {
+      return JSON.parse(fs.readFileSync(distPath, "utf8"));
+    }
+    // 开发模式：src/shared/i18n/{lang}.json
+    const srcPath = path.join(app.getAppPath(), "src", "shared", "i18n", `${lang}.json`);
+    if (fs.existsSync(srcPath)) {
+      return JSON.parse(fs.readFileSync(srcPath, "utf8"));
+    }
+    // 回退到中文
+    const fallbackDist = path.join(app.getAppPath(), "dist", "shared", "i18n", "zh-CN.json");
+    if (fs.existsSync(fallbackDist)) {
+      return JSON.parse(fs.readFileSync(fallbackDist, "utf8"));
+    }
+    const fallbackSrc = path.join(app.getAppPath(), "src", "shared", "i18n", "zh-CN.json");
+    if (fs.existsSync(fallbackSrc)) {
+      return JSON.parse(fs.readFileSync(fallbackSrc, "utf8"));
+    }
+    return {};
+  } catch {
+    return {};
+  }
 });
 
 ipcMain.on(IPC.SETTINGS_OPEN_SIDEBAR, () => {

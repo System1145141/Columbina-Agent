@@ -8,6 +8,7 @@
     "build:preload": "tsc -p tsconfig.preload.json",
     "build:renderer": "vite build",
     "build": "npm run build:main && npm run build:preload && npm run build:renderer",
+    "postbuild": "node -e \"const fs=require('fs'),p=require('path'),src=p.join('src','shared','i18n'),dst=p.join('dist','shared','i18n');fs.mkdirSync(dst,{recursive:true});fs.readdirSync(src).filter(f=>f.endsWith('.json')).forEach(f=>fs.copyFileSync(p.join(src,f),p.join(dst,f)))\"",
     "dev": "npm run build:main && npm run build:preload && concurrently \"vite\" \"cross-env VITE_DEV=1 electron .\"",
     "start": "electron .",
     "test": "vitest run",

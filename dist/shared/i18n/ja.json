@@ -1,0 +1,23 @@
+{
+  "app": { "title": "Columbina · 設定", "brand": "Columbina", "version": "Columbina v0.2.0", "settingsCenter": "設定センター" },
+  "nav": { "memory": "メモリー", "chat": "チャット", "user": "ユーザー情報", "tasks": "スケジュール", "identity": "役職", "skills": "スキル", "plugins": "プラグイン", "settings": "設定", "api": "API設定", "columbina": "Columbina設定", "channels": "スマホ連携", "tts": "TTS設定", "asr": "ASR設定", "tokens": "トークン使用量", "disclaimer": "免責事項" },
+  "api": { "title": "API設定", "subtitle": "モデルサービスを設定してください。コロンビーナとサンドローネがチャットと状態判定に使用します。", "modelPreset": "モデルプリセット", "manualConfig": "手動設定", "nickname": "ニックネーム", "apiKey": "APIキー", "apiProtocol": "APIプロトコル", "protocolAuto": "自動（Base URLから推測）", "protocolOpenAI": "OpenAI互換", "protocolAnthropic": "Anthropic互換", "modelName": "モデル名", "modelList": { "addModel": "＋ モデル追加", "delete": "削除" } },
+  "general": { "title": "設定", "subtitle": "デスクトップペット、ステータスバー、スケジュールバー、オーディオ設定を管理します。", "sidebarWindow": "ステータスバー", "tasksWindow": "スケジュールバー", "music": "音楽", "sound": "効果音", "petAlwaysOnTop": "ペット常に最前面", "petVisible": "ペット表示", "petZoom": "ペットズーム", "uiTheme": "UIテーマ", "themeDeepBlue": "ディープブルー", "themeLightBlue": "ライトブルー", "themePearlWhite": "ホワイト", "autoStart": "起動時に自動起動", "chatHistoryManagement": "チャット履歴管理", "clearChatHistory": "履歴を消去", "language": "言語", "languageDesc": "インターフェースの表示言語です。変更後すぐに反映されます。", "langZhCN": "中文", "langEN": "EN", "langJA": "日文", "langKO": "韓語", "about": "について" },
+  "columbina": { "title": "Columbina設定", "subtitle": "Columbinaのエージェント動作、ステータス更新、スタンプ、メモリを管理します。", "runtimeSync": { "title": "ステータスバー同期", "desc": "ステータスと気分の同期方法を制御します。", "off": "オフ", "localKeyword": "ローカルキーワード", "llmAnalysis": "LLM分析", "llmNote": "LLMモードでは毎回追加のモデル呼び出しが発生し、追加のトークン消費があります。" }, "sticker": { "title": "スタンプ送信", "desc": "チャットでのスタンプ送信を制御します。", "enabled": "ステータス：スタンプ送信を許可", "displaySize": "スタンプ表示サイズ", "sizeSmall": "小", "sizeStandard": "標準", "sizeLarge": "大", "similarityThreshold": "類似度閾値", "thresholdHint": "低いほどトリガーしやすく、高いほど精密にマッチ", "manageStickers": "スタンプ管理", "addSticker": "＋ スタンプ追加" }, "rag": { "title": "RAG / ドキュメントインポート", "desc": "ローカル検索モデルを選択します。", "embeddingModel": "Embeddingモデル", "rerankTitle": "リランク", "rerankOff": "オフ", "checking": "確認中..." } },
+  "memory": { "title": "Columbinaメモリー", "subtitle": "Columbinaのあなたに関する知識と記憶。", "l0": { "title": "長期プロフィール", "desc": "Columbinaが常に覚えている情報。", "placeholder": "未設定" }, "l1": { "title": "現在の段階", "desc": "最近の目標、好み、状態。" }, "l2": { "title": "イベント記憶", "desc": "チャットから抽出された重要なイベント。" }, "imported": { "title": "インポート知識", "desc": "ユーザーがアップロードしたドキュメントとナレッジベース。" }, "reflection": { "title": "段階サマリー", "desc": "AIが自動生成する定期的なレビュー。" } },
+  "user": { "title": "マイ情報", "subtitle": "個人識別情報とクラウドアカウント。", "nickname": "ニックネーム", "callPreference": "呼び方の好み", "birthday": "誕生日", "defaultCity": "デフォルト都市" },
+  "chat": { "title": "チャット", "subtitle": "チャットウィンドウとセッション履歴を管理します。", "newChat": "新規チャット", "empty": "まだ会話がありません。" },
+  "tasks": { "title": "スケジュールタスク", "subtitle": "自動トリガーエージェントタスクを管理します。", "newTask": "+ 新規タスク", "empty": "スケジュールタスクはまだありません。", "frequencyOnce": "一回のみ", "frequencyDaily": "毎日", "frequencyWeekly": "毎週", "frequencyInterval": "間隔", "weekdayMon": "月", "weekdayTue": "火", "weekdayWed": "水", "weekdayThu": "木", "weekdayFri": "金", "weekdaySat": "土", "weekdaySun": "日", "unitMinutes": "分", "unitHours": "時間" },
+  "identity": { "title": "役職", "subtitle": "Columbinaのアイデンティティと責任をカスタマイズします。", "placeholder": "近日公開" },
+  "skills": { "panelTitle": "スキル管理", "empty": "利用可能なスキルはまだありません。" },
+  "plugins": { "title": "プラグイン", "subtitle": "Columbinaのツール機能を管理します。", "alwaysOn": "常駐" },
+  "channels": { "title": "スマホ連携" },
+  "disclaimer": { "title": "免責事項", "panelTitle": "免責事項と利用規約" },
+  "tokens": { "title": "トークン使用量", "noData": "まだ使用データがありません。" },
+  "tts": { "title": "TTS設定", "engineOff": "オフ" },
+  "asr": { "title": "ASR設定", "off": "オフ" },
+  "common": { "save": "保存", "cancel": "キャンセル", "confirm": "確認", "delete": "削除", "close": "閉じる", "edit": "編集", "waitingSave": "保存待ち", "saving": "保存中...", "saved": "保存済み", "saveFailed": "保存失敗", "saveSettings": "設定を保存", "saveApiSettings": "API設定を保存", "saveColumbinaSettings": "Columbina設定を保存", "readConfigFailed": "設定の読み込みに失敗しました", "unsavedChanges": "未保存の変更があります" },
+  "providers": { "minimax": "MiniMax", "deepseek": "DeepSeek", "volcano": "Volcano AgentPlan", "glm": "GLM（智譜）", "kimi": "Kimi（月の暗面）", "qwen": "Qwen（通義千問）", "chatgpt": "ChatGPT（OpenAI）", "claude": "Claude（Anthropic）" },
+  "placeholder": { "title": "開発中" },
+  "window": { "minimize": "最小化", "close": "閉じる" }
+}

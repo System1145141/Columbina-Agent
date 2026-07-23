@@ -1,0 +1,23 @@
+{
+  "app": { "title": "Columbina · 설정", "brand": "Columbina", "version": "Columbina v0.2.0", "settingsCenter": "설정 센터" },
+  "nav": { "memory": "메모리", "chat": "채팅", "user": "사용자 정보", "tasks": "예약 작업", "identity": "직위", "skills": "스킬", "plugins": "플러그인", "settings": "설정", "api": "API 설정", "columbina": "Columbina 설정", "channels": "스마트폰 연결", "tts": "TTS 설정", "asr": "ASR 설정", "tokens": "토큰 사용량", "disclaimer": "면책 조항" },
+  "api": { "title": "API 설정", "subtitle": "모델 서비스를 설정하세요. Columbina와 Sandrone이 채팅과 상태 판단에 사용합니다.", "modelPreset": "모델 프리셋", "manualConfig": "수동 설정", "nickname": "닉네임", "apiKey": "API 키", "apiProtocol": "API 프로토콜", "protocolAuto": "자동 (Base URL로 추론)", "protocolOpenAI": "OpenAI 호환", "protocolAnthropic": "Anthropic 호환", "modelName": "모델명", "modelList": { "addModel": "＋ 모델 추가", "delete": "삭제" } },
+  "general": { "title": "설정", "subtitle": "데스크톱 펫, 상태 바, 일정 바, 오디오 설정을 관리합니다.", "sidebarWindow": "상태 바 창", "tasksWindow": "일정 바 창", "music": "음악", "sound": "효과음", "petAlwaysOnTop": "펫 항상 위로", "petVisible": "펫 표시", "petZoom": "펫 확대", "uiTheme": "UI 테마", "themeDeepBlue": "딥블루", "themeLightBlue": "라이트블루", "themePearlWhite": "화이트", "autoStart": "시작 시 자동 실행", "chatHistoryManagement": "채팅 기록 관리", "clearChatHistory": "기록 지우기", "language": "언어", "languageDesc": "인터페이스 표시 언어입니다. 변경 후 즉시 적용됩니다.", "langZhCN": "中文", "langEN": "EN", "langJA": "日文", "langKO": "韓語", "about": "정보" },
+  "columbina": { "title": "Columbina 설정", "subtitle": "Columbina의 에이전트 동작, 상태 업데이트, 스티커, 메모리를 관리합니다.", "runtimeSync": { "title": "상태 바 동기화", "desc": "상태와 기분 동기화 방식을 제어합니다.", "off": "끄기", "localKeyword": "로컬 키워드", "llmAnalysis": "LLM 분석", "llmNote": "LLM 모드는 매번 추가 모델 호출이 발생하여 추가 토큰이 소비됩니다." }, "sticker": { "title": "스티커 전송", "desc": "채팅에서 스티커 전송을 제어합니다.", "enabled": "상태: 스티커 전송 허용", "displaySize": "스티커 표시 크기", "sizeSmall": "작게", "sizeStandard": "표준", "sizeLarge": "크게", "similarityThreshold": "유사도 임계값", "thresholdHint": "낮을수록 쉽게 트리거, 높을수록 정밀하게 매치", "manageStickers": "스티커 관리", "addSticker": "＋ 스티커 추가" }, "rag": { "title": "RAG / 문서 임포트", "desc": "로컬 검색 모델을 선택합니다.", "embeddingModel": "임베딩 모델", "rerankTitle": "재정렬", "rerankOff": "끄기", "checking": "확인 중..." } },
+  "memory": { "title": "Columbina 메모리", "subtitle": "Columbina의 당신에 대한 지식과 기억.", "l0": { "title": "장기 프로필", "desc": "Columbina가 항상 기억하는 정보.", "placeholder": "설정 안 됨" }, "l1": { "title": "현재 단계", "desc": "최근 목표, 선호도, 상태." }, "l2": { "title": "이벤트 메모리", "desc": "채팅에서 추출된 중요한 이벤트." }, "imported": { "title": "가져온 지식", "desc": "사용자가 업로드한 문서와 지식 베이스." }, "reflection": { "title": "단계 요약", "desc": "AI가 자동 생성하는 정기 리뷰." } },
+  "user": { "title": "내 정보", "subtitle": "개인 식별 정보와 클라우드 계정.", "nickname": "닉네임", "callPreference": "호칭 선호", "birthday": "생일", "defaultCity": "기본 도시" },
+  "chat": { "title": "채팅", "subtitle": "채팅 창과 세션 기록을 관리합니다.", "newChat": "새 채팅", "empty": "아직 대화가 없습니다." },
+  "tasks": { "title": "예약 작업", "subtitle": "자동 트리거 에이전트 작업을 관리합니다.", "newTask": "+ 새 작업", "empty": "아직 예약된 작업이 없습니다.", "frequencyOnce": "한 번", "frequencyDaily": "매일", "frequencyWeekly": "매주", "frequencyInterval": "간격", "weekdayMon": "월", "weekdayTue": "화", "weekdayWed": "수", "weekdayThu": "목", "weekdayFri": "금", "weekdaySat": "토", "weekdaySun": "일", "unitMinutes": "분", "unitHours": "시간" },
+  "identity": { "title": "직위", "subtitle": "Columbina의 정체성과 책임을 사용자 정의합니다.", "placeholder": "곧 출시" },
+  "skills": { "panelTitle": "스킬 관리", "empty": "사용 가능한 스킬이 아직 없습니다." },
+  "plugins": { "title": "플러그인", "subtitle": "Columbina의 도구 기능을 관리합니다.", "alwaysOn": "상주" },
+  "channels": { "title": "스마트폰 연결" },
+  "disclaimer": { "title": "면책 조항", "panelTitle": "면책 조항 및 이용 약관" },
+  "tokens": { "title": "토큰 사용량", "noData": "아직 사용 데이터가 없습니다." },
+  "tts": { "title": "TTS 설정", "engineOff": "끄기" },
+  "asr": { "title": "ASR 설정", "off": "끄기" },
+  "common": { "save": "저장", "cancel": "취소", "confirm": "확인", "delete": "삭제", "close": "닫기", "edit": "편집", "waitingSave": "저장 대기", "saving": "저장 중...", "saved": "저장됨", "saveFailed": "저장 실패", "saveSettings": "설정 저장", "saveApiSettings": "API 설정 저장", "saveColumbinaSettings": "Columbina 설정 저장", "readConfigFailed": "설정 읽기 실패", "unsavedChanges": "저장되지 않은 변경 사항이 있습니다" },
+  "providers": { "minimax": "MiniMax", "deepseek": "DeepSeek", "volcano": "Volcano AgentPlan", "glm": "GLM（즈푸）", "kimi": "Kimi（월지암면）", "qwen": "Qwen（통의천문）", "chatgpt": "ChatGPT（OpenAI）", "claude": "Claude（Anthropic）" },
+  "placeholder": { "title": "개발 중" },
+  "window": { "minimize": "최소화", "close": "닫기" }
+}

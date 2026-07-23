@@ -516,3 +516,9 @@ const gameBotApi = {
 };
 contextBridge.exposeInMainWorld("gameBot", gameBotApi);
 
+// i18n 国际化翻译包加载
+const i18nApi = {
+  getBundle: (lang: string) => ipcRenderer.invoke(IPC.I18N_GET_BUNDLE, lang),
+};
+contextBridge.exposeInMainWorld("getI18nBundle", i18nApi.getBundle);
+

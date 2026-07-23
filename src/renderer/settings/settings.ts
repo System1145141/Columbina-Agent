@@ -6,6 +6,8 @@ import {
   formatChatRelativeTime,
   type ChatSessionMetaUI,
 } from "../../shared/chat-ui";
+import { t, setLang, getLang, loadLangBundle, type Lang } from "../../shared/i18n";
+import { applyI18n } from "../../shared/i18n/dom";
 
 // Inline modal (to avoid Vite tree-shaking)
 let _cyModalOverlay: HTMLElement | null = null;
@@ -826,11 +828,13 @@ function applyStickerSizeSelection(value: "small" | "standard" | "large"): void 
   });
 }
 
-function applyLanguageSelection(language: "zh-CN"): void {
+function applyLanguageSelection(language: Lang): void {
   languageSelect.querySelectorAll<HTMLButtonElement>(".language-option").forEach((button) => {
     const active = button.dataset.lang === language;
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-pressed", String(active));
+    // 移除 disabled 属性，启用所有语言按钮
+    button.disabled = false;
   });
 }
 
@@ -897,7 +901,7 @@ async function loadGeneralSettings(): Promise<void> {
     tasksVisibleInput.checked = cfg.tasksVisible ?? true;
     launchAtLoginInput.checked = cfg.launchAtLogin;
     applyUiThemeSelection(normalizeUiTheme(cfg.uiTheme));
-    applyLanguageSelection("zh-CN");
+    applyLanguageSelection((cfg.language as Lang) ?? "zh-CN");
     setGeneralSaveStatus("等待保存");
   } catch {
     setGeneralSaveStatus("读取设置失败", "is-error");
@@ -969,6 +973,28 @@ uiThemeSelect.querySelectorAll<HTMLButtonElement>(".option-block").forEach((butt
     const theme = normalizeUiTheme(button.dataset.theme);
     applyUiThemeSelection(theme);
     setGeneralSaveStatus("有未保存的更改");
+  });
+});
+
+// ── 语言选择器 ──
+async function switchLanguage(lang: Lang): Promise<void> {
+  setLang(lang);
+  applyLanguageSelection(lang);
+  await loadLangBundle(lang);
+  applyI18n(lang);
+  // 更新标题栏
+  sectionTitle.textContent = t(`nav.${currentSection}`, lang);
+  sectionHint.textContent = t(`${currentSection}.hint`, lang);
+  setGeneralSaveStatus("有未保存的更改");
+}
+
+let currentSection = "general";
+languageSelect.querySelectorAll<HTMLButtonElement>(".language-option").forEach((button) => {
+  button.addEventListener("click", () => {
+    const lang = button.dataset.lang as Lang;
+    if (lang && lang !== getLang()) {
+      void switchLanguage(lang);
+    }
   });
 });
 
@@ -1696,7 +1722,7 @@ generalForm.addEventListener("submit", async (e) => {
       sidebarVisible: sidebarVisibleInput.checked,
       tasksVisible: tasksVisibleInput.checked,
       launchAtLogin: launchAtLoginInput.checked,
-      language: "zh-CN",
+      language: getLang(),
       uiTheme: getUiThemeValue(),
     });
     setGeneralSaveStatus("已保存", "is-ok");
@@ -1895,9 +1921,10 @@ async function toggleSchedulerHistory(taskId: string, card: Element): Promise<vo
 }
 
 function switchSection(section: string): void {
+  currentSection = section;
   const label = NAV_LABELS[section] ?? NAV_LABELS.api;
-  sectionTitle.textContent = label.title;
-  sectionHint.textContent = label.hint;
+  sectionTitle.textContent = t(`nav.${section}`);
+  sectionHint.textContent = t(`${section}.hint`);
 
   const isApi = section === "api";
   const isGeneral = section === "general";
@@ -2397,6 +2424,23 @@ channelsLogClearBtn?.addEventListener("click", async () => {
 // 首次进入 channels panel 时拉一次日志
 // （也可以在用户展开 details 时再拉，但保持简单直接拉）
 void loadChannelsPanel();
+
+// ── i18n 初始化：加载保存的语言，载入翻译包，应用翻译 ──
+(async function initI18n() {
+  try {
+    const cfg = await window.settings?.getGeneral();
+    const lang = (cfg?.language as Lang) ?? "zh-CN";
+    setLang(lang);
+    await loadLangBundle(lang);
+    applyLanguageSelection(lang);
+    applyI18n(lang);
+  } catch {
+    // 如果 IPC 不可用，回退到静态导入
+    setLang("zh-CN");
+    await loadLangBundle("zh-CN");
+  }
+})();
+
 // 启动时读 URL hash 决定初始标签（main 通过 loadURL 带 #api 实现"切换模型按钮跳 API"）。
 // 无 hash 默认 general。
 const initialSection = (window.location.hash || "#general").slice(1);
