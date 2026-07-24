@@ -1,6 +1,29 @@
 {
-  "app": { "title": "Columbina · 設定", "brand": "Columbina", "version": "Columbina v{{version}}", "settingsCenter": "設定センター" },
-  "nav": { "ariaLabel": "設定ナビゲーション", "memory": "メモリー", "chat": "チャット", "user": "ユーザー情報", "tasks": "スケジュール", "identity": "役職", "skills": "スキル", "plugins": "プラグイン", "settings": "設定", "api": "API設定", "columbina": "Columbina設定", "channels": "スマホ連携", "tts": "TTS設定", "asr": "ASR設定", "tokens": "トークン使用量", "disclaimer": "免責事項" },
+  "app": {
+    "title": "Columbina · 設定",
+    "brand": "Columbina",
+    "version": "Columbina v{{version}}",
+    "settingsCenter": "設定センター"
+  },
+  "nav": {
+    "ariaLabel": "設定ナビゲーション",
+    "memory": "メモリー",
+    "chat": "チャット",
+    "user": "ユーザー情報",
+    "tasks": "スケジュール",
+    "identity": "役職",
+    "skills": "スキル",
+    "plugins": "プラグイン",
+    "settings": "設定",
+    "general": "一般",
+    "api": "API設定",
+    "columbina": "Columbina設定",
+    "channels": "スマホ連携",
+    "tts": "TTS設定",
+    "asr": "ASR設定",
+    "tokens": "トークン使用量",
+    "disclaimer": "免責事項"
+  },
   "api": {
     "title": "API設定",
     "hint": "モデルサービスの設定を入力してください。ローカルに保存されます。",
