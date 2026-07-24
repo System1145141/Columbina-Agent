@@ -304,6 +304,16 @@ const roleModelLeft = document.getElementById("role-model-left") as HTMLSelectEl
 const roleModelRight = document.getElementById("role-model-right") as HTMLSelectElement | null;
 const roleNameLeft = document.getElementById("role-name-left") as HTMLElement | null;
 const roleNameRight = document.getElementById("role-name-right") as HTMLElement | null;
+
+/** 根据当前选中的 reasoning 选项刷新显示值 */
+function updateReasoningValueDisplay(): void {
+  const menu = document.getElementById("reasoning-dropdown");
+  const active = menu?.querySelector(".dm-opt.is-active") as HTMLElement | null;
+  const display = document.getElementById("reasoning-val");
+  if (!active || !display) return;
+  const key = active.getAttribute("data-i18n");
+  display.textContent = key ? t(key) : active.textContent?.trim() ?? "";
+}
 const emptyTextEl = document.getElementById("chat-empty-text") as HTMLElement | null;
 
 /** 每个角色各自选中的模型 id（模型列表中的 id） */
@@ -2959,7 +2969,14 @@ clearBtn.addEventListener("click", clearChat);
         menu.querySelectorAll(".dm-opt").forEach(function(o) { o.classList.remove("is-active"); });
         opt.classList.add("is-active");
         var val = values[id];
-        if (val) val.textContent = opt.textContent?.trim() || "";
+        if (!val) return;
+        if (id === "reasoning-dropdown") {
+          // reasoning 下拉选项通过 i18n key 显示，保持中英文 label 统一
+          const key = opt.getAttribute("data-i18n");
+          val.textContent = key ? t(key) : opt.textContent?.trim() || "";
+        } else {
+          val.textContent = opt.textContent?.trim() || "";
+        }
         closeAll();
       });
     });
@@ -3065,11 +3082,15 @@ if (particlesCtx) {
   setI18nVars({ version: APP_VERSION });
   await loadLangBundle(lang);
   applyI18n(lang);
+  updateReasoningValueDisplay();
 })().then(async () => {
   // 设置页切换语言后，主进程广播要求重载
   window.columbinaI18n?.onReload((lang) => {
     setLang(lang as Lang);
-    void loadLangBundle(lang as Lang).then(() => applyI18n(lang as Lang));
+    void loadLangBundle(lang as Lang).then(() => {
+      applyI18n(lang as Lang);
+      updateReasoningValueDisplay();
+    });
   });
   await loadEnabledStickers();
   await bootstrap();
