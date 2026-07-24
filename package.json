@@ -54,7 +54,7 @@
     "playwright": "^1.60.0",
     "qr-image": "^3.2.0",
     "qrcode": "^1.5.4",
-    "rxjs": "^7.8.1",
+    "rxjs": "^7.8.2",
     "turndown": "^7.2.4",
     "wink-bm25-text-search": "^3.1.2",
     "ws": "^8.21.0"
@@ -66,5 +66,10 @@
     "esbuild@0.21.5": true,
     "sharp@0.32.6": true,
     "tree-sitter@0.22.4": true
+  },
+  "overrides": {
+    "@ag-ui/client": {
+      "rxjs": "7.8.2"
+    }
   }
 }
