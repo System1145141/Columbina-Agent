@@ -47,7 +47,7 @@
             </button>
             <span class="chat__role-selector" id="role-selector">
               <span class="chat__role-group" id="role-left">
-                <span class="chat__role-name" id="role-name-left">哥伦比娅</span>
+                <span class="chat__role-name" id="role-name-left" data-i18n="chatWindow.roleColumbina">哥伦比娅</span>
                 <select class="chat__role-model-select" id="role-model-left" aria-label="哥伦比娅的模型" data-i18n-aria="chatWindow.columbinaModel"></select>
               </span>
               <label class="chat__role-switch" id="role-toggle-label">
@@ -56,7 +56,7 @@
               </label>
               <span class="chat__role-group" id="role-right">
                 <select class="chat__role-model-select" id="role-model-right" aria-label="桑多涅的模型" data-i18n-aria="chatWindow.sandroneModel"></select>
-                <span class="chat__role-name" id="role-name-right">桑多涅</span>
+                <span class="chat__role-name" id="role-name-right" data-i18n="chatWindow.roleSandrone">桑多涅</span>
               </span>
             </span>
           </div>
@@ -73,7 +73,7 @@
             </div>
             <div class="dropdown-trigger" data-dropdown="reasoning-dropdown">
               <span class="dt-label" data-i18n="chatWindow.reasoning">推理</span>
-              <span class="dt-value" id="reasoning-val">Auto · 自动</span>
+              <span class="dt-value" id="reasoning-val"></span>
               <span class="dt-arrow"></span>
             </div>
             <button type="button" class="chat__icon-btn" id="clear" aria-label="清空对话" title="清空对话" data-i18n-aria="chatWindow.clearChat" data-i18n-title="chatWindow.clearChat">⌫</button>
@@ -133,11 +133,11 @@
   </div>
   <div class="dropdown-menu" id="reasoning-dropdown">
     <div class="dm-title" data-i18n="chatWindow.reasoningTitle">推理强度</div>
-    <div class="dm-opt" data-value="Custom · 自定义">Custom · 自定义</div>
-    <div class="dm-opt is-active" data-value="Auto · 自动">Auto · 自动</div>
-    <div class="dm-opt" data-value="Low · 低">Low · 低</div>
-    <div class="dm-opt" data-value="Medium · 中">Medium · 中</div>
-    <div class="dm-opt" data-value="High · 高">High · 高</div>
+    <div class="dm-opt" data-value="custom" data-i18n="chatWindow.reasoningCustom">Custom · 自定义</div>
+    <div class="dm-opt is-active" data-value="auto" data-i18n="chatWindow.reasoningAuto">Auto · 自动</div>
+    <div class="dm-opt" data-value="low" data-i18n="chatWindow.reasoningLow">Low · 低</div>
+    <div class="dm-opt" data-value="medium" data-i18n="chatWindow.reasoningMedium">Medium · 中</div>
+    <div class="dm-opt" data-value="high" data-i18n="chatWindow.reasoningHigh">High · 高</div>
   </div>
 </body>
 </html>
