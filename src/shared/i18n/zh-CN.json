@@ -44,6 +44,8 @@
     "modelNamePlaceholder": "模型名称",
     "modelList": {
       "addModel": "＋ 添加模型",
+      "setDefault": "设为默认",
+      "default": "默认",
       "delete": "删除"
     }
   },
@@ -217,7 +219,7 @@
     "empty": "还没有定时任务。新建一个任务，让 Columbina 按时间自动执行提示词。",
     "newTaskTitle": "新建定时任务",
     "editTaskTitle": "编辑定时任务",
-    "title": "标题",
+    "newTaskSetTitle": "标题",
     "titlePlaceholder": "例如：早安信息整理",
     "prompt": "提示词",
     "promptPlaceholder": "到点后发给 LLM 的提示词",
@@ -595,7 +597,7 @@
     "permissionFullAccess": "完全访问：Columbina 可自由读写本地文件（风险自担）。",
     "permissionFullWarning": "完全访问权限会允许 Columbina 自由读写本地文件，包括系统关键文件，请确认你已理解并接受全部风险。",
     "permissionFullRiskLabel": "⚠️ 风险自担",
-    "permissionFullCountdown": "5 秒后可确认",
+    "permissionFullCountdownTip": "5 秒后可确认",
     "skillSourceUser": " （用户）",
     "skillMiniMaxDesc": "MiniMax开源的办公文档Skills合集",
     "chatCompanion": "聊天陪伴",

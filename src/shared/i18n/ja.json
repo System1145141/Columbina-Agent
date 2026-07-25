@@ -42,7 +42,10 @@
     "protocolAnthropic": "Anthropic互換",
     "modelName": "モデル名",
     "modelNamePlaceholder": "モデル名",
-    "modelList": { "addModel": "＋ モデル追加", "delete": "削除" }
+    "modelList": { "addModel": "＋ モデル追加",
+      "setDefault": "デフォルト設定",
+      "default": "デフォルト",
+      "delete": "削除" }
   },
   "general": {
     "title": "設定",
@@ -214,7 +217,7 @@
     "empty": "スケジュールタスクはまだありません。タスクを作成してColumbinaに定期的なプロンプトを実行させましょう。",
     "newTaskTitle": "新規スケジュールタスク",
     "editTaskTitle": "スケジュールタスクを編集",
-    "title": "タイトル",
+    "newTaskSetTitle": "タイトル",
     "titlePlaceholder": "例：朝のニュースまとめ",
     "prompt": "プロンプト",
     "promptPlaceholder": "トリガー時にLLMに送信するプロンプト",
@@ -576,7 +579,7 @@
     "permissionFullAccess": "フルアクセス：Columbinaはローカルファイルを自由に読み書きできます（自己責任）。",
     "permissionFullWarning": "フルアクセスはColumbinaがシステムの重要なファイルを含むローカルファイルを自由に読み書きできるようにします。すべてのリスクを理解し受け入れたことを確認してください。",
     "permissionFullRiskLabel": "⚠️ 自己責任",
-    "permissionFullCountdown": "5秒後に確認可能",
+    "permissionFullCountdownTip": "5秒後に確認可能",
     "skillSourceUser": " （ユーザー）",
     "skillMiniMaxDesc": "MiniMaxオープンソースのオフィス文書Skillsコレクション",
     "chatCompanion": "チャット陪伴",

@@ -42,7 +42,12 @@
     "protocolAnthropic": "Anthropic Compatible",
     "modelName": "Model Name",
     "modelNamePlaceholder": "Model name",
-    "modelList": { "addModel": "+ Add Model", "delete": "Delete" }
+    "modelList": { 
+      "addModel": "+ Add Model",
+      "setDefault": "Set Default",
+      "default": "Default",
+       "delete": "Delete" 
+    }
   },
   "general": {
     "title": "Settings",
@@ -214,7 +219,7 @@
     "empty": "No scheduled tasks yet. Create a task to let Columbina run prompts on a schedule.",
     "newTaskTitle": "New Scheduled Task",
     "editTaskTitle": "Edit Scheduled Task",
-    "title": "Title",
+    "newTaskSetTitle": "Title",
     "titlePlaceholder": "e.g. Morning news digest",
     "prompt": "Prompt",
     "promptPlaceholder": "Prompt sent to LLM at trigger time",
@@ -576,7 +581,7 @@
     "permissionFullAccess": "Full access: Columbina can freely read/write local files (at your own risk).",
     "permissionFullWarning": "Full access allows Columbina to freely read/write local files, including system-critical files. Please confirm you understand and accept all risks.",
     "permissionFullRiskLabel": "⚠️ At your own risk",
-    "permissionFullCountdown": "5 seconds until confirm available",
+    "permissionFullCountdownTip": "5 seconds until confirm available",
     "skillSourceUser": " (User)",
     "skillMiniMaxDesc": "MiniMax open-source office document Skills collection",
     "chatCompanion": "Chat Companion",

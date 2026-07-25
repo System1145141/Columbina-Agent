@@ -42,7 +42,10 @@
     "protocolAnthropic": "Anthropic 호환",
     "modelName": "모델명",
     "modelNamePlaceholder": "모델 이름",
-    "modelList": { "addModel": "＋ 모델 추가", "delete": "삭제" }
+    "modelList": { "addModel": "＋ 모델 추가",
+      "setDefault": "기본 설정",
+      "default": "기본",
+      "delete": "삭제" }
   },
   "general": {
     "title": "설정",
@@ -214,7 +217,7 @@
     "empty": "아직 예약된 작업이 없습니다. 작업을 만들어 Columbina가 일정에 따라 프롬프트를 실행하게 하세요.",
     "newTaskTitle": "새 예약 작업",
     "editTaskTitle": "예약 작업 편집",
-    "title": "제목",
+    "newTaskSetTitle": "제목",
     "titlePlaceholder": "예: 아침 뉴스 정리",
     "prompt": "프롬프트",
     "promptPlaceholder": "트리거 시 LLM에 전송할 프롬프트",
@@ -576,7 +579,7 @@
     "permissionFullAccess": "전체 액세스: Columbina가 로컬 파일을 자유롭게 읽고 쓸 수 있습니다 (본인 책임).",
     "permissionFullWarning": "전체 액세스는 Columbina가 시스템 중요 파일을 포함한 로컬 파일을 자유롭게 읽고 쓸 수 있게 합니다. 모든 위험을 이해하고 수락했는지 확인하세요.",
     "permissionFullRiskLabel": "⚠️ 본인 책임",
-    "permissionFullCountdown": "5초 후 확인 가능",
+    "permissionFullCountdownTip": "5초 후 확인 가능",
     "skillSourceUser": " (사용자)",
     "skillMiniMaxDesc": "MiniMax 오픈소스 사무 문서 Skills 컬렉션",
     "chatCompanion": "채팅 동반",
