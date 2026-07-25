@@ -113,6 +113,8 @@ export interface ModelSettingsLite {
   stickerSimilarityThreshold?: number;
   /** 模型列表 */
   models?: ModelEntry[];
+  /** 全局默认模型 id */
+  defaultModelId?: string;
 }
 
 export interface UserProfileLite {
@@ -154,13 +156,14 @@ export async function buildAgentRunOptions(
 ): Promise<{ options: ColumbinaRunOptions; latestUserText: string }> {
   const settings = deps.loadModelSettings();
 
-  // 如果前端指定了 modelId，从模型列表中查找并覆盖 API 配置
+  // 模型选择回退链：input.modelId → defaultModelId → 主模型配置
   let effectiveProvider = settings.provider;
   let effectiveBaseUrl = settings.baseUrl;
   let effectiveModel = settings.model;
   let effectiveApiKey = settings.apiKey;
-  if (input.modelId && settings.models) {
-    const matched = settings.models.find((m) => m.id === input.modelId);
+  let effectiveModelId = input.modelId || settings.defaultModelId;
+  if (effectiveModelId && settings.models) {
+    const matched = settings.models.find((m) => m.id === effectiveModelId);
     if (matched) {
       effectiveProvider = matched.provider || effectiveProvider;
       effectiveBaseUrl = matched.baseUrl || effectiveBaseUrl;

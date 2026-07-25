@@ -104,6 +104,7 @@ export const IPC = {
   // public model config updates (no API key)
   MODEL_CONFIG_GET: "model-config:get",
   MODEL_CONFIG_CHANGED: "model-config:changed",
+  MODEL_CONFIG_SAVE_SELECTED_MODEL_IDS: "model-config:save-selected-model-ids",
 
   // runtime state updates (status / feeling / expression)
   RUNTIME_STATE_GET: "runtime-state:get",

@@ -161,6 +161,13 @@ interface ModelEntry {
 interface ModelSettings {
   /** 模型服务列表 */
   models?: ModelEntry[];
+  /** 全局默认模型 id */
+  defaultModelId?: string;
+  /** 各角色当前选中的模型 id */
+  selectedModelIds?: {
+    columbina?: string;
+    sandrone?: string;
+  };
   mode: "auto" | "manual";
   provider: string;
   displayName?: string;
@@ -548,6 +555,7 @@ let editingSchedulerTaskId: string | null = null;
 // 模型列表（替代旧的单模型 + 视觉配置）
 // ══════════════════════════════════════════════
 let modelEntries: ModelEntry[] = [];
+let currentDefaultModelId: string | null = null;
 
 const modelListEl = document.getElementById("model-list") as HTMLElement;
 const addModelBtn = document.getElementById("add-model-btn") as HTMLButtonElement;
@@ -614,17 +622,33 @@ function renderModelList(): void {
       info.appendChild(prov);
     }
 
+    const setDefault = document.createElement("button");
+    setDefault.type = "button";
+    const isDefault = currentDefaultModelId === entry.id;
+    setDefault.className = isDefault ? "model-entry__default is-default" : "model-entry__default";
+    setDefault.textContent = isDefault ? t("api.modelList.default") : t("api.modelList.setDefault");
+    setDefault.disabled = isDefault;
+    setDefault.addEventListener("click", () => {
+      currentDefaultModelId = entry.id;
+      renderModelList();
+      setSaveStatus(t("settingsExtra.unsavedChanges"));
+    });
+
     const del = document.createElement("button");
     del.type = "button";
     del.className = "model-entry__delete";
     del.textContent = t("common.delete");
     del.addEventListener("click", () => {
       modelEntries = modelEntries.filter((m) => m.id !== entry.id);
+      if (currentDefaultModelId === entry.id) {
+        currentDefaultModelId = null;
+      }
       renderModelList();
       setSaveStatus(t("settingsExtra.unsavedChanges"));
     });
 
     div.appendChild(info);
+    div.appendChild(setDefault);
     div.appendChild(del);
     return div;
   });
@@ -870,6 +894,7 @@ async function loadConfig(): Promise<void> {
     fillModelPresetOptions();
     const cfg = await window.settings!.getConfig();
     modelEntries = Array.isArray(cfg.models) ? cfg.models : [];
+    currentDefaultModelId = cfg.defaultModelId ?? null;
     renderModelList();
     applyRuntimeSyncSelection(cfg.runtimeSync);
     stickerEnabledInput.checked = cfg.stickerEnabled !== false;
@@ -1751,6 +1776,7 @@ apiForm.addEventListener("submit", async (e) => {
   try {
     await window.settings!.saveConfig({
       models: modelEntries,
+      defaultModelId: currentDefaultModelId ?? undefined,
       runtimeSync: getRuntimeSyncValue(),
       stickerEnabled: stickerEnabledInput.checked,
       stickerSize: getStickerSizeValue(),
@@ -3166,7 +3192,7 @@ async function confirmFullAccess(): Promise<boolean> {
   // 倒计时 5 秒强制等待
   let remain = 5;
   confirmBtn.disabled = true;
-  confirmBtn.textContent = t("settingsExtra.permissionFullCountdown").replace("{countdown}", String(remain));
+  confirmBtn.textContent = t("settingsExtra.permissionFullCountdownTip").replace("{countdown}", String(remain));
   const tick = setInterval(() => {
     remain -= 1;
     if (remain <= 0) {

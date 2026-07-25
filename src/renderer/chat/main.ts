@@ -63,10 +63,16 @@ interface ModelConfig {
   connected: boolean;
   stickerSize: "small" | "standard" | "large";
   models: ModelEntry[];
+  defaultModelId?: string;
+  selectedModelIds?: {
+    columbina?: string;
+    sandrone?: string;
+  };
 }
 
 interface ModelConfigApi {
   get: () => Promise<ModelConfig>;
+  saveSelectedModelIds: (selectedModelIds: { columbina?: string; sandrone?: string }) => Promise<ModelConfig>;
   onChanged: (callback: (config: ModelConfig) => void) => () => void;
 }
 
@@ -348,6 +354,20 @@ function populateModelSelect(select: HTMLSelectElement | null, models: ModelEntr
 function applyModelConfig(config: ModelConfig | null): void {
   currentModelConfig = config;
   const models = config?.models ?? [];
+  const validIds = new Set(models.map((m) => m.id));
+  // 用已保存的角色选择恢复；若未保存或失效，则回退到全局默认模型
+  selectedModelId.columbina =
+    (config?.selectedModelIds?.columbina && validIds.has(config.selectedModelIds.columbina)
+      ? config.selectedModelIds.columbina
+      : config?.defaultModelId && validIds.has(config.defaultModelId)
+        ? config.defaultModelId
+        : null);
+  selectedModelId.sandrone =
+    (config?.selectedModelIds?.sandrone && validIds.has(config.selectedModelIds.sandrone)
+      ? config.selectedModelIds.sandrone
+      : config?.defaultModelId && validIds.has(config.defaultModelId)
+        ? config.defaultModelId
+        : null);
   populateModelSelect(roleModelLeft, models, selectedModelId.columbina);
   populateModelSelect(roleModelRight, models, selectedModelId.sandrone);
   document.documentElement.dataset.stickerSize = config?.stickerSize ?? "standard";
@@ -637,11 +657,13 @@ async function bootstrap(): Promise<void> {
   if (roleModelLeft) {
     roleModelLeft.addEventListener("change", () => {
       selectedModelId.columbina = roleModelLeft.value || null;
+      void window.modelConfig?.saveSelectedModelIds({ ...selectedModelId });
     });
   }
   if (roleModelRight) {
     roleModelRight.addEventListener("change", () => {
       selectedModelId.sandrone = roleModelRight.value || null;
+      void window.modelConfig?.saveSelectedModelIds({ ...selectedModelId });
     });
   }
   // 初始化角色 UI 状态

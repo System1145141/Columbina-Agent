@@ -3044,6 +3044,29 @@ body {
   white-space: nowrap;
 }
 
+.model-entry__default {
+  font: var(--rb-text-small);
+  color: var(--rb-text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: var(--rb-radius-sm);
+  transition: color 150ms ease, background 150ms ease;
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+
+.model-entry__default:hover {
+  color: var(--rb-blue-400);
+  background: rgba(96, 165, 250, 0.1);
+}
+
+.model-entry__default.is-default {
+  color: var(--rb-blue-400);
+  cursor: default;
+}
+
 .model-entry__delete {
   font: var(--rb-text-small);
   color: var(--rb-text-muted);

@@ -17,6 +17,7 @@ interface ModelConfig {
 
 interface ModelConfigApi {
   get: () => Promise<ModelConfig>;
+  saveSelectedModelIds: (selectedModelIds: { columbina?: string; sandrone?: string }) => Promise<ModelConfig>;
   onChanged: (callback: (config: ModelConfig) => void) => () => void;
 }
 

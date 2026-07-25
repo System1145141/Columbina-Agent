@@ -332,6 +332,13 @@ interface ModelSettings {
   embeddingModel: "minilm" | "bgem3";
   /** 模型列表（新版 API 设置，替换单模型 + 视觉模型方案）。 */
   models?: ModelEntry[];
+  /** 全局默认模型 id（模型列表中的某一条）。未指定或无效时回退到主模型配置。 */
+  defaultModelId?: string;
+  /** 各角色当前选中的模型 id。 */
+  selectedModelIds?: {
+    columbina?: string;
+    sandrone?: string;
+  };
   // 视觉模型配置（可选）。undefined 或未启用 = 不支持看图，read_image 诚实拒绝。
   vision?: VisionModelConfig;
 }
@@ -472,6 +479,13 @@ interface PublicModelConfig {
   rerankerMode: "light" | "standard" | "none";
   /** 已保存的模型列表（供前端角色选择器下拉使用） */
   models: ModelEntry[];
+  /** 全局默认模型 id。 */
+  defaultModelId?: string;
+  /** 各角色当前选中的模型 id。 */
+  selectedModelIds?: {
+    columbina?: string;
+    sandrone?: string;
+  };
 }
 
 type RuntimeStatus = "陪伴中" | "思考中" | "工作中" | "聆听中" | "提醒中" | "离线";
@@ -780,6 +794,26 @@ function normalizeModelSettings(input: Partial<ModelSettings> | null | undefined
   // 顶层镜像：用 perProvider[provider] 展开
   const profile = perProvider[provider];
 
+  const models = Array.isArray(input?.models) ? input.models : [];
+  const validModelIds = new Set(models.map((m) => m.id).filter((id): id is string => typeof id === "string"));
+
+  const defaultModelId =
+    typeof input?.defaultModelId === "string" && validModelIds.has(input.defaultModelId)
+      ? input.defaultModelId
+      : undefined;
+
+  const rawSelected =
+    input?.selectedModelIds && typeof input.selectedModelIds === "object" && !Array.isArray(input.selectedModelIds)
+      ? (input.selectedModelIds as Record<string, unknown>)
+      : {};
+  const selectedModelIds: NonNullable<ModelSettings["selectedModelIds"]> = {};
+  if (typeof rawSelected.columbina === "string" && validModelIds.has(rawSelected.columbina)) {
+    selectedModelIds.columbina = rawSelected.columbina;
+  }
+  if (typeof rawSelected.sandrone === "string" && validModelIds.has(rawSelected.sandrone)) {
+    selectedModelIds.sandrone = rawSelected.sandrone;
+  }
+
   return {
     mode,
     provider,
@@ -797,7 +831,9 @@ function normalizeModelSettings(input: Partial<ModelSettings> | null | undefined
       : 0.55,
     rerankerMode: input?.rerankerMode === "standard" || input?.rerankerMode === "none" ? input.rerankerMode : "light",
     embeddingModel: input?.embeddingModel === "bgem3" ? "bgem3" : "minilm",
-    models: Array.isArray(input?.models) ? input.models : [],
+    models,
+    defaultModelId,
+    selectedModelIds: Object.keys(selectedModelIds).length > 0 ? selectedModelIds : undefined,
     vision: normalizeVisionConfig(input?.vision),
   };
 }
@@ -888,6 +924,16 @@ function saveModelSettings(settings: Partial<ModelSettings>): ModelSettings {
 
   merged.provider = currentProvider;
   merged.perProvider = perProvider;
+
+  // 保存全局默认模型 id（由设置页 UI 维护）
+  if (typeof settings.defaultModelId === "string") {
+    merged.defaultModelId = settings.defaultModelId.trim() || undefined;
+  }
+
+  // 保存各角色选中的模型 id（由聊天页 UI 维护）
+  if (settings.selectedModelIds && typeof settings.selectedModelIds === "object" && !Array.isArray(settings.selectedModelIds)) {
+    merged.selectedModelIds = settings.selectedModelIds as ModelSettings["selectedModelIds"];
+  }
 
   const final = normalizeModelSettings(merged);
   const filePath = getSettingsPath();
@@ -1898,6 +1944,8 @@ function getPublicModelConfig(settings = loadModelSettings()): PublicModelConfig
     stickerSize: settings.stickerSize,
     rerankerMode: settings.rerankerMode,
     models: settings.models ?? [],
+    defaultModelId: settings.defaultModelId,
+    selectedModelIds: settings.selectedModelIds,
   };
 }
 
@@ -2839,6 +2887,12 @@ ipcMain.on(IPC.SETTINGS_SET_PET_ZOOM, (_event, value: number) => {
 
 ipcMain.handle(IPC.MODEL_CONFIG_GET, () => {
   return getPublicModelConfig();
+});
+
+ipcMain.handle(IPC.MODEL_CONFIG_SAVE_SELECTED_MODEL_IDS, (_event, selectedModelIds: ModelSettings["selectedModelIds"]) => {
+  const saved = saveModelSettings({ selectedModelIds });
+  broadcastModelConfigChanged(saved);
+  return getPublicModelConfig(saved);
 });
 
 ipcMain.handle(IPC.RUNTIME_STATE_GET, () => {
