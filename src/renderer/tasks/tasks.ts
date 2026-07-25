@@ -264,11 +264,18 @@ async function refreshAll(): Promise<void> {
 
 // ── 启动 ──────────────────────────────────────────────────────
 async function init(): Promise<void> {
-  // i18n init
-  const lang = (window as any).__LANG__ as Lang | undefined ?? "zh-CN";
+  // i18n init（与设置页一致：从主进程读取已保存的语言）
   setI18nVars({ version: APP_VERSION });
-  await loadLangBundle(lang);
-  applyI18n(lang);
+  try {
+    const cfg = await (window as any).settings?.getGeneral?.();
+    const lang = (cfg?.language as Lang) ?? "zh-CN";
+    setLang(lang);
+    await loadLangBundle(lang);
+    applyI18n(lang);
+  } catch {
+    setLang("zh-CN");
+    await loadLangBundle("zh-CN");
+  }
 
   // 设置页切换语言后，主进程广播要求重载
   window.columbinaI18n?.onReload((newLang) => {
