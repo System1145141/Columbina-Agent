@@ -1,7 +1,8 @@
 **Columbina-Agent 是一个 Windows 桌面 AI 伴侣，支持聊天、记忆、语音、工具调用和多平台接入。**
 
-> 基于 Electron + TypeScript 开发的桌面端 Live2D 智能对话 Agent，
+> 基于 Electron + TypeScript 开发的桌面端智能对话 Agent，
 > 搭载《原神》哥伦比娅（Columbina）与桑多涅（Sandrone）人设，支持日常聊天、情感交互与个性化记忆引擎。
+> 项目基于[Cyrene-Agent](https://github.com/Playa-0v0/Cyrene-Agent/)开发，支持原生国际化、改进的Agent系统等功能
 
 ---
 
@@ -12,11 +13,33 @@
 - 🔊 **语音通话** — TTS + ASR，解放双手
 - 🛠 **工具生态** — 文档生成、联网搜索、文件操作
 - 📱 **多平台接入** — 飞书、微信 iLink
+- 🌐 **原生多语言支持** — 中英日韩四语UI、中英双语提示词
 
 > [!IMPORTANT]
 >
-> Columbina-Agent 不再支持 Live2D 桌宠功能
-> 若体验Live2D 桌宠功能，请前往[Cyrene-Agent](https://github.com/Playa-0v0/Cyrene-Agent/)
+> Columbina-Agent 不再支持 Live2D 桌宠功能和游戏自动化功能
+> 若体验上述功能，请前往原项目[Cyrene-Agent](https://github.com/Playa-0v0/Cyrene-Agent/)
+
+---
+
+## ✨ 与原项目的区别
+
+- 🎨 **UI 改造** — 全新深蓝、浅蓝、白色主题
+- 🔌 **多 Agent 对话** — 哥伦比娅、桑多涅主Agent，可调用子 Agent 处理特定任务
+- 🔑 **API 管理** — 改进的 API Key 管理器与模型选择器
+- 🌐 **多语言支持** — 中英日韩四语UI和中英双语提示词
+
+---
+
+## ✨ 我该选择哪个项目
+
+Columbina-Agent与Cyrene-Agent并**不会冲突**，你可以同时保留两个项目
+
+**Cyrene-Agent**拥有优秀的Live2D资源，并更新了音乐播放功能
+**Columbina-Agent**拥有原生多语言支持和多 Agent 对话功能
+
+> [!IMPORTANT]
+> 请不要将Cyrene-Agent的对话历史导入Columbina-Agent，这可能对其造成永久性损坏！
 
 ---
 
@@ -40,8 +63,7 @@
 >
 > Columbina 可以直接聊天。
 >
-> 但如果你希望获得完整体验（贴纸语义匹配、场景语义增强等），
-> **强烈推荐安装 BGE-M3 Embedding 模型**。
+> 但如果你希望获得完整体验（贴纸语义匹配、场景语义增强等），**推荐安装 BGE-M3 Embedding 模型**。
 
 ### 1. 克隆仓库
 
@@ -56,7 +78,7 @@ cd Columbina-Agent
 npm install
 ```
 
-首次安装会下载 Electron Binaries 与 Pixi.js / Live2D 等渲染依赖，
+首次安装会下载 Electron Binaries 等依赖，
 耗时 3–15 分钟，取决于网络。
 
 ### 3. 安装本地模型（强烈推荐）
@@ -79,8 +101,7 @@ npm run build
 npm start
 ```
 
-同时运行 `tsc`（主进程 / preload）+ `vite` + Electron，主进程改动自动
-重启 Electron，渲染层改动 Vite HMR 热更新。
+同时运行 `tsc`（主进程 / preload）+ `vite` + Electron，主进程改动自动重启 Electron，渲染层改动 Vite HMR 热更新。
 
 ---
 
@@ -88,8 +109,7 @@ npm start
 
 应用启动后，**点系统托盘图标 → 打开设置**，完成以下基础配置：
 
-1. **🔑 API 设置**：选 LLM 厂商 preset（OpenAI / Anthropic / MiniMax / ...），
-   填写 API Key（**必填**，Agent 才能工作）。
+1. **🔑 API 设置**：选 LLM 厂商 preset（OpenAI / Anthropic / MiniMax / ...）， 填写 API Key（**必填**，Agent 才能工作）。
 2. **🎙️ TTS 设置**：选语音合成引擎
 3. **🎧 ASR 设置**（可选）：如需语音通话，填阿里云实时 ASR 的 AppKey / AccessKey。
 4. **📱 连接手机**（可选）：要接入飞书 / 微信 iLink 时配置。
@@ -148,15 +168,11 @@ call 窗口**没有文本输入框**或 PTT（Push-To-Talk）按钮，所有对�
 
 **理论上可以启动：**
 
-| 平台            | 状态       | 备注     |
-| ------------- | -------- | ------ |
-| Windows 10/11 | ✅ 完整测试   | 主要目标平台 |
-| macOS         | 🧡 未测试   | -      |
-| Linux         | 🧡 不完整测试 | 次要目标平台 |
-
-`game-bot` 模块的 `nut.js` 是原生模块，三平台都有预编译的二进制（`package-lock.json` 里 darwin/linux/win32 三种 `libnut` 子包），但**仅在 Windows 上做了端到端测试**。
-
-如果你在 macOS/Linux 上跑出兼容性问题，欢迎开 issue 反馈。
+| 平台            | 状态     | 备注     |
+| ------------- | ------ | ------ |
+| Windows 10/11 | ✅ 完整测试 | 主要目标平台 |
+| macOS         | 🧡 未测试 | -      |
+| Linux         | ✅ 完整测试 | 次要目标平台 |
 
 ### 出现 OOM / 内存泄漏怎么办？
 
@@ -173,22 +189,26 @@ call 窗口**没有文本输入框**或 PTT（Push-To-Talk）按钮，所有对�
 
 ## 📊 当前状态
 
-| 模块                                       | 状态          |
-| ---------------------------------------- | ----------- |
-| 🪟 多窗口 / 表情互动                            | ✅ 可用        |
-| 🪟 Live2D 桌宠                             | ⚠️ 不再支持     |
-| 💬 日常聊天 / 语音通话 / 多会话历史 / 贴纸              | ✅ 可用        |
-| 🧠 记忆系统（L0/L1/L2 + 自研 DMAE Worldbook 引擎） | ✅ 可用        |
-| 🔊 TTS / ASR / 文档生成 / 联网搜索 / 文件操作        | ✅ 可用（部分需配置） |
-| 📱 飞书 Lark 长连接                           | 🧪 实验性      |
-| 📱 微信 iLink Bot                          | 🧪 实验性      |
-| 🔌 MCP（Model Context Protocol）生态         | 🧪 实验性      |
-| ✨ Skill 系统                               | ✅ 可用        |
-| 📚 RAG 文档知识库（含混合检索 / reranker）           | 🧪 实验性      |
-| 🔌 多 Agent 功能                            | 🧪 实验性      |
-| 🌐 多语言支持                                 | 🧪 实验性      |
-| 📄 Columbina-IDE                         | 🗂️ 进行中     |
-
+| 模块                                       | 状态       |
+| ---------------------------------------- | -------- |
+| 🪟 多窗口 / 表情互动                            | ✅ 可用     |
+| 🪟 Live2D 桌宠                             | ⚠️ 不再支持  |
+| 💬 日常聊天 / 语音通话 / 多会话历史 / 贴纸              | ✅ 可用     |
+| 🧠 记忆系统（L0/L1/L2 + 自研 DMAE Worldbook 引擎） | ✅ 可用     |
+| 🔊 TTS / ASR / 文档生成 / 联网搜索 / 文件操作        | ✅ 可用     |
+| 📱 飞书 Lark 长连接                           | 🧪 实验性   |
+| 📱 微信 iLink Bot                          | 🧪 实验性   |
+| 🔌 MCP（Model Context Protocol）生态         | 🧪 实验性   |
+| ✨ Skill 系统                               | ✅ 可用     |
+| 📚 RAG 文档知识库（含混合检索 / reranker）           | 🧪 实验性   |
+| 🔌 多主 Agent 功能                           | 🧪 实验性   |
+| 🔌 SubAgent 功能（串行）                       | ✅ 可用     |
+| 🔌 SubAgent 集群功能（并行）                     | 🧪 实验性   |
+| 🌐 UI多语言支持                               | ✅ 可用     |
+| 🌐 Prompt多语言支持                           | 🧪 中文、英语 |
+| 📄 Columbina-IDE                         | 🗂️ 开发中  |
+>**✅ 可用** 指 日常使用体验稳定
+>**🧪 实验性** 指 功能已实现但仍有部分漏洞，可能略微影响体验
 ---
 
 ## ✨ 功能
@@ -230,76 +250,23 @@ call 窗口**没有文本输入框**或 PTT（Push-To-Talk）按钮，所有对�
 - **任务委派** — `delegate_task`（sub-agent）、`todo_write`（任务清单）、
   `ask_user_choice`（用户选择卡片）。
 
-<details>
-<summary><b>🧩 高级功能</b>（点击展开）</summary>
-
-#### 📚 RAG 文档知识库
-- 支持 txt/md/pdf/docx/xlsx/pptx/csv/json 多格式导入，`source: imported_doc` 可追溯。
-- 混合检索：向量 + BM25 + reranker（light / standard / none 三档）。
-- 双 embedding 后端：本地 `@xenova/transformers` + 云端 OpenAI 兼容。
-- 实体关系图谱，jieba 词典注入防止"昔涟/小鹿"等被错误切分。
-
-#### 🔌 MCP（Model Context Protocol）
-- 支持 stdio / SSE / HTTP 三种 transport。
-- 内置 servers 自动同步，`install_mcp_server` 工具让 Agent 自动装新 server。
-- 自带 Playwright MCP 配置。
-
-#### 📱 外部渠道
-- **飞书 Lark 长连接** — 官方 SDK + WebSocket（无需公网 / 域名 / 内网穿透），
-  p2p 私聊，多模态 text / image / audio / video / file / sticker。
-- **微信 iLink Bot** — iLink Bot HTTP / long-poll 35s 拉取 → 自动 sendText。
-
-#### 🤖 Game Bot 游戏自动化
-- `engine.ts` 步骤解释器：`launch / wait / key / click / vlm_click /
-  vlm_select / vlm_check / branch` 等指令。
-- 配合 GameRecipe 格式描述自动化流程，VLM 视觉定位 + nut-js 键鼠输入。
-- 暴露为 `game_bot_start` 工具，可被 Agent 调用。
-
-#### ✨ Skill 系统
-- 双源扫描：`prompts/skills/` 内置 + `<userData>/skills/` 用户覆盖，
-  目录级整体覆盖。
-- Meta 工具 `invoke_skill` / `read_skill_reference`，路径穿越防护 + 读
-  重放拦截 + 大文本截断。
-- 支持 `/skill_id ...` slash 命令。
-
-</details>
-
-<details>
-<summary><b>🔧 开发功能</b>（点击展开）</summary>
-
-#### 🧪 单元测试
-- Vitest 4 覆盖 asr / tts / channels / chats / game-bot / memory /
-  opener / orchestrator / rag / scheduler / skills 等核心模块。
-- `npm test` 一次性 / `npm run test:watch` 监听模式。
-
-#### 🎬 场景模拟
-- `npm run sim` 默认场景 / `sim:coffee` / `sim:mix` / `sim:rescue` 单场景调试。
-- `npm run sim:sweep --rewardGain=3,5,7,10` 跑 Worldbook 评分参数 sweep。
-- 产物输出到 `sim-result/`。
-
-#### 🔧 开发者体验
-- 统一 IPC 总线：`shared/ipc-channels.ts` 定义 90+ 通道常量。
-- 运行时状态 preview：设置面板实时预览情绪 / 状态文案。
-- Embedding 模型热切换：自动检测维度不匹配并清空旧库。
-- 文件监视 / 热更新：`watchWorldbookFile` 等运行时热加载。
-
-</details>
-
 ---
 
 ## 🧱 技术栈
 
-| 层 | 技术 |
-|---|---|
-| Shell | Electron 43 |
-| 渲染层 | Vite 5 + TypeScript 5 + Pixi.js 7 |
+| 层        | 技术                                                          |
+| -------- | ----------------------------------------------------------- |
+| Shell    | Electron 43                                                 |
+| 渲染层      | Vite 5 + TypeScript 5 + Pixi.js 7                           |
 | AI / MCP | `@modelcontextprotocol/sdk`, `@ag-ui/core`, `@ag-ui/client` |
-| 集成 | 飞书 OpenAPI、微信 iLink、Nodemailer、PDFKit、docx |
-| 测试 | Vitest 4 |
+| 集成       | 飞书 OpenAPI、微信 iLink、Nodemailer、PDFKit、docx                  |
+| 测试       | Vitest 4                                                    |
 
 ---
 
 ## 📦 项目结构
+
+> 本章节的内容可能已经过时
 
 ```
 models/                # 本地 AI 模型（用户放置，见 docs/local-models.md）
@@ -319,7 +286,6 @@ src/
 │   ├── channels/     # 外部渠道适配层（飞书 / 微信 iLink / ...）
 │   ├── chats/        # 多会话历史与持久化
 │   ├── embedding-manager.ts  # 本地 embedding 模型生命周期
-│   ├── game-bot/     # 游戏自动化（game-recipes 驱动）
 │   ├── memory/       # L0/L1/L2 记忆引擎
 │   ├── opener/       # 启动器 / 托盘 / 单实例
 │   ├── orchestrator/ # Agent 主循环 + 工具调度
@@ -334,7 +300,6 @@ src/
 ├── renderer/         # Vite 渲染层
 │   ├── call/         # 语音通话窗口
 │   ├── chat/         # 主聊天界面
-│   ├── live2d/       # Live2D 模型渲染逻辑
 │   ├── public/       # 静态资源（音频 / 头像 / Cubism Core / 贴纸）
 │   ├── settings/     # 设置中心
 │   ├── sidebar/      # 侧边栏
@@ -342,14 +307,14 @@ src/
 │   ├── tasks/        # 任务面板
 │   ├── types/        # 共享类型定义
 │   └── ui/           # 通用 UI 组件
-└── shared/           # 主进程与渲染进程共享代码
+├── shared/           # 主进程与渲染进程共享代码
+│   ├── i18n/         # i18n语言包和相关代码
 
 dist/renderer/        # Vite 构建产物（不在 git 跟踪范围内）
 ├── assets/           # 打包后的 JS/CSS
 ├── audio/            # 音频资源
 ├── avatars/          # 头像图片
 ├── call/ chat/ settings/ sidebar/ sticker-manager/ tasks/   # HTML 入口
-├── models/cyrene/    # Live2D 模型 — 见 MODEL_LICENSE.md
 └── stickers/         # 贴纸图片资源
 ```
 
@@ -361,23 +326,33 @@ dist/renderer/        # Vite 构建产物（不在 git 跟踪范围内）
 
 ## ⚠️ 免责声明
 
-本项目为**非官方粉丝同人作品**，与 HoYoverse / 米哈游**无任何关联、
-背书或赞助关系**。
+本项目为**非官方粉丝同人作品**，与 米哈游（MiHoYo）**无任何关联、背书或赞助关系**。
 
-《崩坏：星穹铁道》、"昔涟"角色及其相关美术，世界观、商标等知识产权
-归 **HoYoverse / 米哈游**所有。
+《原神》、"哥伦比娅"、"桑多涅"角色及其相关美术，世界观、商标等知识产权归 米哈游（MiHoYo）所有。
 
 **关于授权范围的说明**：
 
-- **源代码**采用 [MIT License](./LICENSE)，仅约束本仓库的源代码。
-- **角色 IP、Live2D 模型、美术资产** 不属于 MIT 授权范围，分别遵循
-  [MODEL_LICENSE.md](./MODEL_LICENSE.md) 与米哈游同人创作规范处理。
-- 因底层角色 IP 涉及米哈游同人创作规范，**本项目及其衍生物严禁任何
-  商业用途**（售卖、付费社群、含广告变现、打包销售等）。
+- **源代码**采用 [MIT License](./LICENSE)，仅约束本仓库中，在Cyrene-Agent上修改的源代码。
+- **角色 IP、Live2D 模型、美术资产** 不属于 MIT 授权范围，分别遵循 [MODEL_LICENSE.md](./MODEL_LICENSE.md) 与米哈游同人创作规范处理。
+- 因底层角色 IP 涉及米哈游同人创作规范，**本项目及其衍生物严禁任何商业用途**（售卖、付费社群、含广告变现、打包销售等）。
+- 本项目不再支持 昔涟 Live2D 模型，但可能仍有部分代码残留，将在未来的版本逐步清理
 
 ---
 
-## 📄 许可证
+## 📄 许可证（Columbina-Agent）
+
+> 在本章节，“本仓库”指Columbina-Agent
+
+本仓库的**源代码**遵循 [MIT License](./LICENSE)，Copyright (c) 2026 System1145141。
+MIT 仅约束本仓库的源代码，不适用于角色与第三方美术资产。
+
+角色 IP（《原神》哥伦比娅"、"桑多涅" 等）归 米哈游（MiHoYo）所有。
+
+---
+
+## 📄 许可证（Cyrene-Agent）
+
+> 在本章节，“本仓库”指Cyrene-Agent
 
 本仓库的**源代码**遵循 [MIT License](./LICENSE)，Copyright (c) 2026 Playa。
 MIT 仅约束本仓库的源代码，不适用于角色、Live2D 模型与美术资产。
@@ -394,12 +369,13 @@ MIT 仅约束本仓库的源代码，不适用于角色、Live2D 模型与美术
 
 ## 🙏 致谢
 
-- **昔涟角色**：© HoYoverse / 米哈游
-- **Live2D 模型**：由 [@是依七哒](https://space.bilibili.com/457683484) 制作 —
-  详见 [MODEL_LICENSE.md](./MODEL_LICENSE.md)
+- **哥伦比娅、桑多涅角色**：© HoYoverse / 米哈游
+- **Live2D 模型**：由 [@是依七哒](https://space.bilibili.com/457683484) 制作 — 见 [MODEL_LICENSE.md](./MODEL_LICENSE.md)
 - **Live2D Cubism SDK**：© Live2D Cubism
-
+- **[Cyrene-Agent](https://github.com/Playa-0v0/Cyrene-Agent/)**：[Playa-0v0](https://github.com/Playa-0v0)
 特别感谢模型原作者慷慨授权本项目使用、修改并再分发其作品。
+特别感谢[Playa-0v0](https://github.com/Playa-0v0)和其它贡献者对原项目[Cyrene-Agent](https://github.com/Playa-0v0/Cyrene-Agent/)的开发
+特别感谢 [Playa-0v0](https://github.com/Playa-0v0) 将 Cyrene-Agent 以 MIT 协议开源，使得本项目能够在其基础上进行 UI 改造、多Agent扩展和国际化增强。
 
 ---
 
@@ -409,4 +385,4 @@ MIT 仅约束本仓库的源代码，不适用于角色、Live2D 模型与美术
 
 ---
 
-⭐ 如果你喜欢这个项目，欢迎点一个 Star。这会帮助更多喜欢昔涟的人发现它。
+⭐ 如果你喜欢这个项目，欢迎点一个 Star。这会帮助更多喜欢哥伦比娅和桑多涅的人发现它。
