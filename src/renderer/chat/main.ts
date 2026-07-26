@@ -23,6 +23,8 @@ interface Message {
   sticker?: string | null;
   thinking?: boolean;
   ttsCacheKey?: string;
+  /** 模型消息对应的角色身份（columbina / sandrone），用于显示正确头像。user 消息为 null。 */
+  identityId?: AgentRole | null;
 }
 
 interface ChatReplyPayload {
@@ -209,9 +211,6 @@ const FRONTEND_REPLY_TIMEOUT_MS = 35000;
  * User side: 暂留空，等设置页里上传用户头像后再把 user 改成 file:// 或 data: URL。
  */
 const AVATAR_SRC = {
-  get model() {
-    return resolveAsset(`avatars/${currentRole === "sandrone" ? "Sandrone" : "Columbina"}.jpg`);
-  },
   user: "",
 };
 
@@ -429,6 +428,7 @@ interface ChatStoreSession {
     at: number;
     sticker?: string | null;
     ttsCacheKey?: string;
+    identityId?: AgentRole | null;
   }>;
   createdAt: number;
   updatedAt: number;
@@ -463,7 +463,7 @@ declare global {
 // - 过滤空 content / 渲染中的 thinking 占位（thinking=true 时通常 content 为空，但保险起见双重过滤）
 // - 丢弃 thinking 字段（持久化层不存这种瞬态状态）
 function toPersistableMessages(arr: Message[]): Array<{
-  id: string; role: Role; content: string; at: number; sticker?: StickerId | null; ttsCacheKey?: string;
+  id: string; role: Role; content: string; at: number; sticker?: StickerId | null; ttsCacheKey?: string; identityId?: AgentRole | null;
 }> {
   return arr
     .filter((m) => m && (m.role === "user" || m.role === "model") && typeof m.content === "string" && m.content.trim() && !m.thinking)
@@ -474,6 +474,7 @@ function toPersistableMessages(arr: Message[]): Array<{
       at: m.at,
       sticker: m.sticker ?? null,
       ttsCacheKey: m.ttsCacheKey,
+      identityId: m.identityId ?? null,
     }));
 }
 
@@ -498,6 +499,7 @@ function loadSessionIntoUI(session: ChatStoreSession): void {
       at: m.at,
       sticker: m.sticker ?? null,
       ttsCacheKey: m.ttsCacheKey,
+      identityId: (m.identityId as AgentRole | null | undefined) ?? null,
     });
   }
   // 上报活跃 sessionId（设置面板"删除当前会话"差异化提示用）
@@ -1049,9 +1051,14 @@ function aqiKaomojiText(aqi: number): string {
  * - user role (empty src): leave the slot empty so the CSS gradient
  *   placeholder shows through.
  */
-function setAvatar(slot: HTMLElement, role: Role): void {
+function setAvatar(slot: HTMLElement, role: Role, identityId?: AgentRole | null): void {
   slot.replaceChildren();
-  const src = AVATAR_SRC[role];
+  let src = "";
+  if (role === "model") {
+    src = resolveAsset(`avatars/${identityId === "sandrone" ? "Sandrone" : "Columbina"}.jpg`);
+  } else {
+    src = AVATAR_SRC.user;
+  }
   if (!src) return;
   const img = document.createElement("img");
   img.src = src;
@@ -1077,7 +1084,7 @@ function render(): void {
     const avatar = document.createElement("div");
     avatar.className = "msg__avatar";
     avatar.setAttribute("aria-hidden", "true");
-    setAvatar(avatar, m.role);
+    setAvatar(avatar, m.role, m.identityId);
 
     const body = document.createElement("div");
     body.className = "msg__body";
@@ -1241,10 +1248,11 @@ function installSchedulerEventListener(): void {
         role: "model",
         content: t("chatWindow.scheduledTaskTriggered").replace("{title}", value?.title || t("chatWindow.unnamedTask")),
         at: Date.now(),
+        identityId: "columbina",
       });
       const msgId = `scheduler-model-${runKey}`;
       streams.set(runKey, { msgId, content: "", toolLines: [] });
-      messages.push({ id: msgId, role: "model", content: "", at: Date.now(), thinking: true });
+      messages.push({ id: msgId, role: "model", content: "", at: Date.now(), thinking: true, identityId: "columbina" });
       render();
       void saveSession();
       return;
@@ -2245,7 +2253,7 @@ async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAgentTurnR
   try {
     await refreshModelConfig();
     streamMsgId = String(Date.now() + 1);
-    const streamMsg = { id: streamMsgId, role: "model" as const, content: "", at: Date.now(), thinking: true };
+    const streamMsg = { id: streamMsgId, role: "model" as const, content: "", at: Date.now(), thinking: true, identityId: role };
     messages.push(streamMsg);
     render();
 
@@ -2413,6 +2421,7 @@ async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAgentTurnR
       msg.thinking = false;
       msg.content = streamContent;
       msg.sticker = sticker;
+      msg.identityId = role;
     }
     void saveSession();
     const finishedMsgId = streamMsgId;
@@ -2436,12 +2445,14 @@ async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAgentTurnR
     if (msg) {
       msg.thinking = false;
       msg.content = t("chatWindow.connectModelFailed") + message;
+      msg.identityId = role;
     } else {
       messages.push({
         id: String(Date.now() + 2),
         role: "model",
         content: t("chatWindow.connectModelFailed") + message,
         at: Date.now(),
+        identityId: role,
       });
     }
     void saveSession();
@@ -2530,7 +2541,7 @@ async function triggerAgentGreeting(): Promise<void> {
   let streamMsgId = "";
   try {
     streamMsgId = String(Date.now() + 1);
-    const streamMsg = { id: streamMsgId, role: "model" as const, content: "", at: Date.now(), thinking: true };
+    const streamMsg = { id: streamMsgId, role: "model" as const, content: "", at: Date.now(), thinking: true, identityId: currentRole };
     messages.push(streamMsg);
     render();
 
@@ -2701,6 +2712,7 @@ async function triggerAgentGreeting(): Promise<void> {
       msg.thinking = false;
       msg.content = streamContent;
       msg.sticker = sticker;
+      msg.identityId = currentRole;
     }
     void saveSession();
     const finishedMsgId = streamMsgId;
@@ -2724,12 +2736,14 @@ async function triggerAgentGreeting(): Promise<void> {
     if (msg) {
       msg.thinking = false;
       msg.content = t("chatWindow.connectModelFailed") + message;
+      msg.identityId = currentRole;
     } else {
       messages.push({
         id: String(Date.now() + 2),
         role: "model",
         content: t("chatWindow.connectModelFailed") + message,
         at: Date.now(),
+        identityId: currentRole,
       });
     }
     void saveSession();
@@ -2805,6 +2819,7 @@ async function send(): Promise<void> {
     content: fullUserText,
     at: Date.now(),
     sticker: userStickerId,
+    identityId: null,
   };
   messages.push(userMsg);
   inputEl.value = "";
