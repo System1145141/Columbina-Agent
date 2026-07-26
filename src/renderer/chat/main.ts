@@ -2152,15 +2152,26 @@ function buildModelMessages(): Array<{ role: "user" | "model"; content: string }
 }
 
 /** 为 Agent 自动接力附加 handoff 指令。该消息不进入本地 messages 历史。 */
-function buildRunMessages(includeHandoffPrompt: boolean): Array<{ role: "user" | "model"; content: string }> {
+function buildRunMessages(
+  includeHandoffPrompt: boolean,
+  role: AgentRole = currentRole,
+): Array<{ role: "user" | "model"; content: string }> {
   const base = buildModelMessages();
   if (!includeHandoffPrompt) return base;
+
+  const selfName = role === "columbina"
+    ? t("chatWindow.roleColumbina")
+    : t("chatWindow.roleSandrone");
+  const partnerName = role === "columbina"
+    ? t("chatWindow.roleSandrone")
+    : t("chatWindow.roleColumbina");
+
   return [
     ...base,
     {
       role: "user",
       content:
-        '[system:handoff] 如果你认为另一位同伴需要补充、反驳或总结当前话题，请在回复末尾输出 [HANDOFF:CONTINUE]；否则输出 [HANDOFF:STOP]。不要在回复正文中解释或提及这个标记。',
+        `[system:handoff] 你是${selfName}。如果你认为${partnerName}需要补充、反驳或总结当前话题，请在回复末尾输出 [HANDOFF:CONTINUE]；否则输出 [HANDOFF:STOP]。不要在回复正文中解释或提及这个标记。`,
     },
   ];
 }
@@ -2382,7 +2393,7 @@ async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAgentTurnR
     });
 
     const ack = await window.agui!.run({
-      messages: buildRunMessages(includeHandoffPrompt),
+      messages: buildRunMessages(includeHandoffPrompt, role),
       style: getCurrentStyle(),
       sessionId: currentSessionId || undefined,
       identityId: role,
