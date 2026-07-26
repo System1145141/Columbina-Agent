@@ -476,7 +476,7 @@ if (!window.settings) {
         stickerSize: "standard",
       }),
     saveConfig: (c) => Promise.resolve(c as ModelSettings),
-    getGeneral: () => Promise.resolve({ musicEnabled: false, musicVolume: 60, soundEnabled: true, soundVolume: 70, petAlwaysOnTop: true, petVisible: true, petZoom: 1, sidebarVisible: true, tasksVisible: true, launchAtLogin: false, language: "zh-CN", uiTheme: "deep-blue" }),
+    getGeneral: () => Promise.resolve({ musicEnabled: false, musicVolume: 60, soundEnabled: true, soundVolume: 70, petAlwaysOnTop: true, petVisible: true, petZoom: 1, sidebarVisible: true, tasksVisible: true, launchAtLogin: false, language: "zh-CN", uiTheme: "deep-blue", agentAutoHandoff: false, maxHandoffRounds: 1 }),
     saveGeneral: (c) => Promise.resolve(c as GeneralSettings),
     openSidebar: () => {},
     closeSidebar: () => {},
@@ -760,6 +760,8 @@ const uiThemeSelect = document.getElementById("ui-theme-select") as HTMLElement;
 const languageSelect = document.getElementById("language-select") as HTMLElement;
 const sidebarVisibleInput = document.getElementById("sidebar-visible") as HTMLInputElement;
 const tasksVisibleInput = document.getElementById("tasks-visible") as HTMLInputElement;
+const agentAutoHandoffInput = document.getElementById("agent-auto-handoff") as HTMLInputElement;
+const maxHandoffRoundsInput = document.getElementById("max-handoff-rounds") as HTMLInputElement;
 const clearChatHistoryBtn = document.getElementById("clear-chat-history-btn") as HTMLButtonElement;
 const openStickerManagerBtn = document.getElementById("open-sticker-manager-btn") as HTMLButtonElement;
 const addStickerBtn = document.getElementById("add-sticker-btn") as HTMLButtonElement;
@@ -926,6 +928,8 @@ async function loadGeneralSettings(): Promise<void> {
     sidebarVisibleInput.checked = cfg.sidebarVisible ?? true;
     tasksVisibleInput.checked = cfg.tasksVisible ?? true;
     launchAtLoginInput.checked = cfg.launchAtLogin;
+    agentAutoHandoffInput.checked = cfg.agentAutoHandoff ?? false;
+    maxHandoffRoundsInput.value = String(Math.max(0, Math.min(5, cfg.maxHandoffRounds ?? 1)));
     applyUiThemeSelection(normalizeUiTheme(cfg.uiTheme));
     applyLanguageSelection((cfg.language as Lang) ?? "zh-CN");
     setGeneralSaveStatus(t("settingsExtra.waitingSave"));
@@ -1748,6 +1752,8 @@ generalForm.addEventListener("submit", async (e) => {
       sidebarVisible: sidebarVisibleInput.checked,
       tasksVisible: tasksVisibleInput.checked,
       launchAtLogin: launchAtLoginInput.checked,
+      agentAutoHandoff: agentAutoHandoffInput.checked,
+      maxHandoffRounds: Math.max(0, Math.min(5, Number(maxHandoffRoundsInput.value) || 1)),
       language: getLang(),
       uiTheme: getUiThemeValue(),
     });

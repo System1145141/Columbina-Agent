@@ -81,6 +81,10 @@
     "langEN": "EN",
     "langJA": "日文",
     "langKO": "韓語",
+    "agentAutoHandoff": "Agent 자동 릴레이",
+    "agentAutoHandoffDesc": "현재 Agent가 발언을 마친 후 [HANDOFF:CONTINUE]를 출력하면 다른 Agent가 자동으로 이어서 발언합니다.",
+    "maxHandoffRounds": "최대 릴레이 횟수",
+    "maxHandoffRoundsDesc": "사용자가 메시지를 한 번 본 후 두 Agent 간 최대 릴레이 횟수입니다.",
     "about": "정보",
     "aboutDesc": "Columbina v{{version}} · 경량 감정 동반 데스크톱 Agent"
   },

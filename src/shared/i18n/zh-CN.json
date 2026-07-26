@@ -83,6 +83,10 @@
     "langEN": "EN",
     "langJA": "日文",
     "langKO": "韩语",
+    "agentAutoHandoff": "Agent 自动接力",
+    "agentAutoHandoffDesc": "当前 Agent 说完后，若输出 [HANDOFF:CONTINUE]，另一 Agent 会自动接话。",
+    "maxHandoffRounds": "最大接力轮数",
+    "maxHandoffRoundsDesc": "单次用户发消息后，两个 Agent 之间最多接力几轮。",
     "about": "关于",
     "aboutDesc": "Columbina v{{version}} · 轻量情感陪伴桌面 Agent"
   },

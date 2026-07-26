@@ -462,6 +462,10 @@ interface GeneralSettings {
   asrShowTranscript: boolean;
   /** Opener 主动开口档位 */
   openerMode: "off" | "quiet" | "normal" | "lively";
+  /** Agent 自动接力：当前 Agent 回复后，由模型标记 [HANDOFF:CONTINUE] 触发另一 Agent 接话 */
+  agentAutoHandoff: boolean;
+  /** Agent 自动接力最大轮数，防止无限循环 */
+  maxHandoffRounds: number;
 }
 
 
@@ -596,6 +600,8 @@ const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   asrVadSilenceMs: 1000,
   asrShowTranscript: false,
   openerMode: "off",
+  agentAutoHandoff: false,
+  maxHandoffRounds: 1,
 };
 
 function getSettingsPath(): string {
@@ -1022,6 +1028,10 @@ function normalizeGeneralSettings(input: Partial<GeneralSettings> | null | undef
     openerMode: ["off", "quiet", "normal", "lively"].includes(String(input?.openerMode))
       ? (input!.openerMode as "off" | "quiet" | "normal" | "lively")
       : "off",
+    agentAutoHandoff: input?.agentAutoHandoff === undefined ? DEFAULT_GENERAL_SETTINGS.agentAutoHandoff : Boolean(input.agentAutoHandoff),
+    maxHandoffRounds: typeof input?.maxHandoffRounds === "number" && Number.isFinite(input.maxHandoffRounds) && input.maxHandoffRounds >= 0
+      ? Math.round(input.maxHandoffRounds)
+      : DEFAULT_GENERAL_SETTINGS.maxHandoffRounds,
     ttsGptsovitsBaseUrl: typeof input?.ttsGptsovitsBaseUrl === "string" ? input.ttsGptsovitsBaseUrl : DEFAULT_GENERAL_SETTINGS.ttsGptsovitsBaseUrl,
     ttsGptsovitsRefAudioPath: typeof input?.ttsGptsovitsRefAudioPath === "string" ? input.ttsGptsovitsRefAudioPath : "",
     ttsGptsovitsPromptText: typeof input?.ttsGptsovitsPromptText === "string" ? input.ttsGptsovitsPromptText : "",
