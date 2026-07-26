@@ -38,7 +38,17 @@ if (!window.tasks) {
 }
 
 // ── 常量 ──────────────────────────────────────────────────────
-const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+function getWeekdays(): string[] {
+  return [
+    t("tasks.weekdaySun"),
+    t("tasks.weekdayMon"),
+    t("tasks.weekdayTue"),
+    t("tasks.weekdayWed"),
+    t("tasks.weekdayThu"),
+    t("tasks.weekdayFri"),
+    t("tasks.weekdaySat"),
+  ];
+}
 const CHART_HEIGHT_PX = 76;          // mini-chart 可用柱高（与 settings 页一致）
 const MIN_BAR_PX = 6;                 // 无数据柱最低高度，避免完全消失
 const TASK_REFRESH_MS = 30_000;       // 任务列表轮询
@@ -82,7 +92,7 @@ function renderDate(): void {
     .replace("{year}", String(now.getFullYear()))
     .replace("{month}", String(now.getMonth() + 1))
     .replace("{day}", String(now.getDate()))
-    .replace("{weekday}", WEEKDAYS[now.getDay()]);
+    .replace("{weekday}", getWeekdays()[now.getDay()]);
 }
 
 // ── 渲染：今日 Token 用量 + 进度条（拉满+电流感） ────────────
@@ -125,7 +135,7 @@ function renderWeeklyBars(data7: TokenDayData[]): void {
     const isFuture = i > todayDow;
     weekSlots.push({
       date: key,
-      weekday: WEEKDAYS[day.getDay()],
+      weekday: getWeekdays()[day.getDay()],
       total: data && !isFuture ? (data.input + data.output) : (isFuture ? null : 0),
       isToday,
       isFuture,
