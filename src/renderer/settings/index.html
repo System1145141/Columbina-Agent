@@ -252,6 +252,21 @@
               </div>
             </label>
 
+            <label class="setting-row">
+              <div>
+                <strong data-i18n="general.agentAutoHandoff">Agent 自动接力</strong>
+                <span data-i18n="general.agentAutoHandoffDesc">当前 Agent 说完后，若输出 [HANDOFF:CONTINUE]，另一 Agent 会自动接话。</span>
+              </div>
+              <span class="switch"><input id="agent-auto-handoff" type="checkbox" /><span class="switch__track"><span class="switch__thumb"></span></span></span>
+            </label>
+
+            <label class="setting-row">
+              <div>
+                <strong data-i18n="general.maxHandoffRounds">最大接力轮数</strong>
+                <span data-i18n="general.maxHandoffRoundsDesc">单次用户发消息后，两个 Agent 之间最多接力几轮。</span>
+              </div>
+              <input id="max-handoff-rounds" type="number" min="0" max="5" value="1" style="width: 64px; text-align: center;" />
+            </label>
 
             <div class="setting-row setting-row--about">
               <div>

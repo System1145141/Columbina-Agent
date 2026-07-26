@@ -23,6 +23,8 @@ interface Message {
   sticker?: string | null;
   thinking?: boolean;
   ttsCacheKey?: string;
+  /** 模型消息对应的角色身份（columbina / sandrone），用于显示正确头像。user 消息为 null。 */
+  identityId?: AgentRole | null;
 }
 
 interface ChatReplyPayload {
@@ -209,9 +211,6 @@ const FRONTEND_REPLY_TIMEOUT_MS = 35000;
  * User side: 暂留空，等设置页里上传用户头像后再把 user 改成 file:// 或 data: URL。
  */
 const AVATAR_SRC = {
-  get model() {
-    return resolveAsset(`avatars/${currentRole === "sandrone" ? "Sandrone" : "Columbina"}.jpg`);
-  },
   user: "",
 };
 
@@ -302,6 +301,9 @@ let currentModelConfig: ModelConfig | null = null;
 // ── 角色选择 ──────────────────────────────────────────────
 type AgentRole = "columbina" | "sandrone";
 let currentRole: AgentRole = "columbina";
+let autoHandoffEnabled = false;
+let maxHandoffRounds = 1;
+const HANDOFF_REGEX = /\[HANDOFF:(STOP|CONTINUE)\]/gi;
 
 const roleToggle = document.getElementById("role-toggle") as HTMLInputElement | null;
 const roleGroupLeft = document.getElementById("role-left") as HTMLElement | null;
@@ -426,6 +428,7 @@ interface ChatStoreSession {
     at: number;
     sticker?: string | null;
     ttsCacheKey?: string;
+    identityId?: AgentRole | null;
   }>;
   createdAt: number;
   updatedAt: number;
@@ -460,7 +463,7 @@ declare global {
 // - 过滤空 content / 渲染中的 thinking 占位（thinking=true 时通常 content 为空，但保险起见双重过滤）
 // - 丢弃 thinking 字段（持久化层不存这种瞬态状态）
 function toPersistableMessages(arr: Message[]): Array<{
-  id: string; role: Role; content: string; at: number; sticker?: StickerId | null; ttsCacheKey?: string;
+  id: string; role: Role; content: string; at: number; sticker?: StickerId | null; ttsCacheKey?: string; identityId?: AgentRole | null;
 }> {
   return arr
     .filter((m) => m && (m.role === "user" || m.role === "model") && typeof m.content === "string" && m.content.trim() && !m.thinking)
@@ -471,6 +474,7 @@ function toPersistableMessages(arr: Message[]): Array<{
       at: m.at,
       sticker: m.sticker ?? null,
       ttsCacheKey: m.ttsCacheKey,
+      identityId: m.identityId ?? null,
     }));
 }
 
@@ -495,6 +499,7 @@ function loadSessionIntoUI(session: ChatStoreSession): void {
       at: m.at,
       sticker: m.sticker ?? null,
       ttsCacheKey: m.ttsCacheKey,
+      identityId: (m.identityId as AgentRole | null | undefined) ?? null,
     });
   }
   // 上报活跃 sessionId（设置面板"删除当前会话"差异化提示用）
@@ -1046,9 +1051,14 @@ function aqiKaomojiText(aqi: number): string {
  * - user role (empty src): leave the slot empty so the CSS gradient
  *   placeholder shows through.
  */
-function setAvatar(slot: HTMLElement, role: Role): void {
+function setAvatar(slot: HTMLElement, role: Role, identityId?: AgentRole | null): void {
   slot.replaceChildren();
-  const src = AVATAR_SRC[role];
+  let src = "";
+  if (role === "model") {
+    src = resolveAsset(`avatars/${identityId === "sandrone" ? "Sandrone" : "Columbina"}.jpg`);
+  } else {
+    src = AVATAR_SRC.user;
+  }
   if (!src) return;
   const img = document.createElement("img");
   img.src = src;
@@ -1074,7 +1084,7 @@ function render(): void {
     const avatar = document.createElement("div");
     avatar.className = "msg__avatar";
     avatar.setAttribute("aria-hidden", "true");
-    setAvatar(avatar, m.role);
+    setAvatar(avatar, m.role, m.identityId);
 
     const body = document.createElement("div");
     body.className = "msg__body";
@@ -1238,10 +1248,11 @@ function installSchedulerEventListener(): void {
         role: "model",
         content: t("chatWindow.scheduledTaskTriggered").replace("{title}", value?.title || t("chatWindow.unnamedTask")),
         at: Date.now(),
+        identityId: "columbina",
       });
       const msgId = `scheduler-model-${runKey}`;
       streams.set(runKey, { msgId, content: "", toolLines: [] });
-      messages.push({ id: msgId, role: "model", content: "", at: Date.now(), thinking: true });
+      messages.push({ id: msgId, role: "model", content: "", at: Date.now(), thinking: true, identityId: "columbina" });
       render();
       void saveSession();
       return;
@@ -2148,6 +2159,40 @@ function buildModelMessages(): Array<{ role: "user" | "model"; content: string }
     }));
 }
 
+/** 为 Agent 自动接力附加 handoff 指令。该消息不进入本地 messages 历史。 */
+function buildRunMessages(
+  includeHandoffPrompt: boolean,
+  role: AgentRole = currentRole,
+): Array<{ role: "user" | "model"; content: string }> {
+  const base = buildModelMessages();
+  if (!includeHandoffPrompt) return base;
+
+  const selfName = role === "columbina"
+    ? t("chatWindow.roleColumbina")
+    : t("chatWindow.roleSandrone");
+  const partnerName = role === "columbina"
+    ? t("chatWindow.roleSandrone")
+    : t("chatWindow.roleColumbina");
+
+  return [
+    ...base,
+    {
+      role: "user",
+      content:
+        `[system:handoff] 你是${selfName}。如果你认为${partnerName}需要补充、反驳或总结当前话题，请在回复末尾输出 [HANDOFF:CONTINUE]；否则输出 [HANDOFF:STOP]。不要在回复正文中解释或提及这个标记。`,
+    },
+  ];
+}
+
+function parseHandoff(content: string): { cleanContent: string; shouldHandoff: boolean } {
+  let shouldHandoff = false;
+  const cleanContent = content.replace(HANDOFF_REGEX, (_match, flag) => {
+    if (flag.toUpperCase() === "CONTINUE") shouldHandoff = true;
+    return "";
+  }).trim();
+  return { cleanContent, shouldHandoff };
+}
+
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = window.setTimeout(() => reject(new Error(message)), timeoutMs);
@@ -2182,6 +2227,240 @@ async function getModelReply(): Promise<ChatReplyPayload> {
 }
 
 let sending = false;
+
+interface RunAgentTurnOptions {
+  role: AgentRole;
+  attachments?: { name: string; text: string }[];
+  includeHandoffPrompt?: boolean;
+}
+
+interface RunAgentTurnResult {
+  content: string;
+  sticker: string | null;
+  weatherCard: Record<string, unknown> | null;
+  error: boolean;
+}
+
+/** 运行一轮 Agent 回复，包含事件流订阅、渲染和持久化。 */
+async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAgentTurnResult> {
+  const { role, attachments = [], includeHandoffPrompt = false } = options;
+  let streamMsgId = "";
+  let streamContent = "";
+  let sticker: string | null = null;
+  let pendingWeatherCard: Record<string, unknown> | null = null;
+  let error = false;
+
+  try {
+    await refreshModelConfig();
+    streamMsgId = String(Date.now() + 1);
+    const streamMsg = { id: streamMsgId, role: "model" as const, content: "", at: Date.now(), thinking: true, identityId: role };
+    messages.push(streamMsg);
+    render();
+
+    let ttsContent = "";
+    let autoSpeakTriggered = false;
+    const earlyMinimaxPlayback = createEarlyMinimaxPlayback();
+    textMouthStarted = false;
+    let pendingTtsCachePromise: Promise<{ cacheKey: string } | null> | null = null;
+
+    let finishRun!: () => void;
+    let failRun!: (err: Error) => void;
+    const runDone = new Promise<void>((resolve, reject) => {
+      finishRun = resolve;
+      failRun = reject;
+    });
+
+    const deltaQueue: string[] = [];
+    let playbackTimer: number | null = null;
+    let runFinishedArrived = false;
+    const getStreamingBubble = (): HTMLElement | null => {
+      const row = messagesEl.querySelector(`[data-msg-id="${streamMsgId}"]`);
+      return row ? row.querySelector(".msg__bubble") as HTMLElement : null;
+    };
+    const tryFinish = (): void => {
+      if (runFinishedArrived && deltaQueue.length === 0 && playbackTimer === null) {
+        finishRun();
+      }
+    };
+    const startPlayback = (): void => {
+      if (playbackTimer !== null) return;
+      playbackTimer = window.setInterval(() => {
+        const next = deltaQueue.shift();
+        if (next !== undefined) {
+          streamContent += next;
+          const bubble = getStreamingBubble();
+          if (bubble) {
+            const span = document.createElement("span");
+            span.className = "msg__char";
+            span.textContent = next;
+            bubble.appendChild(span);
+          }
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+          return;
+        }
+        if (playbackTimer !== null) { clearInterval(playbackTimer); playbackTimer = null; }
+        tryFinish();
+      }, 40);
+    };
+    const offEvent = window.agui!.onEvent((rawEvent) => {
+      try {
+        const event = rawEvent as AguiBaseEvent;
+        const msg = messages.find(m => m.id === streamMsgId);
+        switch (event.type) {
+          case "TOOL_CALL_START": {
+            const bubble = getStreamingBubble();
+            if (bubble) {
+              bubble.classList.remove("msg__bubble--thinking");
+              bubble.replaceChildren();
+              const tip = document.createElement("div");
+              tip.className = "msg__tool-tip";
+              const isKuuhenki = event.toolCallName === "召唤月灵";
+              if (isKuuhenki) tip.classList.add("msg__tool-tip--kuuhenki");
+              tip.dataset.toolCallId = event.toolCallId ?? "";
+              const icon = document.createElement("span");
+              icon.className = "msg__tool-icon";
+              icon.textContent = isKuuhenki ? "🌙" : "🔧";
+              const text = document.createElement("span");
+              text.className = "msg__tool-text";
+              text.textContent = isKuuhenki ? (role === "sandrone" ? t("chatWindow.summoningFagieou") : t("chatWindow.summoningKuuhenki")) : t("chatWindow.calling") + (event.toolCallName ?? "工具");
+              tip.appendChild(icon);
+              tip.appendChild(text);
+              bubble.appendChild(tip);
+            }
+            break;
+          }
+          case "TOOL_CALL_END": {
+            const bubble = getStreamingBubble();
+            if (bubble) {
+              const tip = bubble.querySelector(".msg__tool-tip");
+              if (tip) {
+                const textEl = tip.querySelector(".msg__tool-text");
+                if (textEl && tip.classList.contains("msg__tool-tip--kuuhenki")) {
+                  textEl.textContent = role === "sandrone" ? t("chatWindow.fagieouDone") : t("chatWindow.kuuhenkiDone");
+                } else if (textEl) {
+                  textEl.textContent = t("chatWindow.done");
+                }
+                tip.classList.add("msg__tool-tip--done");
+              }
+            }
+            break;
+          }
+          case "TEXT_MESSAGE_START":
+            if (msg) { msg.thinking = false; render(); }
+            break;
+          case "TEXT_MESSAGE_CONTENT":
+            if (event.delta) {
+              ttsContent += event.delta;
+              earlyMinimaxPlayback.append(ttsContent);
+              deltaQueue.push(event.delta);
+              if (!textMouthStarted) {
+                void loadTtsSettings().then((settings) => {
+                  if (settings && !settings.ttsAutoRead) {
+                    startTextModeMouth();
+                  }
+                });
+              }
+              if (msg) { msg.thinking = false; }
+              startPlayback();
+            }
+            break;
+          case "TEXT_MESSAGE_END":
+            if (!autoSpeakTriggered && ttsContent.trim()) {
+              autoSpeakTriggered = true;
+              // 朗读时去掉 handoff 标记，避免读出指令
+              pendingTtsCachePromise = earlyMinimaxPlayback.finish(ttsContent.replace(HANDOFF_REGEX, "").trim());
+            }
+            break;
+          case "CUSTOM":
+            if (event.name === "columbina.sticker") {
+              sticker = (event.value as StickerId | null) ?? null;
+            } else if (event.name === "columbina.weather") {
+              pendingWeatherCard = event.value as Record<string, unknown>;
+            } else if (event.name === "columbina.todos") {
+              renderTodoPanel(event.value as TodoState | null);
+            } else if (event.name === "columbina.choice") {
+              const choiceData = event.value as { id: string; question: string; options: Array<{ label: string; value: string; description?: string }>; default?: string };
+              const card = buildChoiceCardEl(choiceData);
+              messagesEl.appendChild(card);
+              messagesEl.scrollTop = messagesEl.scrollHeight;
+            }
+            break;
+          case "RUN_FINISHED":
+            runFinishedArrived = true;
+            tryFinish();
+            break;
+          case "RUN_ERROR":
+            failRun(new Error(event.content || "模型请求失败"));
+            break;
+          default:
+            break;
+        }
+      } catch (err) {
+        console.error("[Chat] onEvent回调抛错:", err);
+      }
+    });
+
+    const ack = await window.agui!.run({
+      messages: buildRunMessages(includeHandoffPrompt, role),
+      style: getCurrentStyle(),
+      sessionId: currentSessionId || undefined,
+      identityId: role,
+      modelId: selectedModelId[role] ?? undefined,
+      attachments,
+    });
+    if (!ack.success) {
+      offEvent();
+      throw new Error(ack.error || "模型请求发起失败");
+    }
+
+    await runDone;
+    offEvent();
+
+    const msg = messages.find(m => m.id === streamMsgId);
+    if (msg) {
+      msg.thinking = false;
+      msg.content = streamContent;
+      msg.sticker = sticker;
+      msg.identityId = role;
+    }
+    void saveSession();
+    const finishedMsgId = streamMsgId;
+    void pendingTtsCachePromise?.then((cache) => {
+      if (!cache) return;
+      const latestMsg = messages.find(m => m.id === finishedMsgId);
+      if (!latestMsg) return;
+      latestMsg.ttsCacheKey = cache.cacheKey;
+      void saveSession();
+    });
+    render();
+    if (pendingWeatherCard) {
+      const card = buildWeatherCardEl(pendingWeatherCard);
+      messagesEl.appendChild(card);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+  } catch (err) {
+    error = true;
+    const message = err instanceof Error ? err.message : "模型请求失败";
+    const msg = messages.find(m => m.id === streamMsgId);
+    if (msg) {
+      msg.thinking = false;
+      msg.content = t("chatWindow.connectModelFailed") + message;
+      msg.identityId = role;
+    } else {
+      messages.push({
+        id: String(Date.now() + 2),
+        role: "model",
+        content: t("chatWindow.connectModelFailed") + message,
+        at: Date.now(),
+        identityId: role,
+      });
+    }
+    void saveSession();
+    render();
+  }
+
+  return { content: streamContent, sticker, weatherCard: pendingWeatherCard, error };
+}
 
 // ── 快捷预设胶囊 ──────────────────────────────────────────
 // 空对话时在 empty-state 下方显示的半透明胶囊，点击后：
@@ -2262,7 +2541,7 @@ async function triggerAgentGreeting(): Promise<void> {
   let streamMsgId = "";
   try {
     streamMsgId = String(Date.now() + 1);
-    const streamMsg = { id: streamMsgId, role: "model" as const, content: "", at: Date.now(), thinking: true };
+    const streamMsg = { id: streamMsgId, role: "model" as const, content: "", at: Date.now(), thinking: true, identityId: currentRole };
     messages.push(streamMsg);
     render();
 
@@ -2433,6 +2712,7 @@ async function triggerAgentGreeting(): Promise<void> {
       msg.thinking = false;
       msg.content = streamContent;
       msg.sticker = sticker;
+      msg.identityId = currentRole;
     }
     void saveSession();
     const finishedMsgId = streamMsgId;
@@ -2456,12 +2736,14 @@ async function triggerAgentGreeting(): Promise<void> {
     if (msg) {
       msg.thinking = false;
       msg.content = t("chatWindow.connectModelFailed") + message;
+      msg.identityId = currentRole;
     } else {
       messages.push({
         id: String(Date.now() + 2),
         role: "model",
         content: t("chatWindow.connectModelFailed") + message,
         at: Date.now(),
+        identityId: currentRole,
       });
     }
     void saveSession();
@@ -2537,6 +2819,7 @@ async function send(): Promise<void> {
     content: fullUserText,
     at: Date.now(),
     sticker: userStickerId,
+    identityId: null,
   };
   messages.push(userMsg);
   inputEl.value = "";
@@ -2545,239 +2828,45 @@ async function send(): Promise<void> {
   void saveSession();
   render();
 
-  let streamMsgId = "";
+  const originalRole = currentRole;
+  let handoffRound = 0;
   try {
-    streamMsgId = String(Date.now() + 1);
-    const streamMsg = { id: streamMsgId, role: "model", content: "", at: Date.now(), thinking: true };
-    messages.push(streamMsg);
-    render();
-
-    let streamContent = "";
-    let ttsContent = "";
-    let autoSpeakTriggered = false;
-    const earlyMinimaxPlayback = createEarlyMinimaxPlayback();
-    textMouthStarted = false;
-    let pendingTtsCachePromise: Promise<{ cacheKey: string } | null> | null = null;
-    let sticker: string | null = null;
-    let pendingWeatherCard: Record<string, unknown> | null = null;
-
-    // 终态信号：由事件流的 RUN_FINISHED/RUN_ERROR 触发 resolve，
-    // 不依赖 invoke 的 resolve（invoke 只做 ack，可能与事件投递存在顺序竞争）。
-    let finishRun!: () => void;
-    let failRun!: (err: Error) => void;
-    const runDone = new Promise<void>((resolve, reject) => {
-      finishRun = resolve;
-      failRun = reject;
-    });
-
-    // AG-UI 事件流：订阅 window.agui.onEvent，按事件类型渲染
-    // 主进程在 FC 完成后瞬间把所有 delta 发完，渲染端用"回放队列"按固定节奏逐字显示，
-    // 营造真流式感。流式中的气泡用增量 span 追加 + CSS 渐显，不调 render() 全量重建。
-    const deltaQueue: string[] = [];
-    let playbackTimer: number | null = null;
-    let runFinishedArrived = false;
-    /** 找到当前流式消息的气泡 DOM（TEXT_MESSAGE_START 时 render 过一次，带 data-msg-id）。 */
-    const getStreamingBubble = (): HTMLElement | null => {
-      const row = messagesEl.querySelector(`[data-msg-id="${streamMsgId}"]`);
-      return row ? row.querySelector(".msg__bubble") as HTMLElement : null;
-    };
-    // 终态条件：RUN_FINISHED 到达 AND 回放队列空。两者都满足才 finishRun。
-    const tryFinish = (): void => {
-      if (runFinishedArrived && deltaQueue.length === 0 && playbackTimer === null) {
-        finishRun();
-      }
-    };
-    const startPlayback = (): void => {
-      if (playbackTimer !== null) return;
-      playbackTimer = window.setInterval(() => {
-        const next = deltaQueue.shift();
-        if (next !== undefined) {
-          streamContent += next;
-          // 增量追加 span 到气泡，CSS 渐显。不调 render()，避免全量重建卡顿。
-          const bubble = getStreamingBubble();
-          if (bubble) {
-            const span = document.createElement("span");
-            span.className = "msg__char";
-            span.textContent = next;
-            bubble.appendChild(span);
-          }
-          messagesEl.scrollTop = messagesEl.scrollHeight;
-          return;
-        }
-        // 队列空了
-        if (playbackTimer !== null) { clearInterval(playbackTimer); playbackTimer = null; }
-        tryFinish();
-      }, 40);
-    };
-    const offEvent = window.agui!.onEvent((rawEvent) => {
-      try {
-        const event = rawEvent as AguiBaseEvent;
-        const msg = messages.find(m => m.id === streamMsgId);
-        switch (event.type) {
-          case "TOOL_CALL_START": {
-            // 工具调用开始：在 thinking 气泡里显示工具提示
-            const bubble = getStreamingBubble();
-            if (bubble) {
-              bubble.classList.remove("msg__bubble--thinking");
-              bubble.replaceChildren();
-              const tip = document.createElement("div");
-              tip.className = "msg__tool-tip";
-              const isKuuhenki = event.toolCallName === "召唤月灵";
-              if (isKuuhenki) tip.classList.add("msg__tool-tip--kuuhenki");
-              tip.dataset.toolCallId = event.toolCallId ?? "";
-              const icon = document.createElement("span");
-              icon.className = "msg__tool-icon";
-              icon.textContent = isKuuhenki ? "🌙" : "🔧";
-              const text = document.createElement("span");
-              text.className = "msg__tool-text";
-              text.textContent = isKuuhenki ? (currentRole === "sandrone" ? t("chatWindow.summoningFagieou") : t("chatWindow.summoningKuuhenki")) : t("chatWindow.calling") + (event.toolCallName ?? "工具");
-              tip.appendChild(icon);
-              tip.appendChild(text);
-              bubble.appendChild(tip);
-            }
-            break;
-          }
-          case "TOOL_CALL_END": {
-            // 工具调用完成
-            const bubble = getStreamingBubble();
-            if (bubble) {
-              const tip = bubble.querySelector(".msg__tool-tip");
-              if (tip) {
-                const textEl = tip.querySelector(".msg__tool-text");
-                if (textEl && tip.classList.contains("msg__tool-tip--kuuhenki")) {
-                  textEl.textContent = currentRole === "sandrone" ? t("chatWindow.fagieouDone") : t("chatWindow.kuuhenkiDone");
-                } else if (textEl) {
-                  textEl.textContent = t("chatWindow.done");
-                }
-                tip.classList.add("msg__tool-tip--done");
-              }
-            }
-            break;
-          }
-          case "TEXT_MESSAGE_START":
-            // 切换 thinking 点 → 空气泡，render 一次建立 DOM（带 data-msg-id）
-            // 工具提示（若有）会被 render 重建清掉，自然过渡到文字
-            if (msg) { msg.thinking = false; render(); }
-            break;
-          case "TEXT_MESSAGE_CONTENT":
-            if (event.delta) {
-              ttsContent += event.delta;
-              earlyMinimaxPlayback.append(ttsContent);
-              deltaQueue.push(event.delta);
-              if (!textMouthStarted) {
-                void loadTtsSettings().then((settings) => {
-                  if (settings && !settings.ttsAutoRead) {
-                    startTextModeMouth();
-                  }
-                });
-              }
-              if (msg) { msg.thinking = false; }
-              startPlayback();
-            }
-            break;
-          case "TEXT_MESSAGE_END":
-            // 全文 delta 已收齐时，ttsContent 已经同步累加完整；UI 的 streamContent 仍按 40ms 逐字回放。
-            // 这样声音可尽早开始，且不受前端打字动画队列影响。
-            if (!autoSpeakTriggered && ttsContent.trim()) {
-              autoSpeakTriggered = true;
-              pendingTtsCachePromise = earlyMinimaxPlayback.finish(ttsContent);
-            }
-            break;
-          case "CUSTOM":
-            // 主进程发的自定义事件：sticker / 天气卡片 / 任务清单 / 选择卡片
-            if (event.name === "columbina.sticker") {
-              sticker = (event.value as StickerId | null) ?? null;
-            } else if (event.name === "columbina.weather") {
-              // 暂存天气数据，等 runDone 后 render 再插入（避免 render 的 replaceChildren 清掉卡片）
-              console.log("[Chat] 收到天气卡片数据:", JSON.stringify(event.value)?.slice(0, 100));
-              pendingWeatherCard = event.value as Record<string, unknown>;
-            } else if (event.name === "columbina.todos") {
-              renderTodoPanel(event.value as TodoState | null);
-            } else if (event.name === "columbina.choice") {
-              // 选择卡片：立即插入聊天流（不等 runDone，因为要即时交互）
-              const choiceData = event.value as { id: string; question: string; options: Array<{ label: string; value: string; description?: string }>; default?: string };
-              const card = buildChoiceCardEl(choiceData);
-              messagesEl.appendChild(card);
-              messagesEl.scrollTop = messagesEl.scrollHeight;
-            }
-            break;
-          case "RUN_FINISHED":
-            // 终态信号到达，但要等回放队列空才真正 finishRun（保证流式播完）
-            runFinishedArrived = true;
-            tryFinish();
-            break;
-          case "RUN_ERROR":
-            failRun(new Error(event.content || "模型请求失败"));
-            break;
-          default:
-            // TOOL_CALL_* / STEP_* 暂不在 UI 处理（骨架阶段）
-            break;
-        }
-      } catch (err) {
-        console.error("[Chat] onEvent回调抛错:", err);
-      }
-    });
-
-    // invoke 只确认"已发起"，不等 Observable 结束。
-    // 真正的完成由事件流 RUN_FINISHED/RUN_ERROR 驱动（await runDone）。
-    const ack = await window.agui!.run({
-      messages: buildModelMessages(),
-      style: getCurrentStyle(),
-      sessionId: currentSessionId || undefined,
-      identityId: currentRole,
-      modelId: selectedModelId[currentRole] ?? undefined,
+    let lastResult = await runAgentTurn({
+      role: currentRole,
       attachments: turnTextAttachments,
+      includeHandoffPrompt: autoHandoffEnabled,
     });
-    if (!ack.success) {
-      offEvent();
-      throw new Error(ack.error || "模型请求发起失败");
-    }
 
-    // 等事件流终态
-    await runDone;
-    offEvent();
+    // Agent 自动接力：解析 [HANDOFF:CONTINUE/STOP] 标记
+    while (
+      autoHandoffEnabled &&
+      !lastResult.error &&
+      handoffRound < maxHandoffRounds
+    ) {
+      const { cleanContent, shouldHandoff } = parseHandoff(lastResult.content);
+      if (!shouldHandoff) break;
 
-    const msg = messages.find(m => m.id === streamMsgId);
-    if (msg) {
-      msg.thinking = false;
-      msg.content = streamContent;
-      msg.sticker = sticker;
-    }
-    void saveSession();
-    const finishedMsgId = streamMsgId;
-    void pendingTtsCachePromise?.then((cache) => {
-      if (!cache) return;
-      const latestMsg = messages.find(m => m.id === finishedMsgId);
-      if (!latestMsg) return;
-      latestMsg.ttsCacheKey = cache.cacheKey;
-      void saveSession();
-    });
-    render();
-    // 天气卡片在 render 后追加到末尾（模型回复之后）
-    if (pendingWeatherCard) {
-      console.log("[Chat] 插入天气卡片");
-      const card = buildWeatherCardEl(pendingWeatherCard);
-      messagesEl.appendChild(card);
-      messagesEl.scrollTop = messagesEl.scrollHeight;
-      pendingWeatherCard = null;
-    }
-    // TTS 已在 TEXT_MESSAGE_END 时触发，这里不再重复朗读
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "模型请求失败";
-    const msg = messages.find(m => m.id === streamMsgId);
-    if (msg) {
-      msg.thinking = false;
-      msg.content = t("chatWindow.connectModelFailed") + message;
-    } else {
-      messages.push({
-        id: String(Date.now() + 2),
-        role: "model",
-        content: t("chatWindow.connectModelFailed") + message,
-        at: Date.now(),
+      // 把当前角色回复中的 handoff 标记去掉，保持界面干净
+      const lastMsg = messages[messages.length - 1];
+      if (lastMsg && lastMsg.role === "model") {
+        lastMsg.content = cleanContent;
+        void saveSession();
+        render();
+      }
+
+      handoffRound++;
+      const otherRole = currentRole === "columbina" ? "sandrone" : "columbina";
+      switchRole(otherRole);
+      lastResult = await runAgentTurn({
+        role: otherRole,
+        includeHandoffPrompt: handoffRound < maxHandoffRounds,
       });
     }
-    void saveSession();
-    render();
+
+    // 无论是否接力，最终切回用户最初选择的角色
+    if (currentRole !== originalRole) {
+      switchRole(originalRole);
+    }
   } finally {
     sending = false;
     sendBtn.disabled = false;
@@ -3104,6 +3193,8 @@ if (particlesCtx) {
   try {
     const cfg = await (window as any).settings?.getGeneral?.();
     const lang = (cfg?.language as Lang) ?? "zh-CN";
+    autoHandoffEnabled = Boolean(cfg?.agentAutoHandoff);
+    maxHandoffRounds = Math.max(0, Math.min(5, Number(cfg?.maxHandoffRounds) || 1));
     setLang(lang);
     await loadLangBundle(lang);
     applyI18n(lang);

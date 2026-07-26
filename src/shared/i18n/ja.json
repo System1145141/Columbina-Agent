@@ -81,6 +81,10 @@
     "langEN": "EN",
     "langJA": "日文",
     "langKO": "韓語",
+    "agentAutoHandoff": "Agent自動リレー",
+    "agentAutoHandoffDesc": "現在のAgentが発言終了後、[HANDOFF:CONTINUE]を出力すると、もう一方のAgentが自動的に続けて発言します。",
+    "maxHandoffRounds": "最大リレー回数",
+    "maxHandoffRoundsDesc": "ユーザーが1回メッセージを送信した後、2つのAgent間でリレーできる最大回数です。",
     "about": "について",
     "aboutDesc": "Columbina v{{version}} · 軽量感情陪伴デスクトップAgent"
   },

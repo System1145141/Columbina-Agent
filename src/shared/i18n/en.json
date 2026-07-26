@@ -83,6 +83,10 @@
     "langEN": "EN",
     "langJA": "日文",
     "langKO": "韩语",
+    "agentAutoHandoff": "Agent Auto Handoff",
+    "agentAutoHandoffDesc": "After the current Agent finishes, if it outputs [HANDOFF:CONTINUE], the other Agent will automatically continue the conversation.",
+    "maxHandoffRounds": "Max Handoff Rounds",
+    "maxHandoffRoundsDesc": "After a single user message, the maximum number of handoff rounds between the two Agents.",
     "about": "About",
     "aboutDesc": "Columbina v{{version}} · Lightweight Emotional Companion Desktop Agent"
   },
