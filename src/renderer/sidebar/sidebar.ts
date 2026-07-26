@@ -5,6 +5,16 @@ import { t, setLang, setI18nVars, loadLangBundle, type Lang } from "../../shared
 import { applyI18n } from "../../shared/i18n/dom";
 import { APP_VERSION } from "../../shared/version";
 
+interface ModelEntry {
+  id: string;
+  nickname: string;
+  provider: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  transport?: "auto" | "openai" | "anthropic";
+}
+
 interface ModelConfig {
   mode: "auto" | "manual";
   provider: string;
@@ -13,6 +23,12 @@ interface ModelConfig {
   model: string;
   connected: boolean;
   runtimeSync: "off" | "local" | "llm";
+  models: ModelEntry[];
+  defaultModelId?: string;
+  selectedModelIds?: {
+    columbina?: string;
+    sandrone?: string;
+  };
 }
 
 interface ModelConfigApi {
@@ -134,14 +150,32 @@ async function initRuntimeState(): Promise<void> {
   window.runtimeState?.onChanged((state) => applyRuntimeState(state));
 }
 
+function getProviderShortName(provider: string): string {
+  return provider.split("（")[0].trim();
+}
+
+function getColumbinaFeedingName(config: ModelConfig | null): string {
+  if (!config) return t("sidebar.noModel");
+  // 优先同步聊天面板里"哥伦比娅"角色当前选中的模型
+  const selectedId = config.selectedModelIds?.columbina;
+  if (selectedId && config.models) {
+    const entry = config.models.find((m) => m.id === selectedId);
+    if (entry) {
+      return entry.nickname || getProviderShortName(entry.provider) || entry.model;
+    }
+  }
+  // 回退到全局 provider 配置
+  return config.displayName || config.shortName || config.model || t("sidebar.noModel");
+}
+
 function applyModelConfig(config: ModelConfig | null): void {
   const connected = Boolean(config?.connected);
   const wasRuntimeSyncEnabled = runtimeSyncEnabled;
   runtimeSyncEnabled = config?.runtimeSync === "local" || config?.runtimeSync === "llm";
   onlineStatusLabel.textContent = connected ? t("sidebar.online") : t("sidebar.offline");
   onlineBadge?.classList.toggle("is-offline", !connected);
-  // "正在喂养"显示优先级：用户昵称 > 厂商短名 > model id > 兜底
-  feedingModelEl.textContent = config?.displayName || config?.shortName || config?.model || t("sidebar.noModel");
+  // "正在喂养"优先显示聊天面板哥伦比娅角色选中的模型
+  feedingModelEl.textContent = getColumbinaFeedingName(config);
   if (!runtimeSyncEnabled) applyRuntimeDisabled();
   else if (!wasRuntimeSyncEnabled) applyRuntimeState(latestRuntimeState);
 }
