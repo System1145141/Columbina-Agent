@@ -40,6 +40,11 @@ declare global {
       getGeneral: () => Promise<Record<string, unknown>>;
       saveGeneral: (config: Record<string, unknown>) => Promise<unknown>;
     };
+    agui?: {
+      run: (input: { messages: unknown[]; style: string; sessionId?: string; identityId?: string; modelId?: string; attachments?: { name: string; text: string }[] }) => Promise<{ success: boolean; error?: string }>;
+      onEvent: (callback: (event: unknown) => void) => () => void;
+      cancel: () => Promise<boolean>;
+    };
   }
 }
 
@@ -73,6 +78,24 @@ interface IdeSettings {
   tabSize: number;
 }
 
+interface AiMessage {
+  id: string;
+  role: "user" | "model";
+  content: string;
+  thinking?: boolean;
+  toolName?: string;
+  error?: boolean;
+}
+
+interface AguiBaseEvent {
+  type: string;
+  delta?: string;
+  toolCallName?: string;
+  content?: string;
+  name?: string;
+  value?: unknown;
+}
+
 // DOM elements
 const openFolderBtn = document.getElementById("open-folder-btn") as HTMLButtonElement;
 const folderPathEl = document.getElementById("folder-path") as HTMLSpanElement;
@@ -98,6 +121,13 @@ const commandPanelEl = document.getElementById("command-panel") as HTMLElement;
 const commandInputEl = document.getElementById("command-input") as HTMLInputElement;
 const commandListEl = document.getElementById("command-list") as HTMLElement;
 const ideRootEl = document.querySelector(".ide") as HTMLElement;
+const aiToggleBtn = document.getElementById("ai-toggle-btn") as HTMLButtonElement;
+const aiPanelEl = document.getElementById("ai-panel") as HTMLElement;
+const aiCloseBtn = document.getElementById("ai-close-btn") as HTMLButtonElement;
+const aiMessagesEl = document.getElementById("ai-messages") as HTMLElement;
+const aiInputEl = document.getElementById("ai-input") as HTMLTextAreaElement;
+const aiSendBtn = document.getElementById("ai-send-btn") as HTMLButtonElement;
+const aiContextSelectEl = document.getElementById("ai-context-select") as HTMLSelectElement;
 
 document.getElementById("min-btn")?.addEventListener("click", () => window.ide?.minimize());
 document.getElementById("max-btn")?.addEventListener("click", () => window.ide?.toggleMaximize());
@@ -125,6 +155,12 @@ let ideSettings: IdeSettings = {
 };
 
 let draggedTabId = "";
+
+let aiPanelVisible = false;
+const aiMessages: AiMessage[] = [];
+let aiRunning = false;
+let aiCurrentMessageId = "";
+let aiEventUnsub: (() => void) | null = null;
 
 // Utilities
 function basename(filePath: string): string {
@@ -983,6 +1019,230 @@ function filterCommands(query: string) {
   renderCommandList();
 }
 
+// AI panel
+type AiContextScope = "file" | "selection" | "project";
+
+function getCurrentSelection(): string {
+  if (!editorView) return "";
+  const { from, to } = editorView.state.selection.main;
+  if (from === to) return "";
+  return editorView.state.doc.sliceString(from, to);
+}
+
+async function collectProjectContext(folderPath: string, maxFiles = 30, maxChars = 12000): Promise<string> {
+  const fileList: string[] = [];
+  const contents: string[] = [];
+  let totalChars = 0;
+
+  async function walk(dirPath: string) {
+    if (fileList.length >= maxFiles) return;
+    try {
+      const entries = await window.ide!.readDir(dirPath);
+      for (const entry of entries) {
+        if (fileList.length >= maxFiles) return;
+        if (entry.isDirectory) {
+          const name = entry.name.toLowerCase();
+          if (["node_modules", ".git", "dist", "build", ".cache"].includes(name)) continue;
+          await walk(entry.path);
+        } else {
+          const ext = getFileExtension(entry.path);
+          const binaryExts = ["png", "jpg", "jpeg", "gif", "svg", "ico", "woff", "woff2", "ttf", "eot", "mp3", "mp4", "zip", "gz"];
+          if (binaryExts.includes(ext)) continue;
+          try {
+            const text = await window.ide!.readFile(entry.path);
+            if (totalChars + text.length > maxChars) continue;
+            totalChars += text.length;
+            fileList.push(entry.path.replace(folderPath + "/", ""));
+            contents.push(`\n--- FILE: ${fileList[fileList.length - 1]} ---\n${text}`);
+          } catch {
+            // ignore unreadable files
+          }
+        }
+      }
+    } catch {
+      // ignore unreadable directories
+    }
+  }
+
+  await walk(folderPath);
+  if (contents.length === 0) return "（项目为空或无法读取文件）";
+  return `项目文件列表:\n${fileList.join("\n")}\n${contents.join("\n")}`;
+}
+
+async function buildAiContext(scope: AiContextScope): Promise<string> {
+  const parts: string[] = [];
+
+  if (scope === "file" || scope === "selection") {
+    const tab = activeTabId ? tabs.get(activeTabId) : null;
+    if (tab) {
+      parts.push(`当前文件路径: ${tab.filePath}`);
+      parts.push(`当前文件内容:\n\`\`\`\n${tab.currentContent}\n\`\`\``);
+    } else {
+      parts.push("（当前没有打开的文件）");
+    }
+  }
+
+  if (scope === "selection") {
+    const selection = getCurrentSelection();
+    if (selection) {
+      parts.push(`用户当前选中的代码:\n\`\`\`\n${selection}\n\`\`\``);
+    } else {
+      parts.push("（当前没有选中任何内容）");
+    }
+  }
+
+  if (scope === "project") {
+    if (currentFolder) {
+      parts.push(`当前打开的项目文件夹: ${currentFolder}`);
+      parts.push(await collectProjectContext(currentFolder));
+    } else {
+      parts.push("（当前没有打开项目文件夹）");
+    }
+  }
+
+  return parts.join("\n\n");
+}
+
+function toggleAiPanel() {
+  aiPanelVisible = !aiPanelVisible;
+  aiPanelEl.style.display = aiPanelVisible ? "flex" : "none";
+  if (aiPanelVisible) {
+    aiInputEl.focus();
+  }
+}
+
+function renderAiMessages() {
+  aiMessagesEl.innerHTML = "";
+  for (const msg of aiMessages) {
+    const row = document.createElement("div");
+    row.className = `ide__ai-message ide__ai-message--${msg.role}`;
+
+    if (msg.thinking) {
+      const thinking = document.createElement("div");
+      thinking.className = "ide__ai-thinking";
+      thinking.textContent = msg.toolName ? `正在调用 ${msg.toolName}...` : "正在思考...";
+      row.appendChild(thinking);
+    }
+
+    if (msg.toolName && !msg.thinking) {
+      const tool = document.createElement("div");
+      tool.className = "ide__ai-tool";
+      tool.textContent = `✓ ${msg.toolName}`;
+      row.appendChild(tool);
+    }
+
+    if (msg.content || !msg.thinking) {
+      const bubble = document.createElement("div");
+      bubble.className = "ide__ai-bubble";
+      bubble.textContent = msg.content;
+      row.appendChild(bubble);
+    }
+
+    if (msg.error) {
+      const error = document.createElement("div");
+      error.className = "ide__ai-error";
+      error.textContent = msg.content;
+      row.appendChild(error);
+    }
+
+    aiMessagesEl.appendChild(row);
+  }
+  aiMessagesEl.scrollTop = aiMessagesEl.scrollHeight;
+}
+
+async function sendAiMessage() {
+  const text = aiInputEl.value.trim();
+  if (!text || aiRunning) return;
+
+  const scope = aiContextSelectEl.value as AiContextScope;
+  aiInputEl.value = "";
+
+  aiMessages.push({ id: `u-${Date.now()}`, role: "user", content: text });
+  renderAiMessages();
+
+  aiRunning = true;
+  aiSendBtn.disabled = true;
+  const modelMsgId = `m-${Date.now()}`;
+  aiCurrentMessageId = modelMsgId;
+  aiMessages.push({ id: modelMsgId, role: "model", content: "", thinking: true });
+  renderAiMessages();
+
+  try {
+    const context = await buildAiContext(scope);
+    const prompt = `你是一名资深的编程助手，正在帮助用户在 IDE 中工作。请根据以下上下文回答用户问题。\n\n${context}\n\n用户问题:\n${text}`;
+
+    aiEventUnsub?.();
+    let streamContent = "";
+    let runFinished = false;
+    let runErrored = false;
+
+    const finishPromise = new Promise<void>((resolve, reject) => {
+      aiEventUnsub = window.agui?.onEvent((rawEvent) => {
+        const event = rawEvent as AguiBaseEvent;
+        const msg = aiMessages.find((m) => m.id === modelMsgId);
+        if (!msg) return;
+
+        switch (event.type) {
+          case "TEXT_MESSAGE_START":
+            msg.thinking = false;
+            break;
+          case "TEXT_MESSAGE_CONTENT":
+            msg.thinking = false;
+            if (event.delta) {
+              streamContent += event.delta;
+              msg.content = streamContent;
+            }
+            break;
+          case "TOOL_CALL_START":
+            msg.toolName = event.toolCallName || "工具";
+            break;
+          case "TOOL_CALL_END":
+            msg.toolName = `${event.toolCallName || "工具"} 完成`;
+            break;
+          case "RUN_FINISHED":
+            runFinished = true;
+            msg.thinking = false;
+            resolve();
+            break;
+          case "RUN_ERROR":
+            runErrored = true;
+            msg.thinking = false;
+            msg.error = true;
+            msg.content = event.content || "请求失败";
+            reject(new Error(msg.content));
+            break;
+        }
+        renderAiMessages();
+      }) ?? null;
+    });
+
+    const ack = await window.agui?.run({
+      messages: [{ role: "user", content: prompt }],
+      style: "chat",
+    });
+
+    if (!ack?.success) {
+      throw new Error(ack?.error || "Agent 启动失败");
+    }
+
+    await finishPromise;
+  } catch (err) {
+    const msg = aiMessages.find((m) => m.id === modelMsgId);
+    if (msg) {
+      msg.thinking = false;
+      msg.error = true;
+      msg.content = err instanceof Error ? err.message : String(err);
+    }
+    renderAiMessages();
+  } finally {
+    aiRunning = false;
+    aiSendBtn.disabled = false;
+    aiEventUnsub?.();
+    aiEventUnsub = null;
+    aiCurrentMessageId = "";
+  }
+}
+
 // Search
 let searchVisible = false;
 
@@ -1134,6 +1394,19 @@ tabBarEl.addEventListener("drop", (e) => {
   const rect = target.getBoundingClientRect();
   const before = e.clientX < rect.left + rect.width / 2;
   reorderTabs(target.dataset.tabId!, before);
+});
+
+aiToggleBtn.addEventListener("click", () => toggleAiPanel());
+aiCloseBtn.addEventListener("click", () => {
+  aiPanelVisible = false;
+  aiPanelEl.style.display = "none";
+});
+aiSendBtn.addEventListener("click", () => void sendAiMessage());
+aiInputEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    void sendAiMessage();
+  }
 });
 
 openFolderBtn.addEventListener("click", async () => {

@@ -16,6 +16,7 @@
         <span class="ide__logo">Columbina IDE</span>
         <button type="button" class="ide__btn" id="open-folder-btn">打开文件夹</button>
         <button type="button" class="ide__btn" id="terminal-toggle-btn" title="切换终端 (Ctrl+`)">终端</button>
+        <button type="button" class="ide__btn" id="ai-toggle-btn" title="切换 AI 面板">AI</button>
         <span class="ide__folder" id="folder-path"></span>
       </div>
       <div class="ide__titlebar-actions">
@@ -53,6 +54,27 @@
           <div class="ide__terminal-content" id="terminal-content"></div>
         </div>
       </main>
+      <aside class="ide__ai-panel" id="ai-panel" style="display: none;">
+        <div class="ide__ai-header">
+          <span>Columbina AI</span>
+          <button type="button" class="ide__ai-close" id="ai-close-btn" aria-label="关闭 AI 面板">×</button>
+        </div>
+        <div class="ide__ai-messages" id="ai-messages"></div>
+        <div class="ide__ai-input-area">
+          <div class="ide__ai-context">
+            <label class="ide__ai-context-label">上下文:</label>
+            <select id="ai-context-select" class="ide__ai-context-select">
+              <option value="file">当前文件</option>
+              <option value="selection">当前选区</option>
+              <option value="project">整个项目</option>
+            </select>
+          </div>
+          <div class="ide__ai-input-row">
+            <textarea id="ai-input" class="ide__ai-input" placeholder="询问关于代码的问题..." rows="2"></textarea>
+            <button type="button" class="ide__ai-send" id="ai-send-btn">发送</button>
+          </div>
+        </div>
+      </aside>
     </div>
     <footer class="ide__statusbar" id="status-bar">
       <span class="ide__statusbar-left" id="status-left"></span>
