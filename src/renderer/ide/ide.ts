@@ -64,6 +64,7 @@ interface Tab {
   initialContent: string;
   currentContent: string;
   modified: boolean;
+  lineEnding: "crlf" | "lf" | "mixed" | "unknown";
 }
 
 interface IdeSettings {
@@ -149,6 +150,35 @@ function getFileIconClass(filePath: string): string {
   return map[ext] || "file";
 }
 
+function detectLineEnding(content: string): Tab["lineEnding"] {
+  const hasCRLF = content.includes("\r\n");
+  const hasLF = /(^|[^\r])\n/.test(content);
+  if (hasCRLF && hasLF) return "mixed";
+  if (hasCRLF) return "crlf";
+  if (hasLF) return "lf";
+  return "unknown";
+}
+
+function normalizeLineEndings(content: string): string {
+  return content.replace(/\r\n/g, "\n");
+}
+
+function encodeLineEndings(content: string, lineEnding: Tab["lineEnding"]): string {
+  if (lineEnding === "crlf" || lineEnding === "mixed") {
+    return content.replace(/\n/g, "\r\n").replace(/\r\r\n/g, "\r\n");
+  }
+  return content;
+}
+
+function lineEndingLabel(lineEnding: Tab["lineEnding"]): string {
+  switch (lineEnding) {
+    case "crlf": return "CRLF";
+    case "lf": return "LF";
+    case "mixed": return "CRLF/LF";
+    default: return "";
+  }
+}
+
 function detectLanguage(filePath: string) {
   const ext = getFileExtension(filePath);
   switch (ext) {
@@ -200,7 +230,10 @@ function updateStatusBar() {
     col = cursor - posLine.from + 1;
   }
   const ext = getFileExtension(tab.filePath).toUpperCase();
-  statusRightEl.textContent = `Ln ${line}, Col ${col}  ·  ${ext || "TXT"}`;
+  const endingLabel = lineEndingLabel(tab.lineEnding);
+  const parts = [`Ln ${line}, Col ${col}`, ext || "TXT"];
+  if (endingLabel) parts.push(endingLabel);
+  statusRightEl.textContent = parts.join("  ·  ");
 }
 
 // Tabs
@@ -367,7 +400,9 @@ async function openFile(filePath: string, anchorLine = 1, anchorCol = 1) {
   }
 
   try {
-    const content = await window.ide!.readFile(filePath);
+    const rawContent = await window.ide!.readFile(filePath);
+    const lineEnding = detectLineEnding(rawContent);
+    const content = normalizeLineEndings(rawContent);
     const tab: Tab = {
       id: filePath,
       filePath,
@@ -375,11 +410,12 @@ async function openFile(filePath: string, anchorLine = 1, anchorCol = 1) {
       initialContent: content,
       currentContent: content,
       modified: false,
+      lineEnding,
     };
     tabs.set(filePath, tab);
     switchToTab(filePath, anchorLine, anchorCol);
   } catch (err) {
-    statusLeftEl.textContent = `读取失败: ${String(err)}`;
+    statusLeftEl.textContent = `读取失败: ${String(String(err))}`;
   }
 }
 
@@ -390,7 +426,8 @@ async function saveTab(tabId: string): Promise<boolean> {
   const content = tab.currentContent;
   if (content === tab.initialContent && !tab.modified) return true;
 
-  const result = await window.ide!.writeFile(tab.filePath, content);
+  const output = encodeLineEndings(content, tab.lineEnding);
+  const result = await window.ide!.writeFile(tab.filePath, output);
   if (result.ok) {
     tab.initialContent = content;
     tab.currentContent = content;

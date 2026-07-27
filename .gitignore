@@ -73,3 +73,4 @@ docs/
 !docs/electron-33-to-43-upgrade-assessment.md
 PRODUCT.md
 sticker-descriptions/
+.trae/rules/git-commit-message.md
