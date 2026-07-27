@@ -59,6 +59,7 @@ let editorView: EditorView | null = null;
 const tabs = new Map<string, Tab>();
 let activeTabId = "";
 const expandedDirs = new Set<string>();
+let isClosing = false; // 防止异步保存期间切换标签页
 
 // Utilities
 function basename(filePath: string): string {
@@ -177,9 +178,10 @@ function renderTabs() {
 }
 
 function switchToTab(tabId: string) {
+  if (isClosing) return; // 防止异步保存期间切换
   if (activeTabId === tabId) return;
 
-  // Save current editor content before switching
+  // Save current editor content before switching, but only if editorView is actually showing the active tab
   if (activeTabId && editorView) {
     const currentTab = tabs.get(activeTabId);
     if (currentTab) {
@@ -199,6 +201,7 @@ function switchToTab(tabId: string) {
 }
 
 function closeTab(tabId: string) {
+  if (isClosing) return; // 防止异步保存期间重复触发
   const tab = tabs.get(tabId);
   if (!tab) return;
 
@@ -210,8 +213,12 @@ function closeTab(tabId: string) {
       // Some environments block confirm dialogs; default to not saving.
     }
     if (save) {
+      isClosing = true;
       void saveTab(tabId).then((ok) => {
+        isClosing = false;
         if (ok) finishCloseTab(tabId);
+      }).catch(() => {
+        isClosing = false;
       });
       return;
     }
@@ -221,20 +228,35 @@ function closeTab(tabId: string) {
 }
 
 function finishCloseTab(tabId: string) {
+  const wasActive = activeTabId === tabId;
+
+  // 如果关闭的是活跃标签，先保存当前编辑器内容
+  if (wasActive && editorView) {
+    const currentTab = tabs.get(activeTabId);
+    if (currentTab) {
+      currentTab.currentContent = editorView.state.doc.toString();
+      currentTab.modified = currentTab.currentContent !== currentTab.initialContent;
+    }
+  }
+
   tabs.delete(tabId);
-  if (activeTabId === tabId) {
+
+  if (wasActive) {
     const next = tabs.values().next().value as Tab | undefined;
     activeTabId = next?.id || "";
     if (activeTabId) {
-      switchToTab(activeTabId);
+      const tab = tabs.get(activeTabId);
+      if (tab) {
+        createEditor(tab.currentContent, tab.filePath);
+      }
     } else {
       editorView?.destroy();
       editorView = null;
       editorEl.innerHTML = "";
-      updateStatusBar();
-      renderTabs();
-      highlightCurrentFileInTree();
     }
+    updateStatusBar();
+    renderTabs();
+    highlightCurrentFileInTree();
   } else {
     renderTabs();
   }
@@ -265,9 +287,9 @@ async function openFile(filePath: string) {
 
 async function saveTab(tabId: string): Promise<boolean> {
   const tab = tabs.get(tabId);
-  if (!tab || !editorView) return false;
+  if (!tab) return false;
 
-  const content = editorView.state.doc.toString();
+  const content = tab.currentContent;
   if (content === tab.initialContent && !tab.modified) return true;
 
   const result = await window.ide!.writeFile(tab.filePath, content);
