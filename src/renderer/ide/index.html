@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Columbina · IDE</title>
+  <link rel="stylesheet" href="../ui/tokens.css" />
+  <link rel="stylesheet" href="../ui/fonts.css" />
+  <link rel="stylesheet" href="../ui/base.css" />
+  <link rel="stylesheet" href="./ide.css" />
+</head>
+<body>
+  <div class="ide">
+    <header class="ide__titlebar">
+      <div class="ide__titlebar-drag">
+        <span class="ide__logo">Columbina IDE</span>
+        <button type="button" class="ide__btn" id="open-folder-btn">打开文件夹</button>
+        <span class="ide__folder" id="folder-path"></span>
+      </div>
+      <div class="ide__titlebar-actions">
+        <button type="button" class="ide__winbtn" id="min-btn" aria-label="最小化">—</button>
+        <button type="button" class="ide__winbtn" id="max-btn" aria-label="最大化">□</button>
+        <button type="button" class="ide__winbtn ide__winbtn--close" id="close-btn" aria-label="关闭">×</button>
+      </div>
+    </header>
+    <div class="ide__workspace">
+      <aside class="ide__sidebar" id="file-tree"></aside>
+      <main class="ide__editor" id="editor"></main>
+    </div>
+    <footer class="ide__statusbar" id="status-bar">就绪</footer>
+  </div>
+  <script type="module" src="./ide.ts"></script>
+</body>
+</html>

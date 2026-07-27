@@ -58,6 +58,7 @@ interface SidebarApi {
   openTasks: () => void;
   openSettings: (section?: string) => void;
   openCall: () => void;
+  openIde: () => void;
 }
 
 declare global {
@@ -77,6 +78,7 @@ if (!window.sidebar) {
     openTasks: () => {},
     openSettings: (_section?: string) => {},
     openCall: () => {},
+    openIde: () => {},
   };
 }
 
@@ -88,6 +90,7 @@ const settingsBtn = document.getElementById("settings-btn") as HTMLButtonElement
 const modelSwitchBtn = document.getElementById("model-switch-btn") as HTMLButtonElement;
 const openChatBtn = document.getElementById("open-chat-btn") as HTMLButtonElement;
 const callBtn = document.getElementById("call-btn") as HTMLButtonElement;
+const openIdeBtn = document.getElementById("open-ide-btn") as HTMLButtonElement;
 const onlineStatusLabel = document.getElementById("online-status-label") as HTMLElement;
 const statusEmojiEl = document.getElementById("status-emoji") as HTMLElement;
 const statusLabelEl = document.getElementById("status-label") as HTMLElement;
@@ -217,6 +220,10 @@ modelSwitchBtn.addEventListener("click", () => {
 
 callBtn.addEventListener("click", () => {
   window.sidebar?.openCall();
+});
+
+openIdeBtn.addEventListener("click", () => {
+  window.sidebar?.openIde();
 });
 
 // "打开聊天"：拿到最近一条会话 id，让 main 打开聊天窗口并加载它；

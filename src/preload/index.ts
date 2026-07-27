@@ -128,6 +128,7 @@ const sidebarApi = {
   openTasks: () => ipcRenderer.send(IPC.SIDEBAR_OPEN_TASKS),
   openSettings: (section?: string) => ipcRenderer.send(IPC.SIDEBAR_OPEN_SETTINGS, section),
   openCall: () => ipcRenderer.send(IPC.SIDEBAR_OPEN_CALL),
+  openIde: () => ipcRenderer.send(IPC.IDE_OPEN),
 };
 
 const tasksApi = {
@@ -142,6 +143,20 @@ const tasksApi = {
 
 contextBridge.exposeInMainWorld("sidebar", sidebarApi);
 contextBridge.exposeInMainWorld("tasks", tasksApi);
+
+// IDE 窗口 API
+const ideApi = {
+  open: () => ipcRenderer.send(IPC.IDE_OPEN),
+  close: () => ipcRenderer.send(IPC.IDE_CLOSE),
+  minimize: () => ipcRenderer.send(IPC.IDE_MINIMIZE),
+  toggleMaximize: () => ipcRenderer.send(IPC.IDE_TOGGLE_MAXIMIZE),
+  pickFolder: () => ipcRenderer.invoke(IPC.IDE_PICK_FOLDER),
+  readDir: (dirPath: string) => ipcRenderer.invoke(IPC.IDE_READ_DIR, dirPath),
+  readFile: (filePath: string) => ipcRenderer.invoke(IPC.IDE_READ_FILE, filePath),
+  writeFile: (filePath: string, content: string) => ipcRenderer.invoke(IPC.IDE_WRITE_FILE, filePath, content),
+  getFileInfo: (filePath: string) => ipcRenderer.invoke(IPC.IDE_GET_FILE_INFO, filePath),
+};
+contextBridge.exposeInMainWorld("ide", ideApi);
 
 // 通话窗口 API
 const callApi = {

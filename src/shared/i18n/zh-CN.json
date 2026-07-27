@@ -460,6 +460,7 @@
     "openChat": "打开聊天",
     "voiceCall": "语音通话",
     "switchModel": "切换模型",
+    "openIde": "打开 IDE",
     "settings": "设置",
     "openSettings": "打开设置",
     "statusHint": "请到设置里开启",

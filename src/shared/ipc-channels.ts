@@ -213,6 +213,17 @@ export const IPC = {
   // renderer → main：回传用户选择
   CHOICE_RESOLVE: "choice:resolve",
 
+  // IDE window
+  IDE_OPEN: "ide:open",                   // 打开 IDE 窗口
+  IDE_CLOSE: "ide:close",                 // 关闭 IDE 窗口
+  IDE_MINIMIZE: "ide:minimize",           // 最小化 IDE 窗口
+  IDE_TOGGLE_MAXIMIZE: "ide:toggle-maximize",
+  IDE_PICK_FOLDER: "ide:pick-folder",     // 选择文件夹
+  IDE_READ_DIR: "ide:read-dir",           // 读取目录
+  IDE_READ_FILE: "ide:read-file",         // 读取文件内容
+  IDE_WRITE_FILE: "ide:write-file",       // 写入文件内容
+  IDE_GET_FILE_INFO: "ide:get-file-info", // 获取文件信息
+
   // call window (voice call)
   CALL_OPEN: "call:open",                 // sidebar → main：打开通话窗口
   CALL_START: "call:start",               // renderer → main：开始通话（初始化 ASR）

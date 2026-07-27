@@ -86,6 +86,7 @@ let tasksWindow: BrowserWindow | null = null;
 let settingsWindow: BrowserWindow | null = null;
 let stickerManagerWindow: BrowserWindow | null = null;
 let callWindow: BrowserWindow | null = null;
+let ideWindow: BrowserWindow | null = null;
 let schedulerEngine: SchedulerEngine | null = null;
 // 聊天窗口当前活跃的会话 id（通过 IPC 由聊天窗口上报）；
 // 设置面板"删除当前会话"差异化提示用。聊天窗口关闭时由 closed 事件置 null。
@@ -2318,6 +2319,50 @@ function createChatWindow(sessionId?: string): void {
   });
 }
 
+function createIdeWindow(): void {
+  if (ideWindow && !ideWindow.isDestroyed()) {
+    ideWindow.show();
+    ideWindow.focus();
+    return;
+  }
+
+  ideWindow = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    minWidth: 800,
+    minHeight: 600,
+    title: "Columbina · IDE",
+    icon: APP_ICON_PATH,
+    backgroundColor: "#1e1e1e",
+    autoHideMenuBar: true,
+    show: false,
+    frame: false,
+    webPreferences: {
+      preload: path.join(__dirname, "..", "..", "preload", "preload", "index.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      additionalArguments: getRendererLangArgs(),
+    },
+  });
+
+  if (isDev) {
+    ideWindow.loadURL("http://localhost:5173/ide/");
+  } else {
+    ideWindow.loadFile(
+      path.join(__dirname, "..", "..", "renderer", "ide", "index.html")
+    );
+  }
+
+  ideWindow.once("ready-to-show", () => {
+    ideWindow?.show();
+  });
+
+  ideWindow.on("closed", () => {
+    ideWindow = null;
+  });
+}
+
 function createSidebarWindow(): void {
   if (sidebarWindow && !sidebarWindow.isDestroyed()) {
     sidebarWindow.show();
@@ -2766,6 +2811,61 @@ ipcMain.handle(IPC.CHAT_INGEST_FILES, async (_event, paths: unknown) => {
     return [];
   }
 });
+
+// IDE 窗口 IPC
+ipcMain.on(IPC.IDE_OPEN, () => createIdeWindow());
+ipcMain.on(IPC.IDE_CLOSE, () => ideWindow?.close());
+ipcMain.on(IPC.IDE_MINIMIZE, () => ideWindow?.minimize());
+ipcMain.on(IPC.IDE_TOGGLE_MAXIMIZE, () => {
+  if (!ideWindow) return;
+  if (ideWindow.isMaximized()) ideWindow.unmaximize();
+  else ideWindow.maximize();
+});
+ipcMain.handle(IPC.IDE_PICK_FOLDER, async () => {
+  if (!ideWindow) return null;
+  const result = await dialog.showOpenDialog(ideWindow, { properties: ["openDirectory"] });
+  return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
+});
+ipcMain.handle(IPC.IDE_READ_DIR, async (_event, dirPath: unknown) => {
+  if (typeof dirPath !== "string") return [];
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    return entries
+      .filter((e) => !e.name.startsWith("."))
+      .map((e) => ({ name: e.name, path: path.join(dirPath, e.name), isDirectory: e.isDirectory() }))
+      .sort((a, b) => (a.isDirectory === b.isDirectory ? a.name.localeCompare(b.name) : a.isDirectory ? -1 : 1));
+  } catch (err: any) {
+    console.error("[Columbina IDE] readDir failed:", err?.message || err);
+    return [];
+  }
+});
+ipcMain.handle(IPC.IDE_READ_FILE, async (_event, filePath: unknown) => {
+  if (typeof filePath !== "string") throw new Error("Invalid path");
+  try {
+    return fs.readFileSync(filePath, "utf8");
+  } catch (err: any) {
+    throw new Error(err?.message || "读取失败");
+  }
+});
+ipcMain.handle(IPC.IDE_WRITE_FILE, async (_event, filePath: unknown, content: unknown) => {
+  if (typeof filePath !== "string" || typeof content !== "string") return { ok: false, error: "Invalid args" };
+  try {
+    fs.writeFileSync(filePath, content, "utf8");
+    return { ok: true };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || "写入失败" };
+  }
+});
+ipcMain.handle(IPC.IDE_GET_FILE_INFO, async (_event, filePath: unknown) => {
+  if (typeof filePath !== "string") return { isDirectory: false, size: 0 };
+  try {
+    const stat = fs.statSync(filePath);
+    return { isDirectory: stat.isDirectory(), size: stat.size };
+  } catch {
+    return { isDirectory: false, size: 0 };
+  }
+});
+
 ipcMain.on(IPC.SIDEBAR_MINIMIZE, () => {
   sidebarWindow?.minimize();
 });
