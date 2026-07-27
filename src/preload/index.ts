@@ -155,6 +155,23 @@ const ideApi = {
   readFile: (filePath: string) => ipcRenderer.invoke(IPC.IDE_READ_FILE, filePath),
   writeFile: (filePath: string, content: string) => ipcRenderer.invoke(IPC.IDE_WRITE_FILE, filePath, content),
   getFileInfo: (filePath: string) => ipcRenderer.invoke(IPC.IDE_GET_FILE_INFO, filePath),
+  searchFiles: (folderPath: string, query: string, options?: { caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean; maxResults?: number }) =>
+    ipcRenderer.invoke(IPC.IDE_SEARCH_FILES, folderPath, query, options),
+  move: (sourcePath: string, targetDir: string) => ipcRenderer.invoke(IPC.IDE_MOVE, sourcePath, targetDir) as Promise<{ ok: boolean; error?: string }>,
+  createTerminal: (cwd?: string) => ipcRenderer.invoke(IPC.IDE_TERMINAL_CREATE, cwd) as Promise<string>,
+  terminalInput: (id: string, data: string) => ipcRenderer.send(IPC.IDE_TERMINAL_INPUT, id, data),
+  terminalResize: (id: string, cols: number, rows: number) => ipcRenderer.send(IPC.IDE_TERMINAL_RESIZE, id, cols, rows),
+  killTerminal: (id: string) => ipcRenderer.send(IPC.IDE_TERMINAL_KILL, id),
+  onTerminalData: (callback: (payload: { id: string; data: string }) => void) => {
+    const listener = (_e: unknown, payload: { id: string; data: string }) => callback(payload);
+    ipcRenderer.on(IPC.IDE_TERMINAL_DATA, listener);
+    return () => ipcRenderer.off(IPC.IDE_TERMINAL_DATA, listener);
+  },
+  onTerminalExit: (callback: (payload: { id: string; exitCode?: number }) => void) => {
+    const listener = (_e: unknown, payload: { id: string; exitCode?: number }) => callback(payload);
+    ipcRenderer.on(IPC.IDE_TERMINAL_EXIT, listener);
+    return () => ipcRenderer.off(IPC.IDE_TERMINAL_EXIT, listener);
+  },
 };
 contextBridge.exposeInMainWorld("ide", ideApi);
 
