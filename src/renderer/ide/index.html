@@ -24,10 +24,21 @@
       </div>
     </header>
     <div class="ide__workspace">
-      <aside class="ide__sidebar" id="file-tree"></aside>
-      <main class="ide__editor" id="editor"></main>
+      <aside class="ide__sidebar" id="file-tree">
+        <div class="ide__sidebar-header">
+          <span class="ide__sidebar-title">资源管理器</span>
+        </div>
+        <div class="ide__tree" id="tree-root"></div>
+      </aside>
+      <main class="ide__main">
+        <div class="ide__tabbar" id="tab-bar"></div>
+        <div class="ide__editor" id="editor"></div>
+      </main>
     </div>
-    <footer class="ide__statusbar" id="status-bar">就绪</footer>
+    <footer class="ide__statusbar" id="status-bar">
+      <span class="ide__statusbar-left" id="status-left"></span>
+      <span class="ide__statusbar-right" id="status-right"></span>
+    </footer>
   </div>
   <script type="module" src="./ide.ts"></script>
 </body>
