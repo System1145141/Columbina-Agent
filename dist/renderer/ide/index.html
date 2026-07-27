@@ -4,10 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Columbina · IDE</title>
-  <script type="module" crossorigin src="../assets/ide-CAYmvqJw.js"></script>
+  <script type="module" crossorigin src="../assets/ide-CdDi8ath.js"></script>
   <link rel="modulepreload" crossorigin href="../assets/base-CVu1OZtx.js">
   <link rel="stylesheet" crossorigin href="../assets/base-DPjjJSDk.css">
-  <link rel="stylesheet" crossorigin href="../assets/ide-fWYkShXG.css">
+  <link rel="stylesheet" crossorigin href="../assets/ide-0e3NJEqR.css">
 </head>
 <body>
   <div class="ide">
@@ -57,7 +57,10 @@
       <aside class="ide__ai-panel" id="ai-panel" style="display: none;">
         <div class="ide__ai-header">
           <span>Columbina AI</span>
-          <button type="button" class="ide__ai-close" id="ai-close-btn" aria-label="关闭 AI 面板">×</button>
+          <div class="ide__ai-header-actions">
+            <button type="button" class="ide__ai-header-btn" id="ai-undo-btn" title="撤销上次修改" disabled>撤销</button>
+            <button type="button" class="ide__ai-close" id="ai-close-btn" aria-label="关闭 AI 面板">×</button>
+          </div>
         </div>
         <div class="ide__ai-messages" id="ai-messages"></div>
         <div class="ide__ai-input-area">

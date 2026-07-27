@@ -85,6 +85,8 @@ interface AiMessage {
   thinking?: boolean;
   toolName?: string;
   error?: boolean;
+  actions?: AgentAction[];
+  actionResults?: AgentActionResult[];
 }
 
 interface AguiBaseEvent {
@@ -94,6 +96,30 @@ interface AguiBaseEvent {
   content?: string;
   name?: string;
   value?: unknown;
+}
+
+interface AgentAction {
+  id: string;
+  type: "read_file" | "write_file" | "search_files" | "run_command";
+  filePath?: string;
+  content?: string;
+  query?: string;
+  command?: string;
+  confirmed?: boolean;
+  rejected?: boolean;
+}
+
+interface AgentActionResult {
+  actionId: string;
+  ok: boolean;
+  output?: string;
+  error?: string;
+}
+
+interface FileSnapshot {
+  filePath: string;
+  content: string;
+  lineEnding: Tab["lineEnding"];
 }
 
 // DOM elements
@@ -128,6 +154,7 @@ const aiMessagesEl = document.getElementById("ai-messages") as HTMLElement;
 const aiInputEl = document.getElementById("ai-input") as HTMLTextAreaElement;
 const aiSendBtn = document.getElementById("ai-send-btn") as HTMLButtonElement;
 const aiContextSelectEl = document.getElementById("ai-context-select") as HTMLSelectElement;
+const aiUndoBtn = document.getElementById("ai-undo-btn") as HTMLButtonElement;
 
 document.getElementById("min-btn")?.addEventListener("click", () => window.ide?.minimize());
 document.getElementById("max-btn")?.addEventListener("click", () => window.ide?.toggleMaximize());
@@ -161,6 +188,8 @@ const aiMessages: AiMessage[] = [];
 let aiRunning = false;
 let aiCurrentMessageId = "";
 let aiEventUnsub: (() => void) | null = null;
+const fileSnapshots = new Map<string, FileSnapshot>();
+let pendingActionResolve: ((value: boolean) => void) | null = null;
 
 // Utilities
 function basename(filePath: string): string {
@@ -1145,9 +1174,351 @@ function renderAiMessages() {
       row.appendChild(error);
     }
 
+    if (msg.actions && msg.actions.length > 0 && !msg.actionResults) {
+      const actionsEl = document.createElement("div");
+      actionsEl.className = "ide__ai-actions";
+      const title = document.createElement("div");
+      title.className = "ide__ai-actions-title";
+      title.textContent = "Agent 请求执行以下操作：";
+      actionsEl.appendChild(title);
+
+      for (const action of msg.actions) {
+        const item = document.createElement("div");
+        item.className = "ide__ai-action" + (action.confirmed ? " is-confirmed" : action.rejected ? " is-rejected" : "");
+        const label = document.createElement("span");
+        label.className = "ide__ai-action-label";
+        label.textContent = formatActionLabel(action);
+        item.appendChild(label);
+        actionsEl.appendChild(item);
+      }
+
+      if (!msg.actions.some((a) => a.confirmed || a.rejected)) {
+        const btns = document.createElement("div");
+        btns.className = "ide__ai-actions-btns";
+        const confirmBtn = document.createElement("button");
+        confirmBtn.type = "button";
+        confirmBtn.className = "ide__ai-action-btn ide__ai-action-btn--confirm";
+        confirmBtn.textContent = "确认执行";
+        confirmBtn.addEventListener("click", () => {
+          if (pendingActionResolve) {
+            pendingActionResolve(true);
+            pendingActionResolve = null;
+          }
+        });
+        const rejectBtn = document.createElement("button");
+        rejectBtn.type = "button";
+        rejectBtn.className = "ide__ai-action-btn ide__ai-action-btn--reject";
+        rejectBtn.textContent = "拒绝";
+        rejectBtn.addEventListener("click", () => {
+          if (pendingActionResolve) {
+            pendingActionResolve(false);
+            pendingActionResolve = null;
+          }
+        });
+        btns.appendChild(confirmBtn);
+        btns.appendChild(rejectBtn);
+        actionsEl.appendChild(btns);
+      }
+
+      row.appendChild(actionsEl);
+    }
+
+    if (msg.actionResults && msg.actionResults.length > 0) {
+      const resultsEl = document.createElement("div");
+      resultsEl.className = "ide__ai-action-results";
+      for (const result of msg.actionResults) {
+        const item = document.createElement("div");
+        item.className = "ide__ai-action-result" + (result.ok ? "" : " is-error");
+        item.textContent = `${result.ok ? "✓" : "✗"} ${result.output || result.error || ""}`;
+        resultsEl.appendChild(item);
+      }
+      row.appendChild(resultsEl);
+    }
+
     aiMessagesEl.appendChild(row);
   }
   aiMessagesEl.scrollTop = aiMessagesEl.scrollHeight;
+}
+
+function formatActionLabel(action: AgentAction): string {
+  switch (action.type) {
+    case "read_file":
+      return `读取文件: ${action.filePath || ""}`;
+    case "write_file":
+      return `写入文件: ${action.filePath || ""}`;
+    case "search_files":
+      return `搜索文件: ${action.query || ""}`;
+    case "run_command":
+      return `运行命令: ${action.command || ""}`;
+    default:
+      return "未知操作";
+  }
+}
+
+function parseActions(content: string): AgentAction[] {
+  const actions: AgentAction[] = [];
+  const regex = /<action>([\s\S]*?)<\/action>/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(content)) !== null) {
+    try {
+      const raw = JSON.parse(match[1].trim()) as Record<string, unknown>;
+      const type = String(raw.type || "");
+      if (!["read_file", "write_file", "search_files", "run_command"].includes(type)) continue;
+      actions.push({
+        id: `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        type: type as AgentAction["type"],
+        filePath: typeof raw.filePath === "string" ? raw.filePath : undefined,
+        content: typeof raw.content === "string" ? raw.content : undefined,
+        query: typeof raw.query === "string" ? raw.query : undefined,
+        command: typeof raw.command === "string" ? raw.command : undefined,
+      });
+    } catch {
+      // ignore invalid action JSON
+    }
+  }
+  return actions;
+}
+
+function stripActions(content: string): string {
+  return content.replace(/<action>[\s\S]*?<\/action>/g, "").trim();
+}
+
+function buildToolsPrompt(): string {
+  return `\n\n你可以使用以下工具来操作项目代码。当需要读取、修改、搜索文件或运行命令时，在回复末尾插入一个或多个 <action>{...}</action> JSON 标记。每个 action 都需要用户确认后才会执行，执行结果会再次发给你。\n\n可用工具：\n1. read_file: 读取文件内容\n   { "type": "read_file", "filePath": "相对或绝对路径" }\n2. write_file: 写入或覆盖文件（危险操作，会保存快照以便撤销）\n   { "type": "write_file", "filePath": "路径", "content": "完整文件内容" }\n3. search_files: 在项目文件夹中搜索文本\n   { "type": "search_files", "query": "搜索关键词" }\n4. run_command: 在集成终端中运行 shell 命令\n   { "type": "run_command", "command": "要执行的命令" }\n\n注意：\n- 不要一次输出过多内容；优先分析再行动。\n- 写文件前最好先读取目标文件。\n- 回复中除了 action 标记外，可以用自然语言向用户说明你的计划。`;
+}
+
+async function saveSnapshot(filePath: string): Promise<void> {
+  if (fileSnapshots.has(filePath)) return;
+  try {
+    const raw = await window.ide!.readFile(filePath);
+    fileSnapshots.set(filePath, {
+      filePath,
+      content: normalizeLineEndings(raw),
+      lineEnding: detectLineEnding(raw),
+    });
+  } catch {
+    // 文件不存在则保存空快照
+    fileSnapshots.set(filePath, { filePath, content: "", lineEnding: "lf" });
+  }
+}
+
+async function executeAction(action: AgentAction): Promise<AgentActionResult> {
+  switch (action.type) {
+    case "read_file": {
+      if (!action.filePath) return { actionId: action.id, ok: false, error: "缺少 filePath" };
+      try {
+        const raw = await window.ide!.readFile(action.filePath);
+        return { actionId: action.id, ok: true, output: normalizeLineEndings(raw) };
+      } catch (err) {
+        return { actionId: action.id, ok: false, error: `读取失败: ${String(err)}` };
+      }
+    }
+    case "write_file": {
+      if (!action.filePath) return { actionId: action.id, ok: false, error: "缺少 filePath" };
+      await saveSnapshot(action.filePath);
+      const lineEnding = fileSnapshots.get(action.filePath)?.lineEnding || "lf";
+      const output = encodeLineEndings(action.content || "", lineEnding);
+      const result = await window.ide!.writeFile(action.filePath, output);
+      if (result.ok) {
+        // 如果文件当前已打开，刷新编辑器内容
+        const tab = tabs.get(action.filePath);
+        if (tab) {
+          tab.initialContent = normalizeLineEndings(output);
+          tab.currentContent = tab.initialContent;
+          tab.modified = false;
+          tab.lineEnding = lineEnding;
+          if (activeTabId === action.filePath) {
+            createEditor(tab.currentContent, tab.filePath);
+          }
+        }
+        updateUndoButton();
+        return { actionId: action.id, ok: true, output: `已写入 ${action.filePath}` };
+      }
+      return { actionId: action.id, ok: false, error: result.error || "写入失败" };
+    }
+    case "search_files": {
+      if (!action.query || !currentFolder) return { actionId: action.id, ok: false, error: "缺少 query 或项目文件夹" };
+      try {
+        const results = await window.ide!.searchFiles(currentFolder, action.query, { maxResults: 20 });
+        if (results.length === 0) return { actionId: action.id, ok: true, output: "未找到匹配结果" };
+        const lines = results.map((r) => `${r.filePath}:${r.line}:${r.column}  ${r.text.trim()}`);
+        return { actionId: action.id, ok: true, output: lines.join("\n") };
+      } catch (err) {
+        return { actionId: action.id, ok: false, error: `搜索失败: ${String(err)}` };
+      }
+    }
+    case "run_command": {
+      if (!action.command) return { actionId: action.id, ok: false, error: "缺少 command" };
+      try {
+        await ensureTerminal();
+        terminalPanelEl.style.display = "flex";
+        terminalVisible = true;
+        if (terminalId) {
+          window.ide?.terminalInput(terminalId, action.command + "\r");
+        }
+        return { actionId: action.id, ok: true, output: `已在终端执行: ${action.command}` };
+      } catch (err) {
+        return { actionId: action.id, ok: false, error: `运行失败: ${String(err)}` };
+      }
+    }
+    default:
+      return { actionId: action.id, ok: false, error: "未知操作类型" };
+  }
+}
+
+async function requestActionConfirmation(actions: AgentAction[]): Promise<boolean> {
+  return new Promise((resolve) => {
+    pendingActionResolve = resolve;
+  });
+}
+
+function updateUndoButton() {
+  aiUndoBtn.disabled = fileSnapshots.size === 0;
+}
+
+async function undoLastWrite() {
+  if (fileSnapshots.size === 0) return;
+  const [first] = fileSnapshots.values();
+  if (!first) return;
+  if (!confirm(`确定撤销对 "${basename(first.filePath)}" 的修改吗？`)) return;
+  try {
+    const output = encodeLineEndings(first.content, first.lineEnding);
+    const result = await window.ide!.writeFile(first.filePath, output);
+    if (result.ok) {
+      const tab = tabs.get(first.filePath);
+      if (tab) {
+        tab.initialContent = first.content;
+        tab.currentContent = first.content;
+        tab.modified = false;
+        tab.lineEnding = first.lineEnding;
+        if (activeTabId === first.filePath) {
+          createEditor(tab.currentContent, tab.filePath);
+        }
+      }
+      fileSnapshots.delete(first.filePath);
+      updateUndoButton();
+      aiMessages.push({ id: `s-${Date.now()}`, role: "model", content: `已撤销对 ${first.filePath} 的修改` });
+      renderAiMessages();
+    } else {
+      alert(`撤销失败: ${result.error || "未知错误"}`);
+    }
+  } catch (err) {
+    alert(`撤销失败: ${String(err)}`);
+  }
+}
+
+async function runAgentTurn(userText: string, scope: AiContextScope, maxRounds = 5) {
+  const userMsgId = `u-${Date.now()}`;
+  aiMessages.push({ id: userMsgId, role: "user", content: userText });
+  renderAiMessages();
+
+  aiRunning = true;
+  aiSendBtn.disabled = true;
+
+  try {
+    let round = 0;
+    let lastContext = await buildAiContext(scope);
+    let prompt = `你是一名资深的编程助手，正在帮助用户在 IDE 中工作。请根据以下上下文回答用户问题。${buildToolsPrompt()}\n\n${lastContext}\n\n用户问题:\n${userText}`;
+
+    while (round < maxRounds) {
+      round++;
+      const modelMsgId = `m-${Date.now()}-${round}`;
+      aiCurrentMessageId = modelMsgId;
+      aiMessages.push({ id: modelMsgId, role: "model", content: "", thinking: true });
+      renderAiMessages();
+
+      const { content: rawContent } = await callAgentStream(prompt);
+      const actions = parseActions(rawContent);
+      const cleanContent = stripActions(rawContent);
+
+      const modelMsg = aiMessages.find((m) => m.id === modelMsgId);
+      if (modelMsg) {
+        modelMsg.content = cleanContent || (actions.length > 0 ? "我计划执行以下操作:" : "");
+        modelMsg.thinking = false;
+        modelMsg.actions = actions.length > 0 ? actions : undefined;
+      }
+      renderAiMessages();
+
+      if (actions.length === 0) break;
+
+      // 请求用户确认
+      const confirmed = await requestActionConfirmation(actions);
+      if (!confirmed) {
+        for (const action of actions) action.rejected = true;
+        modelMsg!.actionResults = actions.map((a) => ({ actionId: a.id, ok: false, error: "用户已拒绝" }));
+        renderAiMessages();
+        break;
+      }
+
+      for (const action of actions) action.confirmed = true;
+      renderAiMessages();
+
+      // 执行 actions
+      const results: AgentActionResult[] = [];
+      for (const action of actions) {
+        const result = await executeAction(action);
+        results.push(result);
+      }
+      modelMsg!.actionResults = results;
+      renderAiMessages();
+
+      // 下一轮 prompt
+      const resultText = results
+        .map((r) => {
+          const action = actions.find((a) => a.id === r.actionId);
+          return `Action (${action?.type}): ${r.ok ? "成功" : "失败"}\n${r.output || r.error || ""}`;
+        })
+        .join("\n\n---\n\n");
+      prompt = `请继续。你刚才请求执行的操作结果如下：\n\n${resultText}\n\n请根据结果继续回答用户问题，或执行下一步操作。${buildToolsPrompt()}`;
+    }
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    aiMessages.push({ id: `e-${Date.now()}`, role: "model", content: errMsg, error: true });
+    renderAiMessages();
+  } finally {
+    aiRunning = false;
+    aiSendBtn.disabled = false;
+    aiCurrentMessageId = "";
+    pendingActionResolve = null;
+  }
+}
+
+async function callAgentStream(prompt: string): Promise<{ content: string }> {
+  return new Promise((resolve, reject) => {
+    let content = "";
+    let resolved = false;
+
+    aiEventUnsub?.();
+    aiEventUnsub = window.agui?.onEvent((rawEvent) => {
+      const event = rawEvent as AguiBaseEvent;
+      switch (event.type) {
+        case "TEXT_MESSAGE_CONTENT":
+          if (event.delta) content += event.delta;
+          break;
+        case "RUN_FINISHED":
+          if (!resolved) {
+            resolved = true;
+            resolve({ content });
+          }
+          break;
+        case "RUN_ERROR":
+          if (!resolved) {
+            resolved = true;
+            reject(new Error(event.content || "请求失败"));
+          }
+          break;
+      }
+    }) ?? null;
+
+    window.agui?.run({
+      messages: [{ role: "user", content: prompt }],
+      style: "chat",
+    }).then((ack) => {
+      if (!ack?.success) {
+        reject(new Error(ack?.error || "Agent 启动失败"));
+      }
+    }).catch(reject);
+  });
 }
 
 async function sendAiMessage() {
@@ -1157,90 +1528,7 @@ async function sendAiMessage() {
   const scope = aiContextSelectEl.value as AiContextScope;
   aiInputEl.value = "";
 
-  aiMessages.push({ id: `u-${Date.now()}`, role: "user", content: text });
-  renderAiMessages();
-
-  aiRunning = true;
-  aiSendBtn.disabled = true;
-  const modelMsgId = `m-${Date.now()}`;
-  aiCurrentMessageId = modelMsgId;
-  aiMessages.push({ id: modelMsgId, role: "model", content: "", thinking: true });
-  renderAiMessages();
-
-  try {
-    const context = await buildAiContext(scope);
-    const prompt = `你是一名资深的编程助手，正在帮助用户在 IDE 中工作。请根据以下上下文回答用户问题。\n\n${context}\n\n用户问题:\n${text}`;
-
-    aiEventUnsub?.();
-    let streamContent = "";
-    let runFinished = false;
-    let runErrored = false;
-
-    const finishPromise = new Promise<void>((resolve, reject) => {
-      aiEventUnsub = window.agui?.onEvent((rawEvent) => {
-        const event = rawEvent as AguiBaseEvent;
-        const msg = aiMessages.find((m) => m.id === modelMsgId);
-        if (!msg) return;
-
-        switch (event.type) {
-          case "TEXT_MESSAGE_START":
-            msg.thinking = false;
-            break;
-          case "TEXT_MESSAGE_CONTENT":
-            msg.thinking = false;
-            if (event.delta) {
-              streamContent += event.delta;
-              msg.content = streamContent;
-            }
-            break;
-          case "TOOL_CALL_START":
-            msg.toolName = event.toolCallName || "工具";
-            break;
-          case "TOOL_CALL_END":
-            msg.toolName = `${event.toolCallName || "工具"} 完成`;
-            break;
-          case "RUN_FINISHED":
-            runFinished = true;
-            msg.thinking = false;
-            resolve();
-            break;
-          case "RUN_ERROR":
-            runErrored = true;
-            msg.thinking = false;
-            msg.error = true;
-            msg.content = event.content || "请求失败";
-            reject(new Error(msg.content));
-            break;
-        }
-        renderAiMessages();
-      }) ?? null;
-    });
-
-    const ack = await window.agui?.run({
-      messages: [{ role: "user", content: prompt }],
-      style: "chat",
-    });
-
-    if (!ack?.success) {
-      throw new Error(ack?.error || "Agent 启动失败");
-    }
-
-    await finishPromise;
-  } catch (err) {
-    const msg = aiMessages.find((m) => m.id === modelMsgId);
-    if (msg) {
-      msg.thinking = false;
-      msg.error = true;
-      msg.content = err instanceof Error ? err.message : String(err);
-    }
-    renderAiMessages();
-  } finally {
-    aiRunning = false;
-    aiSendBtn.disabled = false;
-    aiEventUnsub?.();
-    aiEventUnsub = null;
-    aiCurrentMessageId = "";
-  }
+  await runAgentTurn(text, scope);
 }
 
 // Search
@@ -1408,6 +1696,7 @@ aiInputEl.addEventListener("keydown", (e) => {
     void sendAiMessage();
   }
 });
+aiUndoBtn.addEventListener("click", () => void undoLastWrite());
 
 openFolderBtn.addEventListener("click", async () => {
   const folder = await window.ide?.pickFolder();
