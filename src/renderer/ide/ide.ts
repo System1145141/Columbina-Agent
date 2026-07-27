@@ -126,6 +126,7 @@ interface InlineChatSuggestion {
   original: string;
   modified: string;
   diffHtml: string;
+  explanation: string;
 }
 
 interface InlineChatState {
@@ -299,6 +300,13 @@ class InlineChatWidget extends WidgetType {
     }
 
     if (this.state.suggestion) {
+      if (this.state.suggestion.explanation) {
+        const explanation = document.createElement("div");
+        explanation.className = "ide__inline-chat-explanation";
+        explanation.textContent = this.state.suggestion.explanation;
+        wrapper.appendChild(explanation);
+      }
+
       const diff = document.createElement("div");
       diff.className = "ide__inline-chat-diff";
       diff.innerHTML = this.state.suggestion.diffHtml;
@@ -1814,6 +1822,52 @@ function escapeHtml(text: string): string {
     .replace(/'/g, "&#039;");
 }
 
+interface SearchReplaceBlock {
+  search: string;
+  replace: string;
+}
+
+function parseSearchReplaceBlocks(content: string): { explanation: string; blocks: SearchReplaceBlock[] } {
+  const blocks: SearchReplaceBlock[] = [];
+  const parts: string[] = [];
+  const regex = /<<<search>>>\n?([\s\S]*?)<<<replace>>>\n?([\s\S]*?)<<<end>>>/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(content.slice(lastIndex, match.index));
+    }
+    blocks.push({
+      search: match[1].replace(/\r\n/g, "\n").replace(/\n+$/, ""),
+      replace: match[2].replace(/\r\n/g, "\n").replace(/\n+$/, ""),
+    });
+    lastIndex = regex.lastIndex;
+  }
+
+  if (lastIndex < content.length) {
+    parts.push(content.slice(lastIndex));
+  }
+
+  const explanation = parts.join("").trim();
+  return { explanation, blocks };
+}
+
+function applySearchReplace(original: string, blocks: SearchReplaceBlock[]): { modified: string; errors: string[] } {
+  let modified = original.replace(/\r\n/g, "\n");
+  const errors: string[] = [];
+
+  for (const block of blocks) {
+    if (!modified.includes(block.search)) {
+      errors.push(`未找到匹配文本:\n${block.search.slice(0, 120)}`);
+      continue;
+    }
+    modified = modified.replace(block.search, block.replace);
+  }
+
+  return { modified, errors };
+}
+
 async function runInlineChat(instruction: string) {
   if (!editorView || !instruction) return;
   const state = getInlineChatState();
@@ -1824,16 +1878,44 @@ async function runInlineChat(instruction: string) {
   try {
     const filePath = activeTabId ? tabs.get(activeTabId)?.filePath : "";
     const context = filePath ? `当前文件: ${filePath}` : "";
-    const prompt = `${context ? context + "\n\n" : ""}请根据以下用户指令处理选中的代码。只返回处理后的代码块，不要添加额外解释，除非用户明确要求解释。\n\n用户指令: ${instruction}\n\n选中代码:\n\`\`\`\n${state.selectedText}\n\`\`\`\n\n请直接返回替换选中代码后的完整代码块。`;
+    const prompt = `${context ? context + "\n\n" : ""}你是一名资深编程助手，正在 IDE 中帮助用户修改选中的代码。
+
+用户指令: ${instruction}
+
+选中代码:\n\`\`\`\n${state.selectedText}\n\`\`\`\n
+请用以下格式返回修改：
+- 用 <<<search>>> / <<<replace>>> / <<<end>>> 标出需要替换的代码片段。
+- <<<search>>> 中的文本必须精确匹配选中代码中的某一段。
+- <<<replace>>> 中是该片段修改后的内容。
+- 可以包含多个 search/replace 块。
+- 除了这些标记块之外的内容都会被视为对用户的解释说明，不会被应用到代码中。
+
+示例格式：
+<<<search>>>
+旧代码
+<<<replace>>>
+新代码
+<<<end>>>`;
 
     const { content } = await callAgentStream(prompt);
-    const modified = content.replace(/^```[\w]*\n?|\n?```$/g, "").trim();
+    const { explanation, blocks } = parseSearchReplaceBlocks(content);
+    const { modified, errors } = applySearchReplace(state.selectedText, blocks);
+
+    if (errors.length > 0) {
+      setInlineChatState({
+        ...state,
+        loading: false,
+        error: `无法应用修改:\n${errors.join("\n\n")}`,
+      });
+      return;
+    }
+
     const diffHtml = computeLineDiff(state.selectedText, modified);
 
     setInlineChatState({
       ...state,
       loading: false,
-      suggestion: { original: state.selectedText, modified, diffHtml },
+      suggestion: { original: state.selectedText, modified, diffHtml, explanation },
     });
   } catch (err) {
     setInlineChatState({
