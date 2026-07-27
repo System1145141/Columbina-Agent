@@ -1,5 +1,5 @@
-import { EditorView, keymap, lineNumbers } from "@codemirror/view";
-import { EditorState } from "@codemirror/state";
+import { EditorView, keymap, lineNumbers, WidgetType, Decoration, ViewPlugin, ViewUpdate } from "@codemirror/view";
+import { EditorState, StateEffect, StateField, EditorSelection } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
@@ -122,6 +122,22 @@ interface FileSnapshot {
   lineEnding: Tab["lineEnding"];
 }
 
+interface InlineChatSuggestion {
+  original: string;
+  modified: string;
+  diffHtml: string;
+}
+
+interface InlineChatState {
+  open: boolean;
+  from: number;
+  to: number;
+  selectedText: string;
+  suggestion?: InlineChatSuggestion;
+  loading?: boolean;
+  error?: string;
+}
+
 // DOM elements
 const openFolderBtn = document.getElementById("open-folder-btn") as HTMLButtonElement;
 const folderPathEl = document.getElementById("folder-path") as HTMLSpanElement;
@@ -191,7 +207,155 @@ let aiEventUnsub: (() => void) | null = null;
 const fileSnapshots = new Map<string, FileSnapshot>();
 let pendingActionResolve: ((value: boolean) => void) | null = null;
 
+// Inline chat CodeMirror state
+const setInlineChat = StateEffect.define<InlineChatState>();
+const inlineChatField = StateField.define<InlineChatState>({
+  create: () => ({ open: false, from: 0, to: 0, selectedText: "" }),
+  update(state, tr) {
+    let newState = state;
+    for (const e of tr.effects) {
+      if (e.is(setInlineChat)) newState = e.value;
+    }
+    // 选区变化时如果当前 chat 的选区范围改变，自动关闭
+    if (newState.open && tr.selection && !tr.selection.main.eq(EditorSelection.range(newState.from, newState.to))) {
+      newState = { open: false, from: 0, to: 0, selectedText: "" };
+    }
+    return newState;
+  },
+});
+
+// Inline chat widget
+class InlineChatWidget extends WidgetType {
+  constructor(readonly state: InlineChatState) {
+    super();
+  }
+
+  toDOM() {
+    const wrapper = document.createElement("div");
+    wrapper.className = "ide__inline-chat";
+
+    const header = document.createElement("div");
+    header.className = "ide__inline-chat-header";
+
+    const quickActions = ["解释", "重构", "补全", "修复 bug"];
+    for (const label of quickActions) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "ide__inline-chat-quick";
+      btn.textContent = label;
+      btn.addEventListener("click", () => {
+        const input = wrapper.querySelector(".ide__inline-chat-input") as HTMLTextAreaElement | null;
+        const text = input?.value.trim() || label;
+        void runInlineChat(text);
+      });
+      header.appendChild(btn);
+    }
+
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "ide__inline-chat-close";
+    closeBtn.textContent = "×";
+    closeBtn.title = "关闭";
+    closeBtn.addEventListener("click", () => closeInlineChat());
+    header.appendChild(closeBtn);
+
+    const input = document.createElement("textarea");
+    input.className = "ide__inline-chat-input";
+    input.placeholder = "让 Agent 解释、重构、补全或修复选中的代码...";
+    input.rows = 2;
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        void runInlineChat(input.value.trim());
+      }
+    });
+
+    const sendBtn = document.createElement("button");
+    sendBtn.type = "button";
+    sendBtn.className = "ide__inline-chat-send";
+    sendBtn.textContent = "发送";
+    sendBtn.addEventListener("click", () => void runInlineChat(input.value.trim()));
+
+    const inputRow = document.createElement("div");
+    inputRow.className = "ide__inline-chat-row";
+    inputRow.appendChild(input);
+    inputRow.appendChild(sendBtn);
+
+    wrapper.appendChild(header);
+    wrapper.appendChild(inputRow);
+
+    if (this.state.loading) {
+      const loading = document.createElement("div");
+      loading.className = "ide__inline-chat-loading";
+      loading.textContent = "Agent 思考中...";
+      wrapper.appendChild(loading);
+    }
+
+    if (this.state.error) {
+      const error = document.createElement("div");
+      error.className = "ide__inline-chat-error";
+      error.textContent = this.state.error;
+      wrapper.appendChild(error);
+    }
+
+    if (this.state.suggestion) {
+      const diff = document.createElement("div");
+      diff.className = "ide__inline-chat-diff";
+      diff.innerHTML = this.state.suggestion.diffHtml;
+
+      const actions = document.createElement("div");
+      actions.className = "ide__inline-chat-actions";
+
+      const acceptBtn = document.createElement("button");
+      acceptBtn.type = "button";
+      acceptBtn.className = "ide__inline-chat-btn ide__inline-chat-btn--accept";
+      acceptBtn.textContent = "接受";
+      acceptBtn.addEventListener("click", () => acceptInlineSuggestion());
+
+      const rejectBtn = document.createElement("button");
+      rejectBtn.type = "button";
+      rejectBtn.className = "ide__inline-chat-btn ide__inline-chat-btn--reject";
+      rejectBtn.textContent = "拒绝";
+      rejectBtn.addEventListener("click", () => closeInlineChat());
+
+      actions.appendChild(acceptBtn);
+      actions.appendChild(rejectBtn);
+      wrapper.appendChild(diff);
+      wrapper.appendChild(actions);
+    }
+
+    return wrapper;
+  }
+
+  eq(other: InlineChatWidget) {
+    return (
+      other.state.open === this.state.open &&
+      other.state.from === this.state.from &&
+      other.state.to === this.state.to &&
+      other.state.loading === this.state.loading &&
+      other.state.error === this.state.error &&
+      other.state.suggestion?.modified === this.state.suggestion?.modified
+    );
+  }
+}
+
+const inlineChatPlugin = ViewPlugin.fromClass(
+  class {
+    constructor(readonly view: EditorView) {}
+    update(_update: ViewUpdate) {}
+  },
+  {
+    decorations: (v) => {
+      const state = v.view.state.field(inlineChatField);
+      if (!state.open) return Decoration.none;
+      const widget = new InlineChatWidget(state);
+      return Decoration.set([Decoration.widget({ widget, side: 1 }).range(state.to)]);
+    },
+  }
+);
+
 // Utilities
+
 function basename(filePath: string): string {
   return filePath.replace(/\\/g, "/").split("/").pop() || filePath;
 }
@@ -622,8 +786,26 @@ function createEditor(initialContent = "", filePath = "", anchorLine = 1, anchor
           return true;
         },
       },
+      {
+        key: "Mod-Shift-a",
+        run: () => {
+          openInlineChat();
+          return true;
+        },
+      },
     ]),
     detectLanguage(filePath),
+    inlineChatField,
+    inlineChatPlugin,
+    EditorView.domEventHandlers({
+      contextmenu: (event) => {
+        const selection = editorView?.state.selection.main;
+        if (!selection || selection.from === selection.to) return false;
+        event.preventDefault();
+        showInlineChatContextMenu(event.clientX, event.clientY);
+        return true;
+      },
+    }),
     EditorView.updateListener.of((update) => {
       if (!activeTabId) return;
       const tab = tabs.get(activeTabId);
@@ -1519,6 +1701,157 @@ async function callAgentStream(prompt: string): Promise<{ content: string }> {
       }
     }).catch(reject);
   });
+}
+
+// Inline chat
+let inlineChatContextMenu: HTMLElement | null = null;
+
+function showInlineChatContextMenu(x: number, y: number) {
+  hideInlineChatContextMenu();
+  const menu = document.createElement("div");
+  menu.className = "ide__context-menu";
+  menu.style.left = `${x}px`;
+  menu.style.top = `${y}px`;
+
+  const items = [
+    { label: "询问 Columbina", action: () => openInlineChat() },
+    { label: "解释选中代码", action: () => { openInlineChat(); void runInlineChat("解释这段代码"); } },
+    { label: "重构选中代码", action: () => { openInlineChat(); void runInlineChat("重构这段代码，提高可读性"); } },
+  ];
+
+  for (const item of items) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ide__context-menu-item";
+    btn.textContent = item.label;
+    btn.addEventListener("click", () => {
+      hideInlineChatContextMenu();
+      item.action();
+    });
+    menu.appendChild(btn);
+  }
+
+  document.body.appendChild(menu);
+  inlineChatContextMenu = menu;
+
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) menu.style.left = `${window.innerWidth - rect.width - 8}px`;
+  if (rect.bottom > window.innerHeight) menu.style.top = `${window.innerHeight - rect.height - 8}px`;
+}
+
+function hideInlineChatContextMenu() {
+  if (inlineChatContextMenu) {
+    inlineChatContextMenu.remove();
+    inlineChatContextMenu = null;
+  }
+}
+
+document.addEventListener("click", (e) => {
+  if (inlineChatContextMenu && !inlineChatContextMenu.contains(e.target as Node)) {
+    hideInlineChatContextMenu();
+  }
+});
+
+function getInlineChatState(): InlineChatState {
+  return editorView?.state.field(inlineChatField) ?? { open: false, from: 0, to: 0, selectedText: "" };
+}
+
+function setInlineChatState(state: InlineChatState) {
+  if (!editorView) return;
+  editorView.dispatch({ effects: setInlineChat.of(state) });
+}
+
+function openInlineChat() {
+  if (!editorView) return;
+  const { from, to } = editorView.state.selection.main;
+  if (from === to) {
+    statusLeftEl.textContent = "请先选中一段代码";
+    return;
+  }
+  const selectedText = editorView.state.doc.sliceString(from, to);
+  setInlineChatState({
+    open: true,
+    from,
+    to,
+    selectedText,
+  });
+}
+
+function closeInlineChat() {
+  setInlineChatState({ open: false, from: 0, to: 0, selectedText: "" });
+}
+
+function computeLineDiff(original: string, modified: string): string {
+  const origLines = original.split("\n");
+  const modLines = modified.split("\n");
+  const maxLen = Math.max(origLines.length, modLines.length);
+  const rows: string[] = [];
+
+  for (let i = 0; i < maxLen; i++) {
+    const o = origLines[i];
+    const m = modLines[i];
+    if (o === m) {
+      rows.push(`<div class="ide__inline-chat-line">${escapeHtml(o ?? "")}</div>`);
+    } else {
+      if (o !== undefined) {
+        rows.push(`<div class="ide__inline-chat-line ide__inline-chat-line--del">- ${escapeHtml(o)}</div>`);
+      }
+      if (m !== undefined) {
+        rows.push(`<div class="ide__inline-chat-line ide__inline-chat-line--add">+ ${escapeHtml(m)}</div>`);
+      }
+    }
+  }
+
+  return rows.join("");
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+async function runInlineChat(instruction: string) {
+  if (!editorView || !instruction) return;
+  const state = getInlineChatState();
+  if (!state.open) return;
+
+  setInlineChatState({ ...state, loading: true, error: undefined, suggestion: undefined });
+
+  try {
+    const filePath = activeTabId ? tabs.get(activeTabId)?.filePath : "";
+    const context = filePath ? `当前文件: ${filePath}` : "";
+    const prompt = `${context ? context + "\n\n" : ""}请根据以下用户指令处理选中的代码。只返回处理后的代码块，不要添加额外解释，除非用户明确要求解释。\n\n用户指令: ${instruction}\n\n选中代码:\n\`\`\`\n${state.selectedText}\n\`\`\`\n\n请直接返回替换选中代码后的完整代码块。`;
+
+    const { content } = await callAgentStream(prompt);
+    const modified = content.replace(/^```[\w]*\n?|\n?```$/g, "").trim();
+    const diffHtml = computeLineDiff(state.selectedText, modified);
+
+    setInlineChatState({
+      ...state,
+      loading: false,
+      suggestion: { original: state.selectedText, modified, diffHtml },
+    });
+  } catch (err) {
+    setInlineChatState({
+      ...state,
+      loading: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+function acceptInlineSuggestion() {
+  const state = getInlineChatState();
+  if (!editorView || !state.open || !state.suggestion) return;
+  editorView.dispatch({
+    changes: { from: state.from, to: state.to, insert: state.suggestion.modified },
+    selection: { anchor: state.from + state.suggestion.modified.length },
+  });
+  closeInlineChat();
 }
 
 async function sendAiMessage() {
