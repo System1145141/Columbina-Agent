@@ -231,6 +231,7 @@ export const IPC = {
   IDE_TERMINAL_DATA: "ide:terminal-data",     // 主进程 → 渲染进程：终端输出
   IDE_TERMINAL_EXIT: "ide:terminal-exit",     // 主进程 → 渲染进程：终端退出
   IDE_MOVE: "ide:move",                       // 移动文件/文件夹到目标目录
+  IDE_GET_MEMORY_CONTEXT: "ide:get-memory-context", // 获取 L0/L1/L2 记忆上下文
 
   // call window (voice call)
   CALL_OPEN: "call:open",                 // sidebar → main：打开通话窗口

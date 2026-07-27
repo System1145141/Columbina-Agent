@@ -29,6 +29,7 @@ declare global {
         options?: { caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean; maxResults?: number }
       ) => Promise<IdeSearchResult[]>;
       move: (sourcePath: string, targetDir: string) => Promise<{ ok: boolean; error?: string }>;
+      getMemoryContext: (query: string) => Promise<string>;
       createTerminal: (cwd?: string) => Promise<string>;
       terminalInput: (id: string, data: string) => void;
       terminalResize: (id: string, cols: number, rows: number) => void;
@@ -139,6 +140,15 @@ interface InlineChatState {
   error?: string;
 }
 
+interface ProjectIndexEntry {
+  path: string;
+  relativePath: string;
+  size: number;
+  ext: string;
+  preview: string;
+  keywords: string[];
+}
+
 // DOM elements
 const openFolderBtn = document.getElementById("open-folder-btn") as HTMLButtonElement;
 const folderPathEl = document.getElementById("folder-path") as HTMLSpanElement;
@@ -207,6 +217,7 @@ let aiCurrentMessageId = "";
 let aiEventUnsub: (() => void) | null = null;
 const fileSnapshots = new Map<string, FileSnapshot>();
 let pendingActionResolve: ((value: boolean) => void) | null = null;
+let projectIndex: ProjectIndexEntry[] = [];
 
 // Inline chat CodeMirror state
 const setInlineChat = StateEffect.define<InlineChatState>();
@@ -993,6 +1004,7 @@ async function loadFolder(dirPath: string) {
   editorView = null;
   editorEl.innerHTML = "";
   expandedDirs.clear();
+  projectIndex = [];
   renderTabs();
   updateStatusBar();
 
@@ -1002,6 +1014,7 @@ async function loadFolder(dirPath: string) {
     for (const entry of entries) {
       treeRootEl.appendChild(createTreeItem(entry));
     }
+    void indexProjectFiles(dirPath);
     statusLeftEl.textContent = `已打开: ${dirPath}`;
   } catch (err) {
     statusLeftEl.textContent = `加载失败: ${String(err)}`;
@@ -1248,31 +1261,56 @@ function getCurrentSelection(): string {
   return editorView.state.doc.sliceString(from, to);
 }
 
-async function collectProjectContext(folderPath: string, maxFiles = 30, maxChars = 12000): Promise<string> {
-  const fileList: string[] = [];
-  const contents: string[] = [];
-  let totalChars = 0;
+const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".cache", ".vscode", ".idea"]);
+const BINARY_EXTS = new Set(["png", "jpg", "jpeg", "gif", "svg", "ico", "woff", "woff2", "ttf", "eot", "mp3", "mp4", "zip", "gz", "rar", "7z", "pdf", "exe", "dll", "so", "dylib"]);
+const CODE_EXTS = new Set(["ts", "js", "tsx", "jsx", "json", "css", "scss", "less", "html", "htm", "md", "py", "java", "go", "rs", "c", "cpp", "h", "hpp", "rb", "php", "swift", "kt"]);
+
+function isCodeFile(ext: string): boolean {
+  return CODE_EXTS.has(ext);
+}
+
+function extractKeywords(text: string, maxKeywords = 40): string[] {
+  const keywords = new Set<string>();
+  // 提取标识符: camelCase / PascalCase / snake_case
+  const matches = text.match(/[a-zA-Z_][a-zA-Z0-9_]*/g) || [];
+  for (const m of matches) {
+    if (m.length < 3) continue;
+    // 拆 camelCase / PascalCase
+    const parts = m.split(/(?=[A-Z])/);
+    for (const p of parts) {
+      if (p.length >= 3) keywords.add(p.toLowerCase());
+    }
+  }
+  return Array.from(keywords).slice(0, maxKeywords);
+}
+
+async function indexProjectFiles(folderPath: string): Promise<void> {
+  const index: ProjectIndexEntry[] = [];
 
   async function walk(dirPath: string) {
-    if (fileList.length >= maxFiles) return;
     try {
       const entries = await window.ide!.readDir(dirPath);
       for (const entry of entries) {
-        if (fileList.length >= maxFiles) return;
         if (entry.isDirectory) {
-          const name = entry.name.toLowerCase();
-          if (["node_modules", ".git", "dist", "build", ".cache"].includes(name)) continue;
+          if (SKIP_DIRS.has(entry.name.toLowerCase())) continue;
           await walk(entry.path);
         } else {
           const ext = getFileExtension(entry.path);
-          const binaryExts = ["png", "jpg", "jpeg", "gif", "svg", "ico", "woff", "woff2", "ttf", "eot", "mp3", "mp4", "zip", "gz"];
-          if (binaryExts.includes(ext)) continue;
+          if (BINARY_EXTS.has(ext)) continue;
           try {
+            const info = await window.ide!.getFileInfo(entry.path);
+            if (info.size > 200_000) continue; // 跳过大文件
             const text = await window.ide!.readFile(entry.path);
-            if (totalChars + text.length > maxChars) continue;
-            totalChars += text.length;
-            fileList.push(entry.path.replace(folderPath + "/", ""));
-            contents.push(`\n--- FILE: ${fileList[fileList.length - 1]} ---\n${text}`);
+            const previewLines = text.split("\n").slice(0, 30).join("\n");
+            const keywords = isCodeFile(ext) ? extractKeywords(text) : [];
+            index.push({
+              path: entry.path,
+              relativePath: entry.path.replace(folderPath.replace(/\\/g, "/") + "/", "").replace(/\\/g, "/"),
+              size: info.size,
+              ext,
+              preview: previewLines,
+              keywords,
+            });
           } catch {
             // ignore unreadable files
           }
@@ -1284,11 +1322,82 @@ async function collectProjectContext(folderPath: string, maxFiles = 30, maxChars
   }
 
   await walk(folderPath);
-  if (contents.length === 0) return "（项目为空或无法读取文件）";
-  return `项目文件列表:\n${fileList.join("\n")}\n${contents.join("\n")}`;
+  projectIndex = index;
+  console.log(`[IDE] project index built: ${index.length} files`);
 }
 
-async function buildAiContext(scope: AiContextScope): Promise<string> {
+function tokenizeQuery(query: string): string[] {
+  return query
+    .toLowerCase()
+    .split(/[^a-zA-Z0-9_\u4e00-\u9fa5]+/)
+    .filter((w) => w.length >= 2);
+}
+
+function scoreProjectEntry(entry: ProjectIndexEntry, queryTokens: string[]): number {
+  let score = 0;
+  const relLower = entry.relativePath.toLowerCase();
+  const previewLower = entry.preview.toLowerCase();
+  const keywordSet = new Set(entry.keywords);
+
+  for (const token of queryTokens) {
+    if (relLower.includes(token)) score += 10;
+    if (entry.ext.toLowerCase() === token) score += 5;
+    if (keywordSet.has(token)) score += 8;
+    if (previewLower.includes(token)) score += 3;
+  }
+
+  // 适度惩罚大文件
+  if (entry.size > 50_000) score *= 0.8;
+  return score;
+}
+
+function searchProjectIndex(query: string, topK = 10): ProjectIndexEntry[] {
+  const tokens = tokenizeQuery(query);
+  if (tokens.length === 0) return projectIndex.slice(0, topK);
+  return projectIndex
+    .map((entry) => ({ entry, score: scoreProjectEntry(entry, tokens) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK)
+    .map((item) => item.entry);
+}
+
+async function collectProjectContext(folderPath: string, query?: string, maxFiles = 12, maxChars = 10000): Promise<string> {
+  if (projectIndex.length === 0) {
+    return "（项目索引尚未构建完成，请稍后再试）";
+  }
+
+  const matched = query ? searchProjectIndex(query, maxFiles) : projectIndex.slice(0, maxFiles);
+  if (matched.length === 0) {
+    return "（未找到与问题相关的项目文件）";
+  }
+
+  const fileList: string[] = [];
+  const contents: string[] = [];
+  let totalChars = 0;
+
+  for (const entry of matched) {
+    try {
+      const text = await window.ide!.readFile(entry.path);
+      if (totalChars + text.length > maxChars) {
+        // 仍列出文件，但只截断内容
+        fileList.push(entry.relativePath);
+        contents.push(`\n--- FILE: ${entry.relativePath} ---\n${text.slice(0, Math.max(0, maxChars - totalChars))}\n...（内容已截断）`);
+        totalChars = maxChars;
+        break;
+      }
+      totalChars += text.length;
+      fileList.push(entry.relativePath);
+      contents.push(`\n--- FILE: ${entry.relativePath} ---\n${text}`);
+    } catch {
+      // ignore unreadable files
+    }
+  }
+
+  return `当前项目相关文件（按与问题相关性排序）:\n${fileList.join("\n")}\n${contents.join("\n")}`;
+}
+
+async function buildAiContext(scope: AiContextScope, query?: string): Promise<string> {
   const parts: string[] = [];
 
   if (scope === "file" || scope === "selection") {
@@ -1313,10 +1422,20 @@ async function buildAiContext(scope: AiContextScope): Promise<string> {
   if (scope === "project") {
     if (currentFolder) {
       parts.push(`当前打开的项目文件夹: ${currentFolder}`);
-      parts.push(await collectProjectContext(currentFolder));
+      parts.push(await collectProjectContext(currentFolder, query));
     } else {
       parts.push("（当前没有打开项目文件夹）");
     }
+  }
+
+  // 注入 L0/L1/L2 记忆与世界书上下文
+  try {
+    const memoryContext = await window.ide?.getMemoryContext(query || "");
+    if (memoryContext && memoryContext.trim().length > 0) {
+      parts.push(`\n【相关记忆与背景】\n${memoryContext}`);
+    }
+  } catch {
+    // 记忆模块可能未初始化，忽略错误
   }
 
   return parts.join("\n\n");
@@ -1607,7 +1726,7 @@ async function runAgentTurn(userText: string, scope: AiContextScope, maxRounds =
 
   try {
     let round = 0;
-    let lastContext = await buildAiContext(scope);
+    let lastContext = await buildAiContext(scope, userText);
     let prompt = `你是一名资深的编程助手，正在帮助用户在 IDE 中工作。请根据以下上下文回答用户问题。${buildToolsPrompt()}\n\n${lastContext}\n\n用户问题:\n${userText}`;
 
     while (round < maxRounds) {

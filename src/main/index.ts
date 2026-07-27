@@ -2906,6 +2906,17 @@ ipcMain.handle(IPC.IDE_MOVE, async (_event, sourcePath: unknown, targetDir: unkn
   }
 });
 
+ipcMain.handle(IPC.IDE_GET_MEMORY_CONTEXT, async (_event, query: unknown) => {
+  try {
+    const { buildMemoryContext } = await import("./rag");
+    const q = typeof query === "string" ? query : "";
+    return await buildMemoryContext(q);
+  } catch (err: any) {
+    console.error("[Columbina IDE] buildMemoryContext failed:", err?.message || err);
+    return "";
+  }
+});
+
 interface IdeSearchResult {
   filePath: string;
   line: number;

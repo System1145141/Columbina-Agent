@@ -158,6 +158,7 @@ const ideApi = {
   searchFiles: (folderPath: string, query: string, options?: { caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean; maxResults?: number }) =>
     ipcRenderer.invoke(IPC.IDE_SEARCH_FILES, folderPath, query, options),
   move: (sourcePath: string, targetDir: string) => ipcRenderer.invoke(IPC.IDE_MOVE, sourcePath, targetDir) as Promise<{ ok: boolean; error?: string }>,
+  getMemoryContext: (query: string) => ipcRenderer.invoke(IPC.IDE_GET_MEMORY_CONTEXT, query) as Promise<string>,
   createTerminal: (cwd?: string) => ipcRenderer.invoke(IPC.IDE_TERMINAL_CREATE, cwd) as Promise<string>,
   terminalInput: (id: string, data: string) => ipcRenderer.send(IPC.IDE_TERMINAL_INPUT, id, data),
   terminalResize: (id: string, cols: number, rows: number) => ipcRenderer.send(IPC.IDE_TERMINAL_RESIZE, id, cols, rows),
