@@ -442,6 +442,7 @@
     "openChat": "チャットを開く",
     "voiceCall": "音声通話",
     "switchModel": "モデル切替",
+    "openIde": "IDE を開く",
     "settings": "設定",
     "openSettings": "設定を開く",
     "statusHint": "設定で有効にしてください",

@@ -14,6 +14,7 @@
 - 🛠 **工具生态** — 文档生成、联网搜索、文件操作
 - 📱 **多平台接入** — 飞书、微信 iLink
 - 🌐 **原生多语言支持** — 中英日韩四语UI、中英双语提示词
+- 📄 **IDE 功能** — 内嵌 AI 能力的桌面 IDE，正在开发中
 
 > [!IMPORTANT]
 >
@@ -29,6 +30,7 @@
 - 🔌 **Agent 对话接力** — LLM 判断交接，自然衔接对话
 - 🔑 **API 管理** — 改进的 API Key 管理器与模型选择器
 - 🌐 **多语言支持** — 中英日韩四语UI和中英双语提示词
+- 📄 **IDE 功能** — 内嵌 AI 能力的桌面 IDE，正在开发中
 
 ---
 
@@ -70,6 +72,13 @@ Columbina-Agent与Cyrene-Agent并**不会冲突**，你可以同时保留两个�
 
 ```bash
 git clone https://github.com/System1145141/Columbina-Agent.git
+cd Columbina-Agent
+```
+
+或带有 Columbina-IDE 功能的 Alpha 版本
+
+```bash
+git clone -b Columbina-IDE-test https://github.com/System1145141/Columbina-Agent.git
 cd Columbina-Agent
 ```
 

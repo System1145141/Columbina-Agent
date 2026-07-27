@@ -442,6 +442,7 @@
     "openChat": "채팅 열기",
     "voiceCall": "음성 통화",
     "switchModel": "모델 전환",
+    "openIde": "IDE 열기",
     "settings": "설정",
     "openSettings": "설정 열기",
     "statusHint": "설정에서 활성화하세요",

@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, shell, di
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
+import * as pty from "node-pty";
 import { createHash } from "crypto";
 import { pathToFileURL } from "url";
 import { IPC } from "../shared/ipc-channels";
@@ -86,6 +87,7 @@ let tasksWindow: BrowserWindow | null = null;
 let settingsWindow: BrowserWindow | null = null;
 let stickerManagerWindow: BrowserWindow | null = null;
 let callWindow: BrowserWindow | null = null;
+let ideWindow: BrowserWindow | null = null;
 let schedulerEngine: SchedulerEngine | null = null;
 // 聊天窗口当前活跃的会话 id（通过 IPC 由聊天窗口上报）；
 // 设置面板"删除当前会话"差异化提示用。聊天窗口关闭时由 closed 事件置 null。
@@ -466,6 +468,14 @@ interface GeneralSettings {
   agentAutoHandoff: boolean;
   /** Agent 自动接力最大轮数，防止无限循环 */
   maxHandoffRounds: number;
+  /** IDE 编辑器设置（主题、字体、缩进） */
+  ideSettings: IdeSettings;
+}
+
+interface IdeSettings {
+  theme: "dark" | "light";
+  fontSize: number;
+  tabSize: number;
 }
 
 
@@ -602,6 +612,11 @@ const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   openerMode: "off",
   agentAutoHandoff: false,
   maxHandoffRounds: 1,
+  ideSettings: {
+    theme: "dark",
+    fontSize: 13,
+    tabSize: 2,
+  },
 };
 
 function getSettingsPath(): string {
@@ -1044,6 +1059,15 @@ function normalizeGeneralSettings(input: Partial<GeneralSettings> | null | undef
     ttsMimoKey: typeof input?.ttsMimoKey === "string" ? input.ttsMimoKey : "",
     ttsMimoVoiceAudioPath: typeof input?.ttsMimoVoiceAudioPath === "string" ? input.ttsMimoVoiceAudioPath : "",
     ttsMimoStylePrompt: typeof input?.ttsMimoStylePrompt === "string" ? input.ttsMimoStylePrompt : DEFAULT_GENERAL_SETTINGS.ttsMimoStylePrompt,
+    ideSettings: {
+      theme: input?.ideSettings?.theme === "light" ? "light" : "dark",
+      fontSize: typeof input?.ideSettings?.fontSize === "number" && Number.isFinite(input.ideSettings.fontSize)
+        ? Math.max(8, Math.min(32, Math.round(input.ideSettings.fontSize)))
+        : DEFAULT_GENERAL_SETTINGS.ideSettings.fontSize,
+      tabSize: typeof input?.ideSettings?.tabSize === "number" && Number.isFinite(input.ideSettings.tabSize)
+        ? Math.max(1, Math.min(8, Math.round(input.ideSettings.tabSize)))
+        : DEFAULT_GENERAL_SETTINGS.ideSettings.tabSize,
+    },
   };
 }
 
@@ -2318,6 +2342,50 @@ function createChatWindow(sessionId?: string): void {
   });
 }
 
+function createIdeWindow(): void {
+  if (ideWindow && !ideWindow.isDestroyed()) {
+    ideWindow.show();
+    ideWindow.focus();
+    return;
+  }
+
+  ideWindow = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    minWidth: 800,
+    minHeight: 600,
+    title: "Columbina · IDE",
+    icon: APP_ICON_PATH,
+    backgroundColor: "#1e1e1e",
+    autoHideMenuBar: true,
+    show: false,
+    frame: false,
+    webPreferences: {
+      preload: path.join(__dirname, "..", "..", "preload", "preload", "index.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      additionalArguments: getRendererLangArgs(),
+    },
+  });
+
+  if (isDev) {
+    ideWindow.loadURL("http://localhost:5173/ide/");
+  } else {
+    ideWindow.loadFile(
+      path.join(__dirname, "..", "..", "renderer", "ide", "index.html")
+    );
+  }
+
+  ideWindow.once("ready-to-show", () => {
+    ideWindow?.show();
+  });
+
+  ideWindow.on("closed", () => {
+    ideWindow = null;
+  });
+}
+
 function createSidebarWindow(): void {
   if (sidebarWindow && !sidebarWindow.isDestroyed()) {
     sidebarWindow.show();
@@ -2766,6 +2834,246 @@ ipcMain.handle(IPC.CHAT_INGEST_FILES, async (_event, paths: unknown) => {
     return [];
   }
 });
+
+// IDE 窗口 IPC
+ipcMain.on(IPC.IDE_OPEN, () => createIdeWindow());
+ipcMain.on(IPC.IDE_CLOSE, () => ideWindow?.close());
+ipcMain.on(IPC.IDE_MINIMIZE, () => ideWindow?.minimize());
+ipcMain.on(IPC.IDE_TOGGLE_MAXIMIZE, () => {
+  if (!ideWindow) return;
+  if (ideWindow.isMaximized()) ideWindow.unmaximize();
+  else ideWindow.maximize();
+});
+ipcMain.handle(IPC.IDE_PICK_FOLDER, async () => {
+  if (!ideWindow) return null;
+  const result = await dialog.showOpenDialog(ideWindow, { properties: ["openDirectory"] });
+  return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
+});
+ipcMain.handle(IPC.IDE_READ_DIR, async (_event, dirPath: unknown) => {
+  if (typeof dirPath !== "string") return [];
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    return entries
+      .filter((e) => !e.name.startsWith("."))
+      .map((e) => ({ name: e.name, path: path.join(dirPath, e.name), isDirectory: e.isDirectory() }))
+      .sort((a, b) => (a.isDirectory === b.isDirectory ? a.name.localeCompare(b.name) : a.isDirectory ? -1 : 1));
+  } catch (err: any) {
+    console.error("[Columbina IDE] readDir failed:", err?.message || err);
+    return [];
+  }
+});
+ipcMain.handle(IPC.IDE_READ_FILE, async (_event, filePath: unknown) => {
+  if (typeof filePath !== "string") throw new Error("Invalid path");
+  try {
+    return fs.readFileSync(filePath, "utf8");
+  } catch (err: any) {
+    throw new Error(err?.message || "读取失败");
+  }
+});
+ipcMain.handle(IPC.IDE_WRITE_FILE, async (_event, filePath: unknown, content: unknown) => {
+  if (typeof filePath !== "string" || typeof content !== "string") return { ok: false, error: "Invalid args" };
+  try {
+    fs.writeFileSync(filePath, content, "utf8");
+    return { ok: true };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || "写入失败" };
+  }
+});
+ipcMain.handle(IPC.IDE_GET_FILE_INFO, async (_event, filePath: unknown) => {
+  if (typeof filePath !== "string") return { isDirectory: false, size: 0 };
+  try {
+    const stat = fs.statSync(filePath);
+    return { isDirectory: stat.isDirectory(), size: stat.size };
+  } catch {
+    return { isDirectory: false, size: 0 };
+  }
+});
+
+ipcMain.handle(IPC.IDE_MOVE, async (_event, sourcePath: unknown, targetDir: unknown) => {
+  if (typeof sourcePath !== "string" || typeof targetDir !== "string") {
+    return { ok: false, error: "参数类型错误" };
+  }
+  try {
+    const targetPath = path.join(targetDir, path.basename(sourcePath));
+    if (fs.existsSync(targetPath)) {
+      return { ok: false, error: "目标位置已存在同名文件/文件夹" };
+    }
+    await fs.promises.rename(sourcePath, targetPath);
+    return { ok: true };
+  } catch (err: any) {
+    console.error("[Columbina IDE] move failed:", err?.message || err);
+    return { ok: false, error: err?.message || "移动失败" };
+  }
+});
+
+ipcMain.handle(IPC.IDE_GET_MEMORY_CONTEXT, async (_event, query: unknown) => {
+  try {
+    const { buildMemoryContext } = await import("./rag");
+    const q = typeof query === "string" ? query : "";
+    return await buildMemoryContext(q);
+  } catch (err: any) {
+    console.error("[Columbina IDE] buildMemoryContext failed:", err?.message || err);
+    return "";
+  }
+});
+
+interface IdeSearchResult {
+  filePath: string;
+  line: number;
+  column: number;
+  text: string;
+}
+
+const IDE_SEARCH_IGNORE_DIRS = new Set(["node_modules", ".git", "dist", "build", ".cache", "coverage"]);
+const IDE_SEARCH_MAX_FILE_SIZE = 1024 * 1024; // 1 MB
+
+function isLikelyBinary(buffer: Buffer): boolean {
+  for (let i = 0; i < Math.min(buffer.length, 512); i++) {
+    if (buffer[i] === 0) return true;
+  }
+  return false;
+}
+
+function searchInDirectory(
+  dirPath: string,
+  regex: RegExp,
+  maxResults: number,
+  results: IdeSearchResult[]
+): void {
+  if (results.length >= maxResults) return;
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dirPath, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (results.length >= maxResults) break;
+    if (entry.name.startsWith(".")) continue;
+    const fullPath = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      if (IDE_SEARCH_IGNORE_DIRS.has(entry.name)) continue;
+      searchInDirectory(fullPath, regex, maxResults, results);
+    } else if (entry.isFile()) {
+      try {
+        const stat = fs.statSync(fullPath);
+        if (stat.size > IDE_SEARCH_MAX_FILE_SIZE) continue;
+        const buffer = fs.readFileSync(fullPath);
+        if (isLikelyBinary(buffer)) continue;
+        const text = buffer.toString("utf8");
+        const lines = text.split(/\r?\n/);
+        for (let i = 0; i < lines.length && results.length < maxResults; i++) {
+          const lineText = lines[i];
+          regex.lastIndex = 0;
+          const match = regex.exec(lineText);
+          if (match) {
+            results.push({
+              filePath: fullPath,
+              line: i + 1,
+              column: match.index + 1,
+              text: lineText.trim(),
+            });
+          }
+        }
+      } catch {
+        // ignore unreadable files
+      }
+    }
+  }
+}
+
+ipcMain.handle(IPC.IDE_SEARCH_FILES, async (_event, folderPath: unknown, query: unknown, options: unknown) => {
+  if (typeof folderPath !== "string" || typeof query !== "string" || query.length === 0) return [];
+  const opts = typeof options === "object" && options !== null ? (options as Record<string, unknown>) : {};
+  const caseSensitive = opts.caseSensitive === true;
+  const wholeWord = opts.wholeWord === true;
+  const useRegex = opts.regex === true;
+  const maxResults = typeof opts.maxResults === "number" ? opts.maxResults : 500;
+
+  let pattern = query;
+  if (!useRegex) {
+    pattern = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+  if (wholeWord) {
+    pattern = `\\b(?:${pattern})\\b`;
+  }
+  let regex: RegExp;
+  try {
+    regex = new RegExp(pattern, caseSensitive ? "g" : "gi");
+  } catch {
+    return [];
+  }
+
+  const results: IdeSearchResult[] = [];
+  searchInDirectory(folderPath, regex, maxResults, results);
+  return results;
+});
+
+const ideTerminals = new Map<string, pty.IPty>();
+
+function getDefaultShell(): string {
+  const platform = os.platform();
+  if (platform === "win32") return process.env.COMSPEC || "cmd.exe";
+  if (platform === "darwin") return process.env.SHELL || "/bin/zsh";
+  return process.env.SHELL || "/bin/bash";
+}
+
+function sendTerminalData(id: string, data: string) {
+  if (!ideWindow || ideWindow.isDestroyed()) return;
+  ideWindow.webContents.send(IPC.IDE_TERMINAL_DATA, { id, data });
+}
+
+function sendTerminalExit(id: string, exitCode?: number) {
+  if (!ideWindow || ideWindow.isDestroyed()) return;
+  ideWindow.webContents.send(IPC.IDE_TERMINAL_EXIT, { id, exitCode });
+}
+
+ipcMain.handle(IPC.IDE_TERMINAL_CREATE, async (_event, cwd: unknown) => {
+  const shell = getDefaultShell();
+  const workDir = typeof cwd === "string" && cwd.length > 0 ? cwd : process.cwd();
+  const id = `term-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    const term = pty.spawn(shell, [], {
+      name: "xterm-color",
+      cols: 80,
+      rows: 24,
+      cwd: workDir,
+      env: process.env as { [key: string]: string },
+    });
+    term.onData((data) => sendTerminalData(id, data));
+    term.onExit(({ exitCode }) => {
+      sendTerminalExit(id, exitCode);
+      ideTerminals.delete(id);
+    });
+    ideTerminals.set(id, term);
+    return id;
+  } catch (err: any) {
+    console.error("[Columbina IDE] create terminal failed:", err?.message || err);
+    throw new Error(err?.message || "创建终端失败");
+  }
+});
+
+ipcMain.on(IPC.IDE_TERMINAL_INPUT, (_event, id: unknown, data: unknown) => {
+  if (typeof id !== "string" || typeof data !== "string") return;
+  const term = ideTerminals.get(id);
+  if (term) term.write(data);
+});
+
+ipcMain.on(IPC.IDE_TERMINAL_RESIZE, (_event, id: unknown, cols: unknown, rows: unknown) => {
+  if (typeof id !== "string" || typeof cols !== "number" || typeof rows !== "number") return;
+  const term = ideTerminals.get(id);
+  if (term) term.resize(cols, rows);
+});
+
+ipcMain.on(IPC.IDE_TERMINAL_KILL, (_event, id: unknown) => {
+  if (typeof id !== "string") return;
+  const term = ideTerminals.get(id);
+  if (term) {
+    term.kill();
+    ideTerminals.delete(id);
+  }
+});
+
 ipcMain.on(IPC.SIDEBAR_MINIMIZE, () => {
   sidebarWindow?.minimize();
 });

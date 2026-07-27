@@ -213,6 +213,26 @@ export const IPC = {
   // renderer → main：回传用户选择
   CHOICE_RESOLVE: "choice:resolve",
 
+  // IDE window
+  IDE_OPEN: "ide:open",                   // 打开 IDE 窗口
+  IDE_CLOSE: "ide:close",                 // 关闭 IDE 窗口
+  IDE_MINIMIZE: "ide:minimize",           // 最小化 IDE 窗口
+  IDE_TOGGLE_MAXIMIZE: "ide:toggle-maximize",
+  IDE_PICK_FOLDER: "ide:pick-folder",     // 选择文件夹
+  IDE_READ_DIR: "ide:read-dir",           // 读取目录
+  IDE_READ_FILE: "ide:read-file",         // 读取文件内容
+  IDE_WRITE_FILE: "ide:write-file",       // 写入文件内容
+  IDE_GET_FILE_INFO: "ide:get-file-info", // 获取文件信息
+  IDE_SEARCH_FILES: "ide:search-files",   // 项目内文本搜索
+  IDE_TERMINAL_CREATE: "ide:terminal-create", // 创建终端
+  IDE_TERMINAL_INPUT: "ide:terminal-input",   // 向终端发送输入
+  IDE_TERMINAL_RESIZE: "ide:terminal-resize", // 调整终端大小
+  IDE_TERMINAL_KILL: "ide:terminal-kill",     // 关闭终端
+  IDE_TERMINAL_DATA: "ide:terminal-data",     // 主进程 → 渲染进程：终端输出
+  IDE_TERMINAL_EXIT: "ide:terminal-exit",     // 主进程 → 渲染进程：终端退出
+  IDE_MOVE: "ide:move",                       // 移动文件/文件夹到目标目录
+  IDE_GET_MEMORY_CONTEXT: "ide:get-memory-context", // 获取 L0/L1/L2 记忆上下文
+
   // call window (voice call)
   CALL_OPEN: "call:open",                 // sidebar → main：打开通话窗口
   CALL_START: "call:start",               // renderer → main：开始通话（初始化 ASR）

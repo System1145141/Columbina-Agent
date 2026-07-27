@@ -444,6 +444,7 @@
     "openChat": "Open Chat",
     "voiceCall": "Voice Call",
     "switchModel": "Switch Model",
+    "openIde": "Open IDE",
     "settings": "Settings",
     "openSettings": "Open Settings",
     "statusHint": "Enable in Settings",

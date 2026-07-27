@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Columbina · IDE</title>
+  <link rel="stylesheet" href="../ui/tokens.css" />
+  <link rel="stylesheet" href="../ui/fonts.css" />
+  <link rel="stylesheet" href="../ui/base.css" />
+  <link rel="stylesheet" href="./ide.css" />
+</head>
+<body>
+  <div class="ide">
+    <header class="ide__titlebar">
+      <div class="ide__titlebar-drag">
+        <span class="ide__logo">Columbina IDE</span>
+        <button type="button" class="ide__btn" id="open-folder-btn">打开文件夹</button>
+        <button type="button" class="ide__btn" id="terminal-toggle-btn" title="切换终端 (Ctrl+`)">终端</button>
+        <button type="button" class="ide__btn" id="ai-toggle-btn" title="切换 AI 面板">AI</button>
+        <span class="ide__folder" id="folder-path"></span>
+      </div>
+      <div class="ide__titlebar-actions">
+        <button type="button" class="ide__winbtn" id="min-btn" aria-label="最小化">—</button>
+        <button type="button" class="ide__winbtn" id="max-btn" aria-label="最大化">□</button>
+        <button type="button" class="ide__winbtn ide__winbtn--close" id="close-btn" aria-label="关闭">×</button>
+      </div>
+    </header>
+    <div class="ide__workspace">
+      <aside class="ide__sidebar" id="file-tree">
+        <div class="ide__sidebar-header">
+          <span class="ide__sidebar-title" id="sidebar-title">资源管理器</span>
+          <button type="button" class="ide__sidebar-action" id="search-toggle-btn" title="在文件夹中搜索 (Ctrl+Shift+F)">🔍</button>
+        </div>
+        <div class="ide__search" id="search-panel" style="display: none;">
+          <input type="text" class="ide__search-input" id="search-input" placeholder="搜索" />
+          <div class="ide__search-options">
+            <label><input type="checkbox" id="search-case" /> 区分大小写</label>
+            <label><input type="checkbox" id="search-word" /> 全词匹配</label>
+            <label><input type="checkbox" id="search-regex" /> 正则</label>
+          </div>
+          <button type="button" class="ide__search-back" id="search-back-btn">← 返回资源管理器</button>
+          <div class="ide__search-results" id="search-results"></div>
+        </div>
+        <div class="ide__tree" id="tree-root"></div>
+      </aside>
+      <main class="ide__main">
+        <div class="ide__tabbar" id="tab-bar"></div>
+        <div class="ide__editor" id="editor"></div>
+        <div class="ide__terminal" id="terminal-panel" style="display: none;">
+          <div class="ide__terminal-header">
+            <span>终端</span>
+            <button type="button" class="ide__terminal-close" id="terminal-close-btn" aria-label="关闭终端">×</button>
+          </div>
+          <div class="ide__terminal-content" id="terminal-content"></div>
+        </div>
+      </main>
+      <aside class="ide__ai-panel" id="ai-panel" style="display: none;">
+        <div class="ide__ai-header">
+          <span>Columbina AI</span>
+          <div class="ide__ai-header-actions">
+            <button type="button" class="ide__ai-header-btn" id="ai-undo-btn" title="撤销上次修改" disabled>撤销</button>
+            <button type="button" class="ide__ai-close" id="ai-close-btn" aria-label="关闭 AI 面板">×</button>
+          </div>
+        </div>
+        <div class="ide__ai-messages" id="ai-messages"></div>
+        <div class="ide__ai-input-area">
+          <div class="ide__ai-context">
+            <label class="ide__ai-context-label">上下文:</label>
+            <select id="ai-context-select" class="ide__ai-context-select">
+              <option value="file">当前文件</option>
+              <option value="selection">当前选区</option>
+              <option value="project">整个项目</option>
+            </select>
+          </div>
+          <div class="ide__ai-input-row">
+            <textarea id="ai-input" class="ide__ai-input" placeholder="询问关于代码的问题..." rows="2"></textarea>
+            <button type="button" class="ide__ai-send" id="ai-send-btn">发送</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+    <footer class="ide__statusbar" id="status-bar">
+      <span class="ide__statusbar-left" id="status-left"></span>
+      <span class="ide__statusbar-right" id="status-right"></span>
+    </footer>
+  </div>
+  <div class="ide__command" id="command-panel" style="display: none;">
+    <div class="ide__command-box">
+      <input type="text" class="ide__command-input" id="command-input" placeholder="键入命令或搜索文件" autocomplete="off" />
+      <div class="ide__command-list" id="command-list"></div>
+      <div class="ide__command-hint">
+        <span>↑↓ 选择</span>
+        <span>↵ 执行</span>
+        <span>Esc 关闭</span>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="./ide.ts"></script>
+</body>
+</html>
