@@ -177,6 +177,11 @@ const terminalCloseBtn = document.getElementById("terminal-close-btn") as HTMLBu
 const commandPanelEl = document.getElementById("command-panel") as HTMLElement;
 const commandInputEl = document.getElementById("command-input") as HTMLInputElement;
 const commandListEl = document.getElementById("command-list") as HTMLElement;
+const promptOverlayEl = document.getElementById("prompt-overlay") as HTMLElement;
+const promptLabelEl = document.getElementById("prompt-label") as HTMLLabelElement;
+const promptInputEl = document.getElementById("prompt-input") as HTMLInputElement;
+const promptOkBtn = document.getElementById("prompt-ok-btn") as HTMLButtonElement;
+const promptCancelBtn = document.getElementById("prompt-cancel-btn") as HTMLButtonElement;
 const ideRootEl = document.querySelector(".ide") as HTMLElement;
 const aiToggleBtn = document.getElementById("ai-toggle-btn") as HTMLButtonElement;
 const aiPanelEl = document.getElementById("ai-panel") as HTMLElement;
@@ -1057,8 +1062,58 @@ document.addEventListener("click", (e) => {
   }
 });
 
+let promptResolve: ((value: string | null) => void) | null = null;
+
+function showPromptDialog(message: string, defaultValue = ""): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (promptResolve) {
+      promptResolve(null);
+    }
+    promptResolve = resolve;
+
+    promptLabelEl.textContent = message;
+    promptInputEl.value = defaultValue;
+    promptOverlayEl.style.display = "flex";
+    promptInputEl.focus();
+    promptInputEl.select();
+
+    const cleanup = () => {
+      promptOverlayEl.style.display = "none";
+      promptOkBtn.removeEventListener("click", onOk);
+      promptCancelBtn.removeEventListener("click", onCancel);
+      promptInputEl.removeEventListener("keydown", onKeydown);
+      promptResolve = null;
+    };
+
+    const onOk = () => {
+      const value = promptInputEl.value;
+      cleanup();
+      resolve(value);
+    };
+
+    const onCancel = () => {
+      cleanup();
+      resolve(null);
+    };
+
+    const onKeydown = (e: KeyboardEvent) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        onOk();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        onCancel();
+      }
+    };
+
+    promptOkBtn.addEventListener("click", onOk);
+    promptCancelBtn.addEventListener("click", onCancel);
+    promptInputEl.addEventListener("keydown", onKeydown);
+  });
+}
+
 async function promptCreate(dirPath: string, type: "file" | "dir") {
-  const name = prompt(type === "file" ? "请输入文件名:" : "请输入文件夹名:");
+  const name = await showPromptDialog(type === "file" ? "请输入文件名:" : "请输入文件夹名:");
   if (!name || !name.trim()) return;
   const result = type === "file"
     ? await window.ide?.createFile(dirPath, name.trim())
@@ -1074,7 +1129,7 @@ async function promptCreate(dirPath: string, type: "file" | "dir") {
 }
 
 async function promptRename(entry: IdeDirEntry) {
-  const newName = prompt("请输入新名称:", entry.name);
+  const newName = await showPromptDialog("请输入新名称:", entry.name);
   if (!newName || newName === entry.name) return;
   const result = await window.ide?.rename(entry.path, newName);
   if (!result?.ok) {
