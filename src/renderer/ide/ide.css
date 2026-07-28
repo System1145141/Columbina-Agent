@@ -1250,6 +1250,19 @@ html, body, .ide {
   background: #3e3e42;
 }
 
+.ide__context-menu-item--danger {
+  color: #f48771;
+}
+
+.ide__context-menu-item--danger:hover {
+  background: #5a2e2e;
+  color: #ff9e9e;
+}
+
+.ide__context-menu--tree {
+  z-index: 1001;
+}
+
 /* Inline chat light theme */
 .ide.ide--light .ide__inline-chat {
   background: #f8f8f8;
@@ -1311,4 +1324,13 @@ html, body, .ide {
 
 .ide.ide--light .ide__context-menu-item:hover {
   background: #f0f0f0;
+}
+
+.ide.ide--light .ide__context-menu-item--danger {
+  color: #c75450;
+}
+
+.ide.ide--light .ide__context-menu-item--danger:hover {
+  background: #fce5e5;
+  color: #a33e3a;
 }

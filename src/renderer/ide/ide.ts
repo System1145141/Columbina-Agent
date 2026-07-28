@@ -30,6 +30,10 @@ declare global {
       ) => Promise<IdeSearchResult[]>;
       move: (sourcePath: string, targetDir: string) => Promise<{ ok: boolean; error?: string }>;
       getMemoryContext: (query: string) => Promise<string>;
+      createFile: (dirPath: string, fileName: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
+      createDir: (dirPath: string, dirName: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
+      delete: (targetPath: string) => Promise<{ ok: boolean; error?: string }>;
+      rename: (targetPath: string, newName: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
       createTerminal: (cwd?: string) => Promise<string>;
       terminalInput: (id: string, data: string) => void;
       terminalResize: (id: string, cols: number, rows: number) => void;
@@ -962,6 +966,12 @@ function createTreeItem(entry: IdeDirEntry, level = 0): HTMLElement {
     row.addEventListener("click", () => openFile(entry.path));
   }
 
+  row.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showTreeContextMenu(e.clientX, e.clientY, entry);
+  });
+
   return item;
 }
 
@@ -991,6 +1001,121 @@ async function refreshTreeItem(dirPath: string) {
     }
   } catch (err) {
     childrenContainer.innerHTML = `<div style="padding:4px 12px;color:#858585">刷新失败: ${String(err)}</div>`;
+  }
+}
+
+let treeContextMenu: HTMLElement | null = null;
+
+function showTreeContextMenu(x: number, y: number, entry: IdeDirEntry) {
+  hideTreeContextMenu();
+
+  const menu = document.createElement("div");
+  menu.className = "ide__context-menu ide__context-menu--tree";
+  menu.style.left = `${x}px`;
+  menu.style.top = `${y}px`;
+
+  const items: { label: string; action: () => void | Promise<void>; danger?: boolean }[] = [];
+
+  if (entry.isDirectory) {
+    items.push({ label: "新建文件", action: () => void promptCreate(entry.path, "file") });
+    items.push({ label: "新建文件夹", action: () => void promptCreate(entry.path, "dir") });
+  }
+  items.push({ label: "重命名", action: () => void promptRename(entry) });
+  items.push({ label: "删除", action: () => void confirmDelete(entry), danger: true });
+  items.push({ label: "刷新", action: () => void refreshTreeItem(entry.isDirectory ? entry.path : entry.path.replace(/\\/g, "/").split("/").slice(0, -1).join("/")) });
+
+  for (const item of items) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ide__context-menu-item" + (item.danger ? " ide__context-menu-item--danger" : "");
+    btn.textContent = item.label;
+    btn.addEventListener("click", () => {
+      hideTreeContextMenu();
+      void item.action();
+    });
+    menu.appendChild(btn);
+  }
+
+  document.body.appendChild(menu);
+  treeContextMenu = menu;
+
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) menu.style.left = `${window.innerWidth - rect.width - 8}px`;
+  if (rect.bottom > window.innerHeight) menu.style.top = `${window.innerHeight - rect.height - 8}px`;
+}
+
+function hideTreeContextMenu() {
+  if (treeContextMenu) {
+    treeContextMenu.remove();
+    treeContextMenu = null;
+  }
+}
+
+document.addEventListener("click", (e) => {
+  if (treeContextMenu && !treeContextMenu.contains(e.target as Node)) {
+    hideTreeContextMenu();
+  }
+});
+
+async function promptCreate(dirPath: string, type: "file" | "dir") {
+  const name = prompt(type === "file" ? "请输入文件名:" : "请输入文件夹名:");
+  if (!name || !name.trim()) return;
+  const result = type === "file"
+    ? await window.ide?.createFile(dirPath, name.trim())
+    : await window.ide?.createDir(dirPath, name.trim());
+  if (!result?.ok) {
+    statusLeftEl.textContent = `创建失败: ${result?.error || "未知错误"}`;
+    return;
+  }
+  await refreshTreeItem(dirPath);
+  if (type === "file" && result.path) {
+    await openFile(result.path);
+  }
+}
+
+async function promptRename(entry: IdeDirEntry) {
+  const newName = prompt("请输入新名称:", entry.name);
+  if (!newName || newName === entry.name) return;
+  const result = await window.ide?.rename(entry.path, newName);
+  if (!result?.ok) {
+    statusLeftEl.textContent = `重命名失败: ${result?.error || "未知错误"}`;
+    return;
+  }
+  const parentDir = entry.path.replace(/\\/g, "/").split("/").slice(0, -1).join("/");
+  await refreshTreeItem(parentDir || currentFolder);
+
+  // 如果重命名的是已打开的文件，更新 tab 路径
+  if (!entry.isDirectory && tabs.has(entry.path)) {
+    const tab = tabs.get(entry.path);
+    if (tab && result.path) {
+      tabs.delete(entry.path);
+      tab.filePath = result.path;
+      tab.fileName = basename(result.path);
+      tab.id = result.path;
+      tabs.set(result.path, tab);
+      if (activeTabId === entry.path) {
+        activeTabId = result.path;
+      }
+      renderTabs();
+      updateStatusBar();
+    }
+  }
+}
+
+async function confirmDelete(entry: IdeDirEntry) {
+  const confirmed = confirm(`确定要删除 "${entry.name}" 吗?\n\n此操作不可恢复。`);
+  if (!confirmed) return;
+  const result = await window.ide?.delete(entry.path);
+  if (!result?.ok) {
+    statusLeftEl.textContent = `删除失败: ${result?.error || "未知错误"}`;
+    return;
+  }
+  const parentDir = entry.path.replace(/\\/g, "/").split("/").slice(0, -1).join("/");
+  await refreshTreeItem(parentDir || currentFolder);
+
+  // 如果删除的是已打开的文件，关闭标签
+  if (!entry.isDirectory && tabs.has(entry.path)) {
+    finishCloseTab(entry.path);
   }
 }
 
