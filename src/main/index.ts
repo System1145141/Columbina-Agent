@@ -42,6 +42,7 @@ import { parseLocalStickerFileFromUrl, resolveLocalStickerPath } from "./sticker
 import { normalizeWindowVisibilitySettings } from "./window-visibility-settings";
 import type { StickerConfigItem } from "../shared/sticker-types";
 import { initReranker, getRerankerInstallStatus } from "./rag/reranker";
+import { setupLspIpc } from "./lsp-manager";
 import { memoryStore } from "./memory/memory-store"
 import type { L0Profile, L1Profile } from "./memory/memory-types";
 import { registerChatsIpc } from "./chats/chats-ipc";
@@ -2906,6 +2907,8 @@ ipcMain.handle(IPC.IDE_MOVE, async (_event, sourcePath: unknown, targetDir: unkn
   }
 });
 
+setupLspIpc();
+
 ipcMain.handle(IPC.IDE_GET_MEMORY_CONTEXT, async (_event, query: unknown) => {
   try {
     const { buildMemoryContext } = await import("./rag");
@@ -2914,6 +2917,76 @@ ipcMain.handle(IPC.IDE_GET_MEMORY_CONTEXT, async (_event, query: unknown) => {
   } catch (err: any) {
     console.error("[Columbina IDE] buildMemoryContext failed:", err?.message || err);
     return "";
+  }
+});
+
+ipcMain.handle(IPC.IDE_CREATE_FILE, async (_event, dirPath: unknown, fileName: unknown) => {
+  if (typeof dirPath !== "string" || typeof fileName !== "string" || fileName.length === 0) {
+    return { ok: false, error: "参数类型错误" };
+  }
+  try {
+    const filePath = path.join(dirPath, fileName);
+    if (fs.existsSync(filePath)) {
+      return { ok: false, error: "文件已存在" };
+    }
+    await fs.promises.writeFile(filePath, "", "utf8");
+    return { ok: true, path: filePath };
+  } catch (err: any) {
+    console.error("[Columbina IDE] create file failed:", err?.message || err);
+    return { ok: false, error: err?.message || "创建文件失败" };
+  }
+});
+
+ipcMain.handle(IPC.IDE_CREATE_DIR, async (_event, dirPath: unknown, dirName: unknown) => {
+  if (typeof dirPath !== "string" || typeof dirName !== "string" || dirName.length === 0) {
+    return { ok: false, error: "参数类型错误" };
+  }
+  try {
+    const newDirPath = path.join(dirPath, dirName);
+    if (fs.existsSync(newDirPath)) {
+      return { ok: false, error: "文件夹已存在" };
+    }
+    await fs.promises.mkdir(newDirPath);
+    return { ok: true, path: newDirPath };
+  } catch (err: any) {
+    console.error("[Columbina IDE] create dir failed:", err?.message || err);
+    return { ok: false, error: err?.message || "创建文件夹失败" };
+  }
+});
+
+ipcMain.handle(IPC.IDE_DELETE, async (_event, targetPath: unknown) => {
+  if (typeof targetPath !== "string") {
+    return { ok: false, error: "参数类型错误" };
+  }
+  try {
+    const stat = await fs.promises.stat(targetPath);
+    if (stat.isDirectory()) {
+      await fs.promises.rm(targetPath, { recursive: true, force: true });
+    } else {
+      await fs.promises.unlink(targetPath);
+    }
+    return { ok: true };
+  } catch (err: any) {
+    console.error("[Columbina IDE] delete failed:", err?.message || err);
+    return { ok: false, error: err?.message || "删除失败" };
+  }
+});
+
+ipcMain.handle(IPC.IDE_RENAME, async (_event, targetPath: unknown, newName: unknown) => {
+  if (typeof targetPath !== "string" || typeof newName !== "string" || newName.length === 0) {
+    return { ok: false, error: "参数类型错误" };
+  }
+  try {
+    const parentDir = path.dirname(targetPath);
+    const newPath = path.join(parentDir, newName);
+    if (fs.existsSync(newPath)) {
+      return { ok: false, error: "目标名称已存在" };
+    }
+    await fs.promises.rename(targetPath, newPath);
+    return { ok: true, path: newPath };
+  } catch (err: any) {
+    console.error("[Columbina IDE] rename failed:", err?.message || err);
+    return { ok: false, error: err?.message || "重命名失败" };
   }
 });
 

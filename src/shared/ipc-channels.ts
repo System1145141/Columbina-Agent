@@ -232,6 +232,16 @@ export const IPC = {
   IDE_TERMINAL_EXIT: "ide:terminal-exit",     // 主进程 → 渲染进程：终端退出
   IDE_MOVE: "ide:move",                       // 移动文件/文件夹到目标目录
   IDE_GET_MEMORY_CONTEXT: "ide:get-memory-context", // 获取 L0/L1/L2 记忆上下文
+  IDE_CREATE_FILE: "ide:create-file",         // 新建文件
+  IDE_CREATE_DIR: "ide:create-dir",           // 新建文件夹
+  IDE_DELETE: "ide:delete",                   // 删除文件/文件夹
+  IDE_RENAME: "ide:rename",                   // 重命名文件/文件夹
+
+  IDE_LSP_START: "ide:lsp-start",             // 启动语言服务器
+  IDE_LSP_STOP: "ide:lsp-stop",               // 关闭语言服务器
+  IDE_LSP_REQUEST: "ide:lsp-request",         // LSP JSON-RPC request
+  IDE_LSP_NOTIFY: "ide:lsp-notify",           // LSP JSON-RPC notification
+  IDE_LSP_DATA: "ide:lsp-data",               // 主进程 → 渲染进程：LSP 响应/通知
 
   // call window (voice call)
   CALL_OPEN: "call:open",                 // sidebar → main：打开通话窗口

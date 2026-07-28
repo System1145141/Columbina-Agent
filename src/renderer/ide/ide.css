@@ -1250,6 +1250,91 @@ html, body, .ide {
   background: #3e3e42;
 }
 
+.ide__context-menu-item--danger {
+  color: #f48771;
+}
+
+.ide__context-menu-item--danger:hover {
+  background: #5a2e2e;
+  color: #ff9e9e;
+}
+
+.ide__context-menu--tree {
+  z-index: 1001;
+}
+
+/* Prompt dialog */
+.ide__prompt-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.ide__prompt-box {
+  background: #252526;
+  border: 1px solid #3e3e42;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  padding: 16px;
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ide__prompt-label {
+  color: #cccccc;
+  font-size: 13px;
+}
+
+.ide__prompt-input {
+  background: #3c3c3c;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  color: #cccccc;
+  padding: 8px 10px;
+  font-size: 13px;
+  outline: none;
+}
+
+.ide__prompt-input:focus {
+  border-color: #007acc;
+}
+
+.ide__prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.ide__prompt-btn {
+  background: #3c3c3c;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  color: #cccccc;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ide__prompt-btn:hover {
+  background: #4e4e4e;
+}
+
+.ide__prompt-btn--primary {
+  background: #0e639c;
+  border-color: #0e639c;
+  color: #ffffff;
+}
+
+.ide__prompt-btn--primary:hover {
+  background: #1177bb;
+}
+
 /* Inline chat light theme */
 .ide.ide--light .ide__inline-chat {
   background: #f8f8f8;
@@ -1311,4 +1396,97 @@ html, body, .ide {
 
 .ide.ide--light .ide__context-menu-item:hover {
   background: #f0f0f0;
+}
+
+.ide.ide--light .ide__context-menu-item--danger {
+  color: #c75450;
+}
+
+.ide.ide--light .ide__context-menu-item--danger:hover {
+  background: #fce5e5;
+  color: #a33e3a;
+}
+
+.ide.ide--light .ide__prompt-box {
+  background: #ffffff;
+  border-color: #e5e5e5;
+}
+
+.ide.ide--light .ide__prompt-label {
+  color: #333333;
+}
+
+.ide.ide--light .ide__prompt-input {
+  background: #ffffff;
+  border-color: #e5e5e5;
+  color: #333333;
+}
+
+.ide.ide--light .ide__prompt-input:focus {
+  border-color: #007acc;
+}
+
+.ide.ide--light .ide__prompt-btn {
+  background: #f0f0f0;
+  border-color: #e5e5e5;
+  color: #333333;
+}
+
+.ide.ide--light .ide__prompt-btn:hover {
+  background: #e5e5e5;
+}
+
+.ide.ide--light .ide__prompt-btn--primary {
+  background: #007acc;
+  border-color: #007acc;
+  color: #ffffff;
+}
+
+.ide.ide--light .ide__prompt-btn--primary:hover {
+  background: #0062a3;
+}
+
+/* LSP hover tooltip */
+.ide__lsp-tooltip {
+  max-width: 480px;
+  padding: 8px 10px;
+  background: #252526;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  color: #cccccc;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  z-index: 100;
+}
+
+.ide.ide--light .ide__lsp-tooltip {
+  background: #ffffff;
+  border-color: #e5e5e5;
+  color: #333333;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+/* LSP diagnostics: subtle gutter emphasis */
+.cm-lintMarker {
+  width: 12px;
+  height: 12px;
+}
+
+.cm-lintRange-error {
+  text-decoration: underline wavy #f48771;
+}
+
+.cm-lintRange-warning {
+  text-decoration: underline wavy #cca700;
+}
+
+.cm-lintRange-info {
+  text-decoration: underline wavy #75beff;
+}
+
+.cm-lintRange-hint {
+  text-decoration: underline wavy #808080;
 }

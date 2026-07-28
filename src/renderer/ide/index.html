@@ -95,6 +95,16 @@
       </div>
     </div>
   </div>
-  <script type="module" src="./ide.ts"></script>
+  <div class="ide__prompt-overlay" id="prompt-overlay" style="display: none;">
+    <div class="ide__prompt-box">
+      <label class="ide__prompt-label" id="prompt-label"></label>
+      <input type="text" class="ide__prompt-input" id="prompt-input" autocomplete="off" />
+      <div class="ide__prompt-actions">
+        <button type="button" class="ide__prompt-btn ide__prompt-btn--primary" id="prompt-ok-btn">确定</button>
+        <button type="button" class="ide__prompt-btn" id="prompt-cancel-btn">取消</button>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="./ide-main.ts"></script>
 </body>
 </html>
