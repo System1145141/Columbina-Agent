@@ -174,27 +174,116 @@
 
 ## 4. 代码组织建议
 
+### 4.1 目标目录结构
+
 ```
 src/renderer/ide/
   index.html          # 入口 HTML
-  ide.ts              # 当前主入口，后续拆分为 ide-main.ts
+  ide-main.ts         # 入口脚本，负责初始化与组件编排
   components/
-    file-tree.ts      # 文件树组件
-    tab-bar.ts        # 标签栏组件
+    file-tree.ts      # 文件树组件（渲染、右键菜单、拖拽）
+    tab-bar.ts        # 标签栏组件（渲染、切换、关闭、拖拽重排）
     status-bar.ts     # 状态栏组件
-    editor-pane.ts    # 编辑器容器
-    ai-panel.ts       # AI 侧边栏
-    terminal-panel.ts # 终端面板
+    editor-pane.ts    # 编辑器容器（CodeMirror、Inline Chat）
+    ai-panel.ts       # AI 侧边栏面板
+    terminal-panel.ts # 底部终端面板
     command-palette.ts# 命令面板
   services/
-    file-service.ts   # 文件操作封装
-    state.ts          # IDE 全局状态
-    layout.ts         # 布局管理
-    agent-bridge.ts   # 与 Agent 的交互桥梁
+    file-service.ts   # 文件 IPC 操作、目录遍历、项目索引、搜索
+    state.ts          # IDE 全局状态与状态变更通知
+    layout.ts         # 布局管理（面板显隐、尺寸调整）
+    agent-bridge.ts   # Agent 调用、工具解析、动作执行、确认/撤销
   styles/
     ide.css           # IDE 级样式
     theme.css         # 主题变量
 ```
+
+### 4.2 拆分计划
+
+当前 `ide.ts` 已膨胀为单文件，包含约 190 个顶层定义。拆分按以下顺序进行，每步完成后运行 `npm run build` 验证。
+
+#### 第一步：抽象 services 层（状态与数据）
+
+1. **新建 `services/state.ts`**
+   - 导出所有全局状态：`currentFolder`、`tabs`、`activeTabId`、`editorView`、`ideSettings`、`aiMessages`、`projectIndex`、`expandedDirs` 等。
+   - 提供 `subscribe(callback)` 机制，让 UI 组件在状态变化时重新渲染。
+   - 导出纯状态操作函数：`addTab(tab)`、`setActiveTab(id)`、`updateTabContent(tabId, content)`、`closeTab(id)` 等。
+   - 状态变更不直接操作 DOM；DOM 更新由各组件订阅后自行处理。
+
+2. **新建 `services/file-service.ts`**
+   - 封装所有 `window.ide.*` 文件相关调用：`readDir`、`readFile`、`writeFile`、`searchFiles`、`move`、`createFile`、`createDir`、`delete`、`rename`、`getFileInfo`。
+   - 实现目录加载、文件树刷新、项目索引构建、轻量 RAG 检索。
+   - 暴露：`loadDirectory(dirPath)`、`refreshDirectory(dirPath)`、`indexProject(folderPath)`、`searchProject(query, topK)`。
+
+3. **新建 `services/agent-bridge.ts`**
+   - 封装 `window.agui.run` 与事件监听。
+   - 实现 `runAgentTurn(userText, scope)`、`callAgentStream(prompt)`。
+   - 实现工具解析：`parseActions(content)`、`stripActions(content)`、`buildToolsPrompt()`。
+   - 实现动作执行：`executeAction(action)`、`requestActionConfirmation(actions)`、`saveSnapshot(filePath)`、`undoLastWrite()`。
+
+#### 第二步：拆分 components 层（UI 与交互）
+
+4. **新建 `components/status-bar.ts`**
+   - 依赖 `services/state.ts`。
+   - 实现 `renderStatusBar()`，订阅状态变化自动更新。
+   - 显示文件路径、修改状态、光标位置、文件类型、换行符风格。
+
+5. **新建 `components/tab-bar.ts`**
+   - 依赖 `services/state.ts`。
+   - 实现 `renderTabs()`、`closeTab(tabId)`、`switchToTab(tabId)`、`reorderTabs(...)`。
+   - 绑定标签点击、关闭、拖拽事件。
+
+6. **新建 `components/editor-pane.ts`**
+   - 依赖 `services/state.ts` 和 `services/file-service.ts`。
+   - 负责 CodeMirror 实例创建/销毁、语言检测、主题/字体应用、快捷键绑定。
+   - 包含 Inline Chat 的 CodeMirror 状态字段、Widget、插件、接受/拒绝逻辑。
+   - 提供 `createEditor()`、`saveCurrentTab()`、`moveCursorTo()`、`getCurrentSelection()`。
+
+7. **新建 `components/file-tree.ts`**
+   - 依赖 `services/state.ts` 和 `services/file-service.ts`。
+   - 实现 `createTreeItem(entry)`、`refreshTreeItem(dirPath)`。
+   - 绑定展开/折叠、文件打开、右键菜单、拖拽移动事件。
+
+8. **新建 `components/command-palette.ts`**
+   - 依赖 `services/state.ts` 和 `services/file-service.ts`。
+   - 实现命令注册、渲染、过滤、执行。
+
+9. **新建 `components/ai-panel.ts`**
+   - 依赖 `services/state.ts` 和 `services/agent-bridge.ts`。
+   - 负责 AI 面板 UI、消息渲染、上下文选择、发送消息、动作确认/撤销。
+
+10. **新建 `components/terminal-panel.ts`**
+    - 依赖 `services/state.ts`。
+    - 负责 xterm.js 实例、终端创建/销毁、面板显隐。
+
+#### 第三步：重写入口与布局
+
+11. **新建 `services/layout.ts`**
+    - 管理面板布局状态：侧边栏、AI 面板、终端面板、搜索面板的显隐与尺寸。
+    - 提供 `toggleSearchPanel()`、`toggleTerminalPanel()`、`toggleAiPanel()`、`applyIdeTheme()`。
+
+12. **将 `ide.ts` 重命名为 `ide-main.ts`**
+    - 删除所有已拆分到 services/components 的逻辑。
+    - 仅保留：DOM 元素引用、窗口控制按钮事件、初始化流程、各组件初始化调用。
+    - 在 `DOMContentLoaded` 中初始化：`status-bar`、`tab-bar`、`editor-pane`、`file-tree`、`command-palette`、`ai-panel`、`terminal-panel`。
+
+13. **更新 `index.html`**
+    - 将 `<script type="module" src="./ide.ts">` 改为 `<script type="module" src="./ide-main.ts">`。
+
+### 4.3 拆分原则
+
+- **状态单一来源**：所有状态集中在 `services/state.ts`，组件通过订阅更新，避免跨模块直接读写状态。
+- **DOM 归属明确**：每个组件只操作自己负责的 DOM 区域。
+- **IPC 不穿透组件**：所有 `window.ide.*` 调用统一封装到 `services/file-service.ts`，组件只调用 service 函数。
+- **Agent 调用不穿透组件**：所有 Agent 相关逻辑统一封装到 `services/agent-bridge.ts`。
+- **逐步验证**：每完成一个文件拆分，运行 `npm run build:renderer` 检查 TypeScript 类型错误；全部完成后运行完整 `npm run build`。
+
+### 4.4 验收标准
+
+- `src/renderer/ide/ide.ts` 不再存在，入口为 `ide-main.ts`。
+- 所有组件和服务文件编译无类型错误。
+- `npm run build` 通过。
+- 功能保持等价：打开文件夹、编辑保存、标签管理、搜索、终端、命令面板、AI 面板、Inline Chat、文件树右键菜单均正常工作。
 
 ## 5. 关键实现细节
 
