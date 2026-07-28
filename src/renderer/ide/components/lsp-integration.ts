@@ -1,6 +1,6 @@
 import { linter, type Diagnostic } from "@codemirror/lint";
 import { autocompletion, type Completion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
-import { hoverTooltip, keymap, ViewPlugin, type ViewUpdate, type EditorView } from "@codemirror/view";
+import { hoverTooltip, keymap, ViewPlugin, EditorView, type ViewUpdate } from "@codemirror/view";
 import { StateEffect, StateField, type Extension, type Text } from "@codemirror/state";
 import { getLspClient, type LspClient, type LspDiagnostic, type LspRange } from "../services/lsp-client";
 import { state, notify, setLspDiagnostics, getLspDiagnostics } from "../services/state";
@@ -284,16 +284,6 @@ export async function goToDefinition(view?: EditorView, pos?: number): Promise<v
 export function lspExtension(filePath: string): Extension[] {
   if (!state.currentFolder || !getLanguageId(filePath)) return [];
 
-  const refreshVersion = StateField.define<number>({
-    create: () => 0,
-    update(value, tr) {
-      for (const e of tr.effects) {
-        if (e.is(lspDiagnosticsUpdated)) return value + 1;
-      }
-      return value;
-    },
-  });
-
   const trackEditor = ViewPlugin.fromClass(
     class {
       constructor(readonly view: EditorView) {
@@ -309,8 +299,9 @@ export function lspExtension(filePath: string): Extension[] {
   );
 
   return [
-    refreshVersion,
-    linter(lspLinter(filePath), { needsRefresh: refreshVersion.facet }),
+    linter(lspLinter(filePath), {
+      needsRefresh: (update) => update.transactions.some((tr) => tr.effects.some((e) => e.is(lspDiagnosticsUpdated))),
+    }),
     autocompletion({ override: [lspCompletionSource] }),
     lspHover,
     keymap.of([

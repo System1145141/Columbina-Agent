@@ -222,6 +222,16 @@ function moveCursorTo(view: EditorView, line: number, col: number): void {
 }
 
 export function createEditor(initialContent = "", filePath = ""): EditorView | null {
+  try {
+    return doCreateEditor(initialContent, filePath);
+  } catch (err) {
+    console.error("[IDE] createEditor failed:", err);
+    editorEl.innerHTML = `<div style="color:#f48771;padding:20px;font-family:sans-serif;">编辑器初始化失败: ${err instanceof Error ? err.message : String(err)}<br><pre style="white-space:pre-wrap">${err instanceof Error ? err.stack : ''}</pre></div>`;
+    return null;
+  }
+}
+
+function doCreateEditor(initialContent = "", filePath = ""): EditorView | null {
   const previousLspFile = currentLspFile;
   if (previousLspFile && previousLspFile !== filePath) {
     notifyLspClose(previousLspFile);
