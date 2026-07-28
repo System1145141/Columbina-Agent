@@ -1,6 +1,7 @@
 import type { EditorView } from "@codemirror/view";
 import type { Terminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
+import type { LspDiagnostic } from "./lsp-client";
 
 export interface IdeSearchResult {
   filePath: string;
@@ -155,6 +156,8 @@ export const state = {
 
   pendingAnchor: null as { line: number; col: number } | null,
   statusMessage: "" as string,
+  lspDiagnostics: new Map<string, LspDiagnostic[]>(),
+  lspStatusMessage: "" as string,
 };
 
 type Listener = () => void;
@@ -224,6 +227,18 @@ export function setCurrentFolder(folder: string): void {
 
 export function setTreeRoot(entries: IdeDirEntry[]): void {
   state.treeRoot = entries;
+}
+
+export function setLspDiagnostics(filePath: string, diagnostics: LspDiagnostic[]): void {
+  state.lspDiagnostics.set(filePath, diagnostics);
+}
+
+export function getLspDiagnostics(filePath: string): LspDiagnostic[] {
+  return state.lspDiagnostics.get(filePath) || [];
+}
+
+export function clearLspDiagnostics(filePath: string): void {
+  state.lspDiagnostics.delete(filePath);
 }
 
 export function clearTabsAndEditor(): void {

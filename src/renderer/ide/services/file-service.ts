@@ -169,6 +169,10 @@ export async function openFile(filePath: string, anchorLine = 1, anchorCol = 1):
   }
 }
 
+export async function openFileAt(filePath: string, line: number, col: number): Promise<void> {
+  await openFile(filePath, line, col);
+}
+
 export async function saveTab(tabId: string): Promise<boolean> {
   const tab = state.tabs.get(tabId);
   if (!tab) return false;

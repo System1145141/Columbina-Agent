@@ -1445,3 +1445,48 @@ html, body, .ide {
 .ide.ide--light .ide__prompt-btn--primary:hover {
   background: #0062a3;
 }
+
+/* LSP hover tooltip */
+.ide__lsp-tooltip {
+  max-width: 480px;
+  padding: 8px 10px;
+  background: #252526;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  color: #cccccc;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  z-index: 100;
+}
+
+.ide.ide--light .ide__lsp-tooltip {
+  background: #ffffff;
+  border-color: #e5e5e5;
+  color: #333333;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+/* LSP diagnostics: subtle gutter emphasis */
+.cm-lintMarker {
+  width: 12px;
+  height: 12px;
+}
+
+.cm-lintRange-error {
+  text-decoration: underline wavy #f48771;
+}
+
+.cm-lintRange-warning {
+  text-decoration: underline wavy #cca700;
+}
+
+.cm-lintRange-info {
+  text-decoration: underline wavy #75beff;
+}
+
+.cm-lintRange-hint {
+  text-decoration: underline wavy #808080;
+}

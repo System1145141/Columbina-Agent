@@ -10,6 +10,13 @@ import { defaultKeymap, indentWithTab } from "@codemirror/commands";
 import { state, subscribe, notify, type InlineChatState } from "../services/state";
 import { saveTab, getFileExtension } from "../services/file-service";
 import { callAgentStream } from "../services/agent-bridge";
+import {
+  lspExtension,
+  notifyLspOpen,
+  notifyLspChange,
+  notifyLspSave,
+  notifyLspClose,
+} from "./lsp-integration";
 
 const editorEl = document.getElementById("editor") as HTMLElement;
 
@@ -167,6 +174,7 @@ const inlineChatPlugin = ViewPlugin.fromClass(
 let lastActiveTabId = "";
 let lastTheme = state.ideSettings.theme;
 let lastFontSize = state.ideSettings.fontSize;
+let currentLspFile = "";
 
 function detectLanguage(filePath: string) {
   const ext = getFileExtension(filePath);
@@ -214,6 +222,12 @@ function moveCursorTo(view: EditorView, line: number, col: number): void {
 }
 
 export function createEditor(initialContent = "", filePath = ""): EditorView | null {
+  const previousLspFile = currentLspFile;
+  if (previousLspFile && previousLspFile !== filePath) {
+    notifyLspClose(previousLspFile);
+  }
+  currentLspFile = filePath;
+
   state.editorView?.destroy();
 
   const isLight = state.ideSettings.theme === "light";
@@ -265,6 +279,7 @@ export function createEditor(initialContent = "", filePath = ""): EditorView | n
       },
     ]),
     detectLanguage(filePath),
+    lspExtension(filePath),
     inlineChatField,
     inlineChatPlugin,
     EditorView.domEventHandlers({
@@ -283,6 +298,9 @@ export function createEditor(initialContent = "", filePath = ""): EditorView | n
       if (update.docChanged) {
         tab.currentContent = state.editorView!.state.doc.toString();
         tab.modified = tab.currentContent !== tab.initialContent;
+        if (currentLspFile) {
+          notifyLspChange(currentLspFile, update.state.doc.toString());
+        }
         notify();
       }
       if (update.selectionSet) {
@@ -297,10 +315,18 @@ export function createEditor(initialContent = "", filePath = ""): EditorView | n
     parent: editorEl,
   });
 
+  if (currentLspFile && currentLspFile !== previousLspFile) {
+    void notifyLspOpen(currentLspFile, initialContent);
+  }
+
   return state.editorView;
 }
 
 function destroyEditor(): void {
+  if (currentLspFile) {
+    notifyLspClose(currentLspFile);
+    currentLspFile = "";
+  }
   state.editorView?.destroy();
   state.editorView = null;
   editorEl.innerHTML = "";
@@ -310,7 +336,11 @@ export function saveCurrentTab(): void {
   if (state.activeTabId) {
     // Make sure current editor content is saved to state first
     saveCurrentEditorToTab(state.activeTabId);
-    void saveTab(state.activeTabId);
+    void saveTab(state.activeTabId).then((ok) => {
+      if (ok && currentLspFile) {
+        notifyLspSave(currentLspFile);
+      }
+    });
   }
 }
 
