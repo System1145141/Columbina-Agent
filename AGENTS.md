@@ -130,8 +130,106 @@
 - 允许第三方扩展主题、语言支持、侧边栏面板
 
 #### 4.2 LSP 支持
-- 接入 Language Server Protocol
-- 实现代码跳转、补全、诊断、重命名
+
+##### 目标
+- 接入 Language Server Protocol，为 IDE 提供代码补全、诊断、跳转到定义、悬停提示、重命名、引用查找等基础语言功能。
+- 优先支持 TypeScript/JavaScript，其次支持 JSON、CSS、HTML、Python 等常见语言。
+
+##### 技术选型
+
+| 层级 | 方案 | 说明 |
+|------|------|------|
+| LSP 通信协议 | 自研 JSON-RPC 2.0 客户端 | 语言服务器通过 stdio 启动，主进程通过 stdin/stdout 与其通信；渲染进程不直接操作子进程。 |
+| LSP 客户端封装 | `services/lsp-client.ts` | 管理语言服务器生命周期、发送请求/通知、分发响应。 |
+| CodeMirror 集成 | `components/lsp-integration.ts` | 将 LSP 能力映射到 CodeMirror 6 扩展：lint、autocomplete、hover tooltip、跳转命令。 |
+| 进程管理 | 主进程启动子进程 | 每种语言对应一个语言服务器进程，按当前打开文件按需启动；项目关闭或 IDE 退出时统一销毁。 |
+
+##### 第一阶段：LSP 基础设施（1-2 周）
+
+1. **新增 IPC 通道**
+   - `IDE_LSP_START`: 渲染进程 → 主进程，请求启动某语言的语言服务器。
+   - `IDE_LSP_REQUEST`: 渲染进程 → 主进程，发送 JSON-RPC request。
+   - `IDE_LSP_NOTIFY`: 渲染进程 → 主进程，发送 JSON-RPC notification。
+   - `IDE_LSP_STOP`: 渲染进程 → 主进程，关闭指定语言服务器。
+   - `IDE_LSP_DATA`: 主进程 → 渲染进程，推送语言服务器返回的数据或通知。
+
+2. **创建 `src/main/lsp-manager.ts`**
+   - 维护 `Map<languageId, ChildProcess>`。
+   - 根据语言 ID 查找对应可执行命令（如 `typescript-language-server --stdio`）。
+   - 支持从项目本地 `node_modules/.bin` 或全局 PATH 解析语言服务器路径。
+   - 处理 stdio 读写、JSON-RPC 消息解析、请求-响应匹配、错误日志。
+   - 当最后一个使用该语言的文件关闭后，延迟 30 秒销毁对应进程。
+
+3. **创建 `src/renderer/ide/services/lsp-client.ts`**
+   - 提供 `startLanguageServer(languageId)`、`sendRequest(method, params)`、`sendNotification(method, params)`、`onNotification(callback)`、`stopLanguageServer(languageId)`。
+   - 在文件打开/内容变化/保存/关闭时自动发送 `textDocument/didOpen`、`textDocument/didChange`、`textDocument/didSave`、`textDocument/didClose`。
+   - 维护 `textDocument` URI 与本地路径的映射。
+
+##### 第二阶段：基础 LSP 功能（2-3 周）
+
+4. **诊断（Diagnostics）**
+   - 监听 `textDocument/publishDiagnostics` 通知。
+   - 将诊断结果转换为 CodeMirror `Diagnostic`，通过 `@codemirror/lint` 显示为波浪线和 gutter 标记。
+   - 状态栏显示当前文件错误/警告数量。
+
+5. **代码补全（Completion）**
+   - 注册 CodeMirror `autocomplete` 扩展，触发时发送 `textDocument/completion`。
+   - 将 LSP `CompletionItem` 映射为 CodeMirror `Completion`。
+   - 支持 `completionItem/resolve` 获取文档详情。
+
+6. **悬停提示（Hover）**
+   - 自定义 `hoverTooltip` 扩展，鼠标悬停时发送 `textDocument/hover`。
+   - 支持 Markdown 文本渲染。
+
+7. **跳转到定义（Go to Definition）**
+   - 命令面板和右键菜单新增"跳转到定义"（F12 / Ctrl+Click）。
+   - 发送 `textDocument/definition`，收到结果后打开目标文件并定位光标。
+   - 如果目标在当前文件，仅移动光标。
+
+##### 第三阶段：进阶 LSP 功能（2 周）
+
+8. **重命名（Rename）**
+   - 右键菜单/命令面板新增"重命名符号"（F2）。
+   - 弹出输入框收集新名称，发送 `textDocument/rename`。
+   - 应用 `WorkspaceEdit` 到多个文件；未打开文件直接写入磁盘，已打开文件更新编辑器内容并标记修改。
+
+9. **查找引用（Find References）**
+   - 命令面板新增"查找引用"。
+   - 发送 `textDocument/references`，结果展示在搜索结果面板中，点击可跳转。
+
+10. **代码格式化（Formatting）**
+    - 命令面板新增"格式化文档"（Shift+Alt+F）。
+    - 发送 `textDocument/formatting`，应用 `TextEdit` 到当前编辑器。
+
+##### 配置与发现
+
+11. **语言服务器配置**
+    - 在 `ideSettings` 中新增 `languageServers` 字段：
+      ```json
+      {
+        "typescript": { "command": "typescript-language-server", "args": ["--stdio"] },
+        "python": { "command": "pylsp" }
+      }
+      ```
+    - 若未配置，按内置映射自动尝试启动常见语言服务器。
+    - 启动失败时在状态栏显示提示，不阻塞 IDE 使用。
+
+##### 验收标准
+
+- TypeScript/JavaScript 文件打开后，5 秒内语言服务器启动成功。
+- 输入代码时能看到 LSP 提供的补全列表。
+- 语法错误实时显示为 gutter 标记和波浪线。
+- F12 可跳转到本地符号定义。
+- F2 重命名符号后，所有引用同步更新。
+- 未安装语言服务器时 IDE 仍可正常编辑，仅提示"缺少 LSP"。
+- `npm run build` 通过。
+
+##### 风险与依赖
+
+- **进程管理复杂**：语言服务器崩溃、stderr 输出、多项目并发需仔细处理。
+- **安装依赖**：typescript-language-server 等需要用户本地或全局安装；初期可在 README 中说明。
+- **CodeMirror 6 集成成本**：LSP 的补全、诊断模型与 CodeMirror 扩展模型需要手动桥接。
+- **性能**：大文件编辑时 `textDocument/didChange` 通知频率高，需要增量同步（`TextDocumentSyncKind.Incremental`）。
 
 #### 4.3 Git 集成
 - 分支、提交、diff、日志可视化

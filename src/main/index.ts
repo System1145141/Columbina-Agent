@@ -42,6 +42,7 @@ import { parseLocalStickerFileFromUrl, resolveLocalStickerPath } from "./sticker
 import { normalizeWindowVisibilitySettings } from "./window-visibility-settings";
 import type { StickerConfigItem } from "../shared/sticker-types";
 import { initReranker, getRerankerInstallStatus } from "./rag/reranker";
+import { setupLspIpc } from "./lsp-manager";
 import { memoryStore } from "./memory/memory-store"
 import type { L0Profile, L1Profile } from "./memory/memory-types";
 import { registerChatsIpc } from "./chats/chats-ipc";
@@ -2905,6 +2906,8 @@ ipcMain.handle(IPC.IDE_MOVE, async (_event, sourcePath: unknown, targetDir: unkn
     return { ok: false, error: err?.message || "移动失败" };
   }
 });
+
+setupLspIpc();
 
 ipcMain.handle(IPC.IDE_GET_MEMORY_CONTEXT, async (_event, query: unknown) => {
   try {

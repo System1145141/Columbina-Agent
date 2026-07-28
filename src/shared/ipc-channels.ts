@@ -237,6 +237,12 @@ export const IPC = {
   IDE_DELETE: "ide:delete",                   // 删除文件/文件夹
   IDE_RENAME: "ide:rename",                   // 重命名文件/文件夹
 
+  IDE_LSP_START: "ide:lsp-start",             // 启动语言服务器
+  IDE_LSP_STOP: "ide:lsp-stop",               // 关闭语言服务器
+  IDE_LSP_REQUEST: "ide:lsp-request",         // LSP JSON-RPC request
+  IDE_LSP_NOTIFY: "ide:lsp-notify",           // LSP JSON-RPC notification
+  IDE_LSP_DATA: "ide:lsp-data",               // 主进程 → 渲染进程：LSP 响应/通知
+
   // call window (voice call)
   CALL_OPEN: "call:open",                 // sidebar → main：打开通话窗口
   CALL_START: "call:start",               // renderer → main：开始通话（初始化 ASR）

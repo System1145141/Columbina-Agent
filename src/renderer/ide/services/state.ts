@@ -257,6 +257,11 @@ declare global {
       createDir: (dirPath: string, dirName: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
       delete: (targetPath: string) => Promise<{ ok: boolean; error?: string }>;
       rename: (targetPath: string, newName: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
+      startLanguageServer: (languageId: string, workspacePath: string) => Promise<{ ok: boolean; error?: string }>;
+      stopLanguageServer: (languageId: string, workspacePath: string) => void;
+      sendLspRequest: (languageId: string, workspacePath: string, request: { id: number; method: string; params?: unknown }) => void;
+      sendLspNotification: (languageId: string, workspacePath: string, notification: { method: string; params?: unknown }) => void;
+      onLspData: (callback: (payload: { languageId: string; workspacePath: string; message: unknown }) => void) => () => void;
       createTerminal: (cwd?: string) => Promise<string>;
       terminalInput: (id: string, data: string) => void;
       terminalResize: (id: string, cols: number, rows: number) => void;
