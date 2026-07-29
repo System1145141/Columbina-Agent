@@ -8,6 +8,7 @@ import {
   updateTabPath,
   setRoots,
   setActiveRoot,
+  addRoot,
   createWorkspaceRoot,
   setTreeRoot,
   clearTabsAndEditor,
@@ -15,6 +16,7 @@ import {
   type IdeSearchResult,
   type ProjectIndexEntry,
   type Tab,
+  type WorkspaceRoot,
 } from "./state";
 
 export function basename(filePath: string): string {
@@ -73,6 +75,10 @@ export function parentDir(filePath: string): string {
   return filePath.replace(/\\/g, "/").split("/").slice(0, -1).join("/");
 }
 
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, "/");
+}
+
 export async function readDir(dirPath: string): Promise<IdeDirEntry[]> {
   return (await window.ide!.readDir(dirPath)) || [];
 }
@@ -129,14 +135,18 @@ export async function loadDirectory(dirPath: string): Promise<void> {
   setTreeRoot([{ name: root.name, path: root.path, isDirectory: true }]);
   state.projectIndex = [];
   notify();
+}
 
-  try {
-    void indexProject(dirPath);
-  } catch (err) {
-    console.error("[IDE] load directory failed:", err);
-    setTreeRoot([]);
-    notify();
+export async function addFolderToWorkspace(dirPath: string): Promise<void> {
+  const root = addRoot(dirPath);
+  const entry = { name: root.name, path: root.path, isDirectory: true };
+  const existingIndex = state.treeRoot.findIndex((e) => e.path === root.path);
+  if (existingIndex >= 0) {
+    state.treeRoot[existingIndex] = entry;
+  } else {
+    state.treeRoot.push(entry);
   }
+  notify();
 }
 
 export async function openFile(filePath: string, anchorLine = 1, anchorCol = 1): Promise<void> {
@@ -265,8 +275,16 @@ export function extractKeywords(text: string, maxKeywords = 40): string[] {
   return Array.from(keywords).slice(0, maxKeywords);
 }
 
-export async function indexProject(folderPath: string): Promise<void> {
-  const index: ProjectIndexEntry[] = [];
+export async function indexProject(folderPath: string, rootName?: string): Promise<void> {
+  const normFolder = normalizePath(folderPath);
+  const prefix = rootName ? `${rootName}/` : "";
+  const newEntries: ProjectIndexEntry[] = [];
+
+  // Remove existing entries belonging to this root before re-indexing
+  const existing = state.projectIndex.filter((e) => {
+    const ep = normalizePath(e.path);
+    return ep !== normFolder && !ep.startsWith(normFolder + "/");
+  });
 
   async function walk(dirPath: string) {
     try {
@@ -284,9 +302,10 @@ export async function indexProject(folderPath: string): Promise<void> {
             const text = await readFile(entry.path);
             const previewLines = text.split("\n").slice(0, 30).join("\n");
             const keywords = isCodeFile(ext) ? extractKeywords(text) : [];
-            index.push({
+            const rel = entry.path.replace(normFolder + "/", "").replace(/\\/g, "/");
+            newEntries.push({
               path: entry.path,
-              relativePath: entry.path.replace(folderPath.replace(/\\/g, "/") + "/", "").replace(/\\/g, "/"),
+              relativePath: prefix + rel,
               size: info.size,
               ext,
               preview: previewLines,
@@ -303,9 +322,28 @@ export async function indexProject(folderPath: string): Promise<void> {
   }
 
   await walk(folderPath);
-  state.projectIndex = index;
-  console.log(`[IDE] project index built: ${index.length} files`);
+  state.projectIndex = [...existing, ...newEntries];
+  console.log(`[IDE] project index built for ${rootName || folderPath}: ${newEntries.length} files`);
 }
+
+export async function reindexAllRoots(): Promise<void> {
+  state.projectIndex = [];
+  for (const root of state.roots) {
+    try {
+      await indexProject(root.path, root.name);
+    } catch (err) {
+      console.error(`[IDE] reindex root ${root.path} failed:`, err);
+    }
+  }
+}
+
+let lastIndexedRootsKey = "";
+subscribe(() => {
+  const key = state.roots.map((r) => r.id).join("|");
+  if (key === lastIndexedRootsKey || state.roots.length === 0) return;
+  lastIndexedRootsKey = key;
+  void reindexAllRoots();
+});
 
 export function tokenizeQuery(query: string): string[] {
   return query
@@ -374,6 +412,24 @@ export async function collectProjectContext(folderPath: string, query?: string, 
   }
 
   return `当前项目相关文件（按与问题相关性排序）:\n${fileList.join("\n")}\n${contents.join("\n")}`;
+}
+
+export async function collectProjectContextAcrossRoots(query?: string, maxFiles = 12, maxChars = 10000): Promise<string> {
+  if (state.roots.length === 0) {
+    return "（当前没有打开项目文件夹）";
+  }
+  if (state.projectIndex.length === 0) {
+    return "（项目索引尚未构建完成，请稍后再试）";
+  }
+
+  const parts: string[] = [];
+  parts.push(`当前工作区包含 ${state.roots.length} 个根目录：`);
+  for (const root of state.roots) {
+    parts.push(`- ${root.name}: ${root.path}`);
+  }
+
+  parts.push(await collectProjectContext("", query, maxFiles, maxChars));
+  return parts.join("\n\n");
 }
 
 export async function collectFilesForQuickOpen(dirPath: string): Promise<IdeDirEntry[]> {

@@ -1,4 +1,4 @@
-import { state, subscribe, notify, getActiveRootPath, getRootForPath, type IdeDirEntry } from "../services/state";
+import { state, subscribe, notify, getActiveRootPath, getRootForPath, type IdeDirEntry, type WorkspaceRoot } from "../services/state";
 import {
   openFile,
   readDir,
@@ -12,6 +12,7 @@ import {
   refreshAfterRename,
   refreshAfterDelete,
   loadDirectory,
+  addFolderToWorkspace,
   searchFiles,
   basename,
   pickFolder,
@@ -21,12 +22,14 @@ import { showSearchPanel, toggleSearchPanel, hideSearchPanel } from "../services
 const treeRootEl = document.getElementById("tree-root") as HTMLElement;
 const folderPathEl = document.getElementById("folder-path") as HTMLSpanElement;
 const openFolderBtn = document.getElementById("open-folder-btn") as HTMLButtonElement;
+const addFolderBtn = document.getElementById("add-folder-btn") as HTMLButtonElement;
 const searchToggleBtn = document.getElementById("search-toggle-btn") as HTMLButtonElement;
 const searchBackBtn = document.getElementById("search-back-btn") as HTMLButtonElement;
 const searchInputEl = document.getElementById("search-input") as HTMLInputElement;
 const searchCaseEl = document.getElementById("search-case") as HTMLInputElement;
 const searchWordEl = document.getElementById("search-word") as HTMLInputElement;
 const searchRegexEl = document.getElementById("search-regex") as HTMLInputElement;
+const searchRootsEl = document.getElementById("search-roots") as HTMLElement;
 const searchResultsEl = document.getElementById("search-results") as HTMLElement;
 const promptOverlayEl = document.getElementById("prompt-overlay") as HTMLElement;
 const promptLabelEl = document.getElementById("prompt-label") as HTMLLabelElement;
@@ -353,6 +356,49 @@ function highlightCurrentFileInTree() {
 }
 
 // Search panel
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, "/");
+}
+
+function getSelectedSearchRoots(): WorkspaceRoot[] {
+  return state.roots.filter((r) => state.searchSelectedRootIds.includes(r.id));
+}
+
+function renderSearchRootSelectors() {
+  searchRootsEl.innerHTML = "";
+  if (state.roots.length === 0) return;
+
+  const label = document.createElement("div");
+  label.className = "ide__search-roots-label";
+  label.textContent = "搜索范围:";
+  searchRootsEl.appendChild(label);
+
+  const list = document.createElement("div");
+  list.className = "ide__search-roots-list";
+
+  for (const root of state.roots) {
+    const item = document.createElement("label");
+    item.className = "ide__search-root-item";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = state.searchSelectedRootIds.includes(root.id);
+    checkbox.addEventListener("change", () => {
+      const selected = new Set(state.searchSelectedRootIds);
+      if (checkbox.checked) selected.add(root.id);
+      else selected.delete(root.id);
+      state.searchSelectedRootIds = Array.from(selected);
+      void runSearch();
+    });
+    const text = document.createElement("span");
+    text.textContent = root.name;
+    text.title = root.path;
+    item.appendChild(checkbox);
+    item.appendChild(text);
+    list.appendChild(item);
+  }
+  searchRootsEl.appendChild(list);
+}
+
 async function runSearch() {
   if (state.roots.length === 0) {
     searchResultsEl.innerHTML = '<div class="ide__search-empty">请先打开文件夹</div>';
@@ -364,76 +410,112 @@ async function runSearch() {
     return;
   }
 
+  const roots = getSelectedSearchRoots();
+  if (roots.length === 0) {
+    searchResultsEl.innerHTML = '<div class="ide__search-empty">请至少选择一个根目录</div>';
+    return;
+  }
+
   searchResultsEl.innerHTML = '<div class="ide__search-empty">搜索中...</div>';
   try {
-    const results: IdeSearchResult[] = [];
-    for (const root of state.roots) {
+    const resultsByRoot = new Map<string, import("../services/state").IdeSearchResult[]>();
+    for (const root of roots) {
       const rootResults = await searchFiles(root.path, query, {
         caseSensitive: searchCaseEl.checked,
         wholeWord: searchWordEl.checked,
         regex: searchRegexEl.checked,
         maxResults: 200,
       });
-      results.push(...rootResults);
+      if (rootResults.length > 0) resultsByRoot.set(root.id, rootResults);
     }
-    renderSearchResults(results);
+    renderSearchResults(resultsByRoot, query);
   } catch (err) {
     searchResultsEl.innerHTML = `<div class="ide__search-empty">搜索失败: ${String(err)}</div>`;
   }
 }
 
-function renderSearchResults(results: import("../services/state").IdeSearchResult[], title?: string) {
+function renderSearchResults(
+  resultsByRoot: Map<string, import("../services/state").IdeSearchResult[]>,
+  title?: string
+) {
   searchResultsEl.innerHTML = "";
-  if (results.length === 0) {
+  let total = 0;
+  for (const items of resultsByRoot.values()) total += items.length;
+  if (total === 0) {
     searchResultsEl.innerHTML = '<div class="ide__search-empty">未找到结果</div>';
     return;
   }
 
   const summary = document.createElement("div");
   summary.className = "ide__search-summary";
-  summary.textContent = title || `共 ${results.length} 条结果`;
+  summary.textContent = title ? `${title} (${total})` : `共 ${total} 条结果`;
   searchResultsEl.appendChild(summary);
 
-  const groups = new Map<string, import("../services/state").IdeSearchResult[]>();
-  for (const r of results) {
-    const list = groups.get(r.filePath) || [];
-    list.push(r);
-    groups.set(r.filePath, list);
-  }
+  for (const [rootId, results] of resultsByRoot) {
+    const root = state.roots.find((r) => r.id === rootId);
+    if (!root) continue;
 
-  for (const [filePath, items] of groups) {
-    const fileGroup = document.createElement("div");
-    fileGroup.className = "ide__search-group";
+    const rootGroup = document.createElement("div");
+    rootGroup.className = "ide__search-root-group";
 
-    const fileHeader = document.createElement("div");
-    fileHeader.className = "ide__search-file";
-    fileHeader.textContent = basename(filePath);
-    fileHeader.title = filePath;
-    fileGroup.appendChild(fileHeader);
+    const rootHeader = document.createElement("div");
+    rootHeader.className = "ide__search-root-header";
+    rootHeader.textContent = root.name;
+    rootHeader.title = root.path;
+    rootGroup.appendChild(rootHeader);
 
-    for (const item of items) {
-      const row = document.createElement("div");
-      row.className = "ide__search-row";
-      const lineNo = document.createElement("span");
-      lineNo.className = "ide__search-line";
-      lineNo.textContent = String(item.line);
-      const text = document.createElement("span");
-      text.className = "ide__search-text";
-      text.textContent = item.text;
-      row.appendChild(lineNo);
-      row.appendChild(text);
-      row.addEventListener("click", () => void openFile(item.filePath, item.line, item.column));
-      fileGroup.appendChild(row);
+    const files = new Map<string, import("../services/state").IdeSearchResult[]>();
+    for (const r of results) {
+      const list = files.get(r.filePath) || [];
+      list.push(r);
+      files.set(r.filePath, list);
     }
 
-    searchResultsEl.appendChild(fileGroup);
+    for (const [filePath, items] of files) {
+      const fileGroup = document.createElement("div");
+      fileGroup.className = "ide__search-group";
+
+      const fileHeader = document.createElement("div");
+      fileHeader.className = "ide__search-file";
+      const relPath = normalizePath(filePath).replace(normalizePath(root.path) + "/", "");
+      fileHeader.textContent = relPath;
+      fileHeader.title = filePath;
+      fileGroup.appendChild(fileHeader);
+
+      for (const item of items) {
+        const row = document.createElement("div");
+        row.className = "ide__search-row";
+        const lineNo = document.createElement("span");
+        lineNo.className = "ide__search-line";
+        lineNo.textContent = String(item.line);
+        const text = document.createElement("span");
+        text.className = "ide__search-text";
+        text.textContent = item.text;
+        row.appendChild(lineNo);
+        row.appendChild(text);
+        row.addEventListener("click", () => void openFile(item.filePath, item.line, item.column));
+        fileGroup.appendChild(row);
+      }
+
+      rootGroup.appendChild(fileGroup);
+    }
+
+    searchResultsEl.appendChild(rootGroup);
   }
 }
 
 export function showReferencesResults(results: import("../services/state").IdeSearchResult[]): void {
   showSearchPanel();
   searchInputEl.value = "";
-  renderSearchResults(results, `引用 (${results.length})`);
+  const map = new Map<string, import("../services/state").IdeSearchResult[]>();
+  for (const r of results) {
+    const root = getRootForPath(r.filePath);
+    const key = root?.id || "";
+    const list = map.get(key) || [];
+    list.push(r);
+    map.set(key, list);
+  }
+  renderSearchResults(map, `引用`);
 }
 
 export function initFileTree(): void {
@@ -442,7 +524,15 @@ export function initFileTree(): void {
     if (folder) await loadDirectory(folder);
   });
 
-  searchToggleBtn.addEventListener("click", () => toggleSearchPanel());
+  addFolderBtn.addEventListener("click", async () => {
+    const folder = await pickFolder();
+    if (folder) await addFolderToWorkspace(folder);
+  });
+
+  searchToggleBtn.addEventListener("click", () => {
+    renderSearchRootSelectors();
+    toggleSearchPanel();
+  });
   searchBackBtn.addEventListener("click", () => hideSearchPanel());
   searchInputEl.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
@@ -467,9 +557,15 @@ export function initFileTree(): void {
     }
   });
 
+  let lastSearchRootsKey = "";
   subscribe(() => {
     renderTree();
     highlightCurrentFileInTree();
+    const key = state.roots.map((r) => r.id).join("|");
+    if (key !== lastSearchRootsKey) {
+      lastSearchRootsKey = key;
+      state.searchSelectedRootIds = state.roots.map((r) => r.id);
+    }
   });
   renderTree();
 }

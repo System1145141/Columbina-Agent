@@ -15,6 +15,7 @@
       <div class="ide__titlebar-drag">
         <span class="ide__logo">Columbina IDE</span>
         <button type="button" class="ide__btn" id="open-folder-btn">打开文件夹</button>
+        <button type="button" class="ide__btn" id="add-folder-btn" title="添加文件夹到工作区">+</button>
         <button type="button" class="ide__btn" id="terminal-toggle-btn" title="切换终端 (Ctrl+`)">终端</button>
         <button type="button" class="ide__btn" id="ai-toggle-btn" title="切换 AI 面板">AI</button>
         <span class="ide__folder" id="folder-path"></span>
@@ -41,37 +42,16 @@
             <label><input type="checkbox" id="search-word" /> 全词匹配</label>
             <label><input type="checkbox" id="search-regex" /> 正则</label>
           </div>
+          <div class="ide__search-roots" id="search-roots"></div>
           <button type="button" class="ide__search-back" id="search-back-btn">← 返回资源管理器</button>
           <div class="ide__search-results" id="search-results"></div>
         </div>
         <div class="ide__git" id="git-panel" style="display: none;">
           <div class="ide__git-header">
-            <div class="ide__git-meta">
-              <span class="ide__git-branch" id="git-branch"></span>
-              <span class="ide__git-ahead-behind" id="git-ahead-behind"></span>
-            </div>
+            <span>源代码管理</span>
             <button type="button" class="ide__git-refresh" id="git-refresh-btn" title="刷新">↻</button>
           </div>
-          <div class="ide__git-section">
-            <div class="ide__git-section-title">已暂存的更改</div>
-            <div class="ide__git-list" id="git-staged-list"></div>
-          </div>
-          <div class="ide__git-section">
-            <div class="ide__git-section-title">已修改</div>
-            <div class="ide__git-list" id="git-modified-list"></div>
-          </div>
-          <div class="ide__git-section">
-            <div class="ide__git-section-title">未跟踪的文件</div>
-            <div class="ide__git-list" id="git-untracked-list"></div>
-          </div>
-          <div class="ide__git-section">
-            <div class="ide__git-section-title">冲突文件</div>
-            <div class="ide__git-list" id="git-conflicted-list"></div>
-          </div>
-          <div class="ide__git-commit">
-            <input type="text" class="ide__git-commit-input" id="git-commit-input" placeholder="提交信息" />
-            <button type="button" class="ide__git-commit-btn" id="git-commit-btn">提交</button>
-          </div>
+          <div class="ide__git-roots" id="git-roots"></div>
           <div class="ide__git-loading" id="git-loading" style="display: none;">
             <span class="ide__git-spinner"></span>
             <span>加载中...</span>

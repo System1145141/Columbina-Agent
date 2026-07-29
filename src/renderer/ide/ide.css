@@ -191,6 +191,41 @@ html, body, .ide {
   margin: 0;
 }
 
+.ide__search-roots {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ide__search-roots-label {
+  font-size: 11px;
+  color: #bbbbbb;
+}
+
+.ide__search-roots-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ide__search-root-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #cccccc;
+  cursor: pointer;
+}
+
+.ide__search-root-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: #9cdcfe;
+  padding: 6px 0 2px;
+  border-bottom: 1px solid #3e3e42;
+  margin-bottom: 4px;
+}
+
 .ide__search-back {
   background: transparent;
   border: none;
@@ -261,6 +296,50 @@ html, body, .ide {
 
 .ide__git-refresh:hover {
   background: #3e3e42;
+}
+
+.ide__git-roots {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ide__git-root {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #3e3e42;
+}
+
+.ide__git-root-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ide__git-root-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ide__git-root-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide__git-root-branch {
+  font-size: 11px;
+  color: #858585;
 }
 
 .ide__git-section {

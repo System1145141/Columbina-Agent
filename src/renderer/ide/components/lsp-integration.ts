@@ -2,10 +2,25 @@ import { linter, type Diagnostic } from "@codemirror/lint";
 import { autocompletion, type Completion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import { hoverTooltip, keymap, ViewPlugin, EditorView, type ViewUpdate } from "@codemirror/view";
 import { StateEffect, StateField, EditorState, type Extension, type Text } from "@codemirror/state";
-import { getLspClient, type LspClient, type LspDiagnostic, type LspRange } from "../services/lsp-client";
-import { state, notify, setLspDiagnostics, getLspDiagnostics, getRootForPath, type IdeSearchResult } from "../services/state";
+import { getLspClient, removeLspClient, type LspClient, type LspDiagnostic, type LspRange } from "../services/lsp-client";
+import { state, subscribe, notify, setLspDiagnostics, getLspDiagnostics, getRootForPath, type IdeSearchResult } from "../services/state";
 import { getFileExtension, openFileAt, readFile, writeFile } from "../services/file-service";
 import { showReferencesResults } from "./file-tree";
+
+let lastLspRootsKey = "";
+subscribe(() => {
+  const key = state.roots.map((r) => r.id).join("|");
+  if (key === lastLspRootsKey) return;
+  const prevIds = new Set(lastLspRootsKey ? lastLspRootsKey.split("|") : []);
+  lastLspRootsKey = key;
+  for (const id of prevIds) {
+    if (!state.roots.some((r) => r.id === id)) {
+      for (const languageId of Object.values(extToLanguageId)) {
+        removeLspClient(languageId, id);
+      }
+    }
+  }
+});
 
 const extToLanguageId: Record<string, string> = {
   ts: "typescript",

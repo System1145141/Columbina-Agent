@@ -177,11 +177,13 @@ export const state = {
   lspDiagnostics: new Map<string, LspDiagnostic[]>(),
   lspStatusMessage: "" as string,
 
-  gitStatus: null as GitStatus | null,
+  gitStatusByRoot: {} as Record<string, GitStatus>,
   gitPanelVisible: false,
-  gitSelectedFile: null as { path: string; staged: boolean } | null,
-  gitDiff: "" as string,
+  gitSelectedFileByRoot: {} as Record<string, { path: string; staged: boolean }>,
+  gitDiffByRoot: {} as Record<string, string>,
   gitLoading: false,
+
+  searchSelectedRootIds: [] as string[],
 };
 
 type Listener = () => void;
@@ -318,8 +320,36 @@ export function reorderRoots(ids: string[]): void {
   state.roots = ids.map((id) => map.get(id)).filter((r): r is WorkspaceRoot => !!r);
 }
 
-export function setGitStatus(status: GitStatus | null): void {
-  state.gitStatus = status;
+export function setGitStatusForRoot(rootId: string, status: GitStatus | null): void {
+  if (status) state.gitStatusByRoot[rootId] = status;
+  else delete state.gitStatusByRoot[rootId];
+}
+
+export function getGitStatusForRoot(rootId: string): GitStatus | null {
+  return state.gitStatusByRoot[rootId] || null;
+}
+
+export function setGitSelectedFileForRoot(rootId: string, file: { path: string; staged: boolean } | null): void {
+  if (file) state.gitSelectedFileByRoot[rootId] = file;
+  else delete state.gitSelectedFileByRoot[rootId];
+}
+
+export function getGitSelectedFileForRoot(rootId: string): { path: string; staged: boolean } | null {
+  return state.gitSelectedFileByRoot[rootId] || null;
+}
+
+export function setGitDiffForRoot(rootId: string, diff: string): void {
+  state.gitDiffByRoot[rootId] = diff;
+}
+
+export function getGitDiffForRoot(rootId: string): string {
+  return state.gitDiffByRoot[rootId] || "";
+}
+
+export function removeGitRootData(rootId: string): void {
+  delete state.gitStatusByRoot[rootId];
+  delete state.gitSelectedFileByRoot[rootId];
+  delete state.gitDiffByRoot[rootId];
 }
 
 export function setTreeRoot(entries: IdeDirEntry[]): void {

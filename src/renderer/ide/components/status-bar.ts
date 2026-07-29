@@ -1,11 +1,11 @@
 import { diagnosticCount } from "@codemirror/lint";
-import { state, subscribe, getLspDiagnostics } from "../services/state";
+import { state, subscribe, getLspDiagnostics, getGitStatusForRoot, getActiveRoot } from "../services/state";
 import { getFileExtension, lineEndingLabel } from "../services/file-service";
 
 const statusLeftEl = document.getElementById("status-left") as HTMLElement;
 const statusRightEl = document.getElementById("status-right") as HTMLElement;
 
-function buildGitSummary(gitStatus: NonNullable<typeof state.gitStatus>): string {
+function buildGitSummary(gitStatus: import("../services/state").GitStatus): string {
   const parts: string[] = [gitStatus.branch];
   if (gitStatus.ahead > 0) parts.push(`${gitStatus.ahead}↑`);
   if (gitStatus.behind > 0) parts.push(`${gitStatus.behind}↓`);
@@ -20,13 +20,15 @@ function buildGitSummary(gitStatus: NonNullable<typeof state.gitStatus>): string
 
 function renderStatusBar() {
   const tab = state.activeTabId ? state.tabs.get(state.activeTabId) : null;
+  const activeRoot = getActiveRoot();
+  const gitStatus = activeRoot ? getGitStatusForRoot(activeRoot.id) : null;
 
   if (state.statusMessage || state.lspStatusMessage) {
     statusLeftEl.textContent = state.statusMessage || state.lspStatusMessage;
   } else {
     const leftParts: string[] = [];
-    if (state.gitStatus?.branch) {
-      leftParts.push(buildGitSummary(state.gitStatus));
+    if (gitStatus?.branch) {
+      leftParts.push(buildGitSummary(gitStatus));
     }
     if (tab) {
       leftParts.push(tab.filePath);
