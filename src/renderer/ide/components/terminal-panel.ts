@@ -79,13 +79,13 @@ function fitTerminal() {
   }
 }
 
-function showTerminalPanel() {
+export function showTerminalPanel() {
   state.terminalVisible = true;
   terminalPanelEl.style.display = "flex";
   void ensureTerminal();
 }
 
-function hideTerminalPanel() {
+export function hideTerminalPanel() {
   state.terminalVisible = false;
   terminalPanelEl.style.display = "none";
 }

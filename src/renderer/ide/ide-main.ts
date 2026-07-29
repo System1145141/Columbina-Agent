@@ -1,5 +1,6 @@
 import { state } from "./services/state";
 import { loadIdeSettings, toggleSearchPanel, toggleTerminalPanel, changeEditorFontSize } from "./services/layout";
+import { restoreWorkspace, saveWorkspaceSync } from "./services/workspace-service";
 import { initStatusBar } from "./components/status-bar";
 import { initTabBar } from "./components/tab-bar";
 import { initEditorPane } from "./components/editor-pane";
@@ -59,6 +60,13 @@ function init(): void {
   initGitPanel();
 
   void loadIdeSettings();
+  void restoreWorkspace();
+
+  window.addEventListener("beforeunload", () => {
+    if (state.roots.length > 0) {
+      saveWorkspaceSync();
+    }
+  });
 }
 
 if (document.readyState === "loading") {

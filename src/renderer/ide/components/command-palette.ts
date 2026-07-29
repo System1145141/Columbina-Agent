@@ -18,6 +18,7 @@ import {
   toggleIdeTheme,
   changeEditorFontSize,
 } from "../services/layout";
+import { saveWorkspace, openWorkspace } from "../services/workspace-service";
 
 const commandPanelEl = document.getElementById("command-panel") as HTMLElement;
 const commandInputEl = document.getElementById("command-input") as HTMLInputElement;
@@ -32,6 +33,22 @@ function getBaseCommands(): CommandItem[] {
       run: async () => {
         const folder = await pickFolder();
         if (folder) await loadDirectory(folder);
+      },
+    },
+    {
+      id: "open-workspace",
+      label: "打开工作区",
+      icon: "🗂️",
+      run: async () => {
+        await openWorkspace();
+      },
+    },
+    {
+      id: "save-workspace",
+      label: "保存工作区",
+      icon: "💾",
+      run: async () => {
+        await saveWorkspace();
       },
     },
     {
@@ -150,16 +167,35 @@ async function showQuickOpen() {
   renderCommandList();
 }
 
-function showCommandPalette() {
+async function showCommandPalette() {
   state.commandPaletteVisible = true;
   commandPanelEl.style.display = "flex";
   commandInputEl.placeholder = "键入命令或搜索文件";
   commandInputEl.value = "";
   commandInputEl.focus();
-  state.commandItems = getBaseCommands();
+  const base = getBaseCommands();
+  const recent = await loadRecentWorkspaceCommands();
+  state.commandItems = [...base, ...recent];
   state.commandSelectedIndex = state.commandItems.length > 0 ? 0 : -1;
   state.fileCommandItems = [];
   renderCommandList();
+}
+
+async function loadRecentWorkspaceCommands(): Promise<CommandItem[]> {
+  try {
+    const general = await window.settings?.getGeneral();
+    const recent = (general?.recentWorkspaces || []) as { path: string; name: string }[];
+    return recent.slice(0, 5).map((item) => ({
+      id: `recent-workspace:${item.path}`,
+      label: `打开最近工作区: ${item.name}`,
+      icon: "🕓",
+      run: async () => {
+        await openWorkspace(item.path);
+      },
+    }));
+  } catch {
+    return [];
+  }
 }
 
 export function hideCommandPalette() {

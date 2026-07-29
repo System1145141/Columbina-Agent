@@ -133,6 +133,7 @@ export async function loadDirectory(dirPath: string): Promise<void> {
   setActiveRoot(root.id);
   clearTabsAndEditor();
   setTreeRoot([{ name: root.name, path: root.path, isDirectory: true }]);
+  state.workspaceFilePath = "";
   state.projectIndex = [];
   notify();
 }
@@ -146,6 +147,7 @@ export async function addFolderToWorkspace(dirPath: string): Promise<void> {
   } else {
     state.treeRoot.push(entry);
   }
+  state.workspaceFilePath = "";
   notify();
 }
 

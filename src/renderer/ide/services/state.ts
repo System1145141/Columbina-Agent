@@ -37,6 +37,7 @@ export interface WorkspaceRoot {
   id: string;
   path: string;
   name: string;
+  missing?: boolean;
 }
 
 export interface AiMessage {
@@ -133,6 +134,7 @@ export type AiContextScope = "file" | "selection" | "project";
 export const state = {
   roots: [] as WorkspaceRoot[],
   activeRootId: "",
+  workspaceFilePath: "" as string,
   treeRoot: [] as IdeDirEntry[],
   editorView: null as EditorView | null,
   tabs: new Map<string, Tab>(),
@@ -417,6 +419,11 @@ declare global {
       commitGit: (folderPath: string, message: string) => Promise<{ ok: boolean; error?: string }>;
       getGitBranch: (folderPath: string) => Promise<string>;
       getGitLog: (folderPath: string, maxCount?: number) => Promise<{ hash: string; message: string; author: string; date: string }[]>;
+      saveWorkspace: (filePath: string | null, state: Record<string, unknown>) => Promise<{ ok: boolean; filePath?: string; error?: string }>;
+      saveWorkspaceSync: (filePath: string | null, state: Record<string, unknown>) => { ok: boolean; filePath?: string; error?: string };
+      openWorkspace: () => Promise<{ ok: boolean; workspace?: Record<string, unknown>; filePath?: string; error?: string }>;
+      getWorkspaceState: () => Promise<{ workspace?: Record<string, unknown>; filePath?: string }>;
+      relocateRoot: (oldPath: string) => Promise<string | null>;
     };
     settings?: {
       getGeneral: () => Promise<Record<string, unknown>>;

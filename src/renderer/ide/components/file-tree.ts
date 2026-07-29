@@ -1,4 +1,4 @@
-import { state, subscribe, notify, getActiveRootPath, getRootForPath, type IdeDirEntry, type WorkspaceRoot } from "../services/state";
+import { state, subscribe, notify, getActiveRootPath, getRootForPath, removeRoot, type IdeDirEntry, type WorkspaceRoot } from "../services/state";
 import {
   openFile,
   readDir,
@@ -18,6 +18,7 @@ import {
   pickFolder,
 } from "../services/file-service";
 import { showSearchPanel, toggleSearchPanel, hideSearchPanel } from "../services/layout";
+import { relocateRoot, closeTabsForRoot } from "../services/workspace-service";
 
 const treeRootEl = document.getElementById("tree-root") as HTMLElement;
 const folderPathEl = document.getElementById("folder-path") as HTMLSpanElement;
@@ -46,8 +47,11 @@ function createTreeItem(entry: IdeDirEntry, level = 0): HTMLElement {
   item.dataset.path = entry.path;
   item.dataset.isdir = String(entry.isDirectory);
 
+  const root = entry.isDirectory ? state.roots.find((r) => r.path === entry.path) : undefined;
+  const isMissingRoot = !!root?.missing;
+
   const row = document.createElement("div");
-  row.className = "ide__tree-row";
+  row.className = "ide__tree-row" + (isMissingRoot ? " ide__tree-row--missing" : "");
   row.style.paddingLeft = `${level * 12 + 4}px`;
   row.draggable = true;
 
@@ -67,7 +71,7 @@ function createTreeItem(entry: IdeDirEntry, level = 0): HTMLElement {
 
   const label = document.createElement("span");
   label.className = "ide__tree-label";
-  label.textContent = entry.name;
+  label.textContent = entry.name + (isMissingRoot ? " (路径缺失)" : "");
   label.title = entry.path;
 
   row.appendChild(toggle);
@@ -95,6 +99,11 @@ function createTreeItem(entry: IdeDirEntry, level = 0): HTMLElement {
     item.appendChild(childrenContainer);
 
     row.addEventListener("click", async () => {
+      if (isMissingRoot) {
+        state.statusMessage = "根目录路径缺失，请右键选择“重新定位文件夹”";
+        notify();
+        return;
+      }
       const isExpanded = state.expandedDirs.has(entry.path);
       if (isExpanded) {
         state.expandedDirs.delete(entry.path);
@@ -198,13 +207,21 @@ function showTreeContextMenu(x: number, y: number, entry: IdeDirEntry) {
 
   const items: { label: string; action: () => void | Promise<void>; danger?: boolean }[] = [];
 
-  if (entry.isDirectory) {
-    items.push({ label: "新建文件", action: () => void promptCreate(entry.path, "file") });
-    items.push({ label: "新建文件夹", action: () => void promptCreate(entry.path, "dir") });
+  const root = entry.isDirectory ? state.roots.find((r) => r.path === entry.path) : undefined;
+
+  if (root) {
+    items.push({ label: "重新定位文件夹", action: () => void relocateRoot(root.id) });
+    items.push({ label: "从工作区移除", action: () => void removeRootFromTree(root), danger: true });
+    items.push({ label: "刷新", action: () => void refreshTreeItem(entry.path) });
+  } else {
+    if (entry.isDirectory) {
+      items.push({ label: "新建文件", action: () => void promptCreate(entry.path, "file") });
+      items.push({ label: "新建文件夹", action: () => void promptCreate(entry.path, "dir") });
+    }
+    items.push({ label: "重命名", action: () => void promptRename(entry) });
+    items.push({ label: "删除", action: () => void confirmDelete(entry), danger: true });
+    items.push({ label: "刷新", action: () => void refreshTreeItem(entry.isDirectory ? entry.path : parentDir(entry.path)) });
   }
-  items.push({ label: "重命名", action: () => void promptRename(entry) });
-  items.push({ label: "删除", action: () => void confirmDelete(entry), danger: true });
-  items.push({ label: "刷新", action: () => void refreshTreeItem(entry.isDirectory ? entry.path : parentDir(entry.path)) });
 
   for (const item of items) {
     const btn = document.createElement("button");
@@ -224,6 +241,16 @@ function showTreeContextMenu(x: number, y: number, entry: IdeDirEntry) {
   const rect = menu.getBoundingClientRect();
   if (rect.right > window.innerWidth) menu.style.left = `${window.innerWidth - rect.width - 8}px`;
   if (rect.bottom > window.innerHeight) menu.style.top = `${window.innerHeight - rect.height - 8}px`;
+}
+
+async function removeRootFromTree(root: WorkspaceRoot) {
+  const confirmed = confirm(`确定要从工作区移除根目录 "${root.name}" 吗？\n\n不会删除磁盘上的文件夹。`);
+  if (!confirmed) return;
+  closeTabsForRoot(root.id);
+  removeRoot(root.id);
+  state.treeRoot = state.treeRoot.filter((e) => e.path !== root.path);
+  state.workspaceFilePath = "";
+  notify();
 }
 
 function hideTreeContextMenu() {
@@ -336,7 +363,9 @@ function renderTree() {
 
   lastRootsKey = rootsKey;
   treeRootEl.innerHTML = "";
-  folderPathEl.textContent = getActiveRootPath();
+  folderPathEl.textContent = state.workspaceFilePath
+    ? basename(state.workspaceFilePath)
+    : getActiveRootPath();
 
   if (state.statusMessage && state.statusMessage.startsWith("加载")) {
     // Loading state handled by status bar
