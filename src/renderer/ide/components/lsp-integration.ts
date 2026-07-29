@@ -186,15 +186,38 @@ function lspCompletionSource(context: CompletionContext): Promise<CompletionResu
     .then((result) => {
       if (!result) return null;
       const rawItems = Array.isArray(result) ? result : (result as { items?: unknown[] }).items || [];
-      const items = rawItems as { label: string; detail?: string; documentation?: string | { kind: string; value: string }; insertText?: string }[];
+      const items = rawItems as {
+        label: string;
+        detail?: string;
+        documentation?: string | { kind: string; value: string };
+        insertText?: string;
+        textEdit?: { range: LspRange; newText: string };
+        filterText?: string;
+      }[];
       if (items.length === 0) return null;
-      const options: Completion[] = items.map((item) => ({
-        label: item.label,
-        detail: item.detail,
-        info: typeof item.documentation === "string" ? item.documentation : item.documentation?.value,
-        apply: item.insertText || item.label,
-      }));
-      return { from: context.pos, options } as CompletionResult;
+
+      // 默认替换范围：从当前单词起始位置到光标位置
+      const wordBefore = context.matchBefore(/[\w$]*$/);
+      const defaultFrom = wordBefore ? wordBefore.from : context.pos;
+
+      const options: Completion[] = items.map((item) => {
+        let applyText = item.textEdit?.newText ?? item.insertText ?? item.label;
+        let from = defaultFrom;
+
+        if (item.textEdit?.range) {
+          from = lspPosToCm(context.state.doc, item.textEdit.range.start);
+        }
+
+        return {
+          label: item.filterText || item.label,
+          detail: item.detail,
+          info: typeof item.documentation === "string" ? item.documentation : item.documentation?.value,
+          apply: applyText,
+          boost: item.textEdit ? 1 : 0,
+        } as Completion;
+      });
+
+      return { from: defaultFrom, options, validFor: /[\w$]+/ } as CompletionResult;
     })
     .catch((err) => {
       console.error("[LSP] completion failed:", err);
