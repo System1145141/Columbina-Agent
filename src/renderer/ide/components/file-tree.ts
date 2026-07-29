@@ -230,7 +230,7 @@ function hideTreeContextMenu() {
   }
 }
 
-function showPromptDialog(message: string, defaultValue = ""): Promise<string | null> {
+export function showPromptDialog(message: string, defaultValue = ""): Promise<string | null> {
   return new Promise((resolve) => {
     if (state.promptResolve) {
       state.promptResolve(null);

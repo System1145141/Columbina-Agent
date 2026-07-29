@@ -60,9 +60,9 @@ function getBaseCommands(): CommandItem[] {
       label: "重命名符号",
       icon: "✏️",
       shortcut: "F2",
-      run: () => {
+      run: async () => {
         if (!state.editorView) return;
-        const newName = window.prompt("请输入新名称:");
+        const newName = await showPromptDialog("请输入新名称:");
         if (newName && newName.trim()) {
           void renameSymbol(state.editorView, newName.trim());
         }

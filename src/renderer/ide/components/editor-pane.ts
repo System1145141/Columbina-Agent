@@ -21,6 +21,7 @@ import {
   findReferences,
   formatDocument,
 } from "./lsp-integration";
+import { showPromptDialog } from "./file-tree";
 
 const editorEl = document.getElementById("editor") as HTMLElement;
 
@@ -446,9 +447,9 @@ function hideEditorContextMenu() {
   }
 }
 
-function promptRenameSymbol() {
+async function promptRenameSymbol() {
   if (!state.editorView) return;
-  const newName = window.prompt("请输入新名称:");
+  const newName = await showPromptDialog("请输入新名称:");
   if (!newName || !newName.trim()) return;
   void renameSymbol(state.editorView, newName.trim());
 }
