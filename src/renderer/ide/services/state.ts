@@ -33,6 +33,12 @@ export interface IdeSettings {
   tabSize: number;
 }
 
+export interface WorkspaceRoot {
+  id: string;
+  path: string;
+  name: string;
+}
+
 export interface AiMessage {
   id: string;
   role: "user" | "model";
@@ -125,7 +131,8 @@ export interface CommandItem {
 export type AiContextScope = "file" | "selection" | "project";
 
 export const state = {
-  currentFolder: "",
+  roots: [] as WorkspaceRoot[],
+  activeRootId: "",
   treeRoot: [] as IdeDirEntry[],
   editorView: null as EditorView | null,
   tabs: new Map<string, Tab>(),
@@ -238,8 +245,77 @@ export function updateTabPath(oldPath: string, newPath: string, newFileName: str
   }
 }
 
-export function setCurrentFolder(folder: string): void {
-  state.currentFolder = folder;
+function normalizeRootPath(p: string): string {
+  return p.replace(/\\/g, "/");
+}
+
+function rootBasename(p: string): string {
+  const normalized = normalizeRootPath(p);
+  return normalized.split("/").pop() || p;
+}
+
+export function createWorkspaceRoot(path: string): WorkspaceRoot {
+  return { id: normalizeRootPath(path), path, name: rootBasename(path) };
+}
+
+export function getActiveRoot(): WorkspaceRoot | undefined {
+  return state.roots.find((r) => r.id === state.activeRootId);
+}
+
+export function getActiveRootPath(): string {
+  return getActiveRoot()?.path || "";
+}
+
+export function getRootForPath(filePath: string): WorkspaceRoot | undefined {
+  const norm = normalizeRootPath(filePath);
+  let best: WorkspaceRoot | undefined;
+  for (const r of state.roots) {
+    const rp = normalizeRootPath(r.path);
+    if (norm === rp || norm.startsWith(rp + "/")) {
+      if (!best || rp.length > normalizeRootPath(best.path).length) {
+        best = r;
+      }
+    }
+  }
+  return best;
+}
+
+export function setRoots(roots: WorkspaceRoot[]): void {
+  state.roots = roots;
+  if (!state.roots.some((r) => r.id === state.activeRootId)) {
+    state.activeRootId = state.roots[0]?.id || "";
+  }
+}
+
+export function addRoot(path: string): WorkspaceRoot {
+  const normalized = normalizeRootPath(path);
+  const existing = state.roots.find((r) => normalizeRootPath(r.path) === normalized);
+  if (existing) {
+    setActiveRoot(existing.id);
+    return existing;
+  }
+  const root = createWorkspaceRoot(path);
+  state.roots.push(root);
+  setActiveRoot(root.id);
+  return root;
+}
+
+export function removeRoot(id: string): void {
+  state.roots = state.roots.filter((r) => r.id !== id);
+  if (state.activeRootId === id) {
+    state.activeRootId = state.roots[0]?.id || "";
+  }
+}
+
+export function setActiveRoot(id: string): void {
+  if (state.roots.some((r) => r.id === id)) {
+    state.activeRootId = id;
+  }
+}
+
+export function reorderRoots(ids: string[]): void {
+  const map = new Map(state.roots.map((r) => [r.id, r]));
+  state.roots = ids.map((id) => map.get(id)).filter((r): r is WorkspaceRoot => !!r);
 }
 
 export function setGitStatus(status: GitStatus | null): void {

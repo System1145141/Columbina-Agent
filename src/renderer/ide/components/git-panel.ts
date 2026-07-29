@@ -1,4 +1,4 @@
-import { state, subscribe, notify, setGitStatus } from "../services/state";
+import { state, subscribe, notify, setGitStatus, getActiveRootPath } from "../services/state";
 import { toggleGitPanel } from "../services/layout";
 import { openFile } from "../services/file-service";
 
@@ -19,16 +19,18 @@ const gitDiffCloseBtn = document.getElementById("git-diff-close") as HTMLButtonE
 const gitOpenDiffBtn = document.getElementById("git-open-diff") as HTMLButtonElement;
 const gitLoadingEl = document.getElementById("git-loading") as HTMLElement;
 
-let lastFolder = "";
+let lastRootId = "";
 
 function relativeToAbsolute(filePath: string): string {
-  if (!state.currentFolder) return filePath;
-  if (filePath.replace(/\\/g, "/").startsWith(state.currentFolder.replace(/\\/g, "/"))) return filePath;
-  return state.currentFolder.replace(/\\/g, "/") + "/" + filePath.replace(/\\/g, "/");
+  const folder = getActiveRootPath();
+  if (!folder) return filePath;
+  if (filePath.replace(/\\/g, "/").startsWith(folder.replace(/\\/g, "/"))) return filePath;
+  return folder.replace(/\\/g, "/") + "/" + filePath.replace(/\\/g, "/");
 }
 
 export async function refreshGitStatus(): Promise<void> {
-  if (!state.currentFolder) {
+  const folder = getActiveRootPath();
+  if (!folder) {
     setGitStatus(null);
     notify();
     return;
@@ -36,7 +38,7 @@ export async function refreshGitStatus(): Promise<void> {
   state.gitLoading = true;
   notify();
   try {
-    const status = await window.ide!.getGitStatus(state.currentFolder);
+    const status = await window.ide!.getGitStatus(folder);
     setGitStatus(status);
   } catch (err) {
     console.error("[IDE] refresh git status failed:", err);
@@ -48,13 +50,14 @@ export async function refreshGitStatus(): Promise<void> {
 }
 
 async function toggleFileStage(filePath: string, staged: boolean): Promise<void> {
-  if (!state.currentFolder) return;
+  const folder = getActiveRootPath();
+  if (!folder) return;
   state.gitLoading = true;
   notify();
   try {
     const result = staged
-      ? await window.ide!.unstageGitFile(state.currentFolder, filePath)
-      : await window.ide!.stageGitFile(state.currentFolder, filePath);
+      ? await window.ide!.unstageGitFile(folder, filePath)
+      : await window.ide!.stageGitFile(folder, filePath);
     if (!result.ok) {
       state.statusMessage = `Git 操作失败: ${result.error || "未知错误"}`;
     }
@@ -69,12 +72,13 @@ async function toggleFileStage(filePath: string, staged: boolean): Promise<void>
 }
 
 export async function showDiff(filePath: string, staged: boolean): Promise<void> {
-  if (!state.currentFolder) return;
+  const folder = getActiveRootPath();
+  if (!folder) return;
   state.gitSelectedFile = { path: filePath, staged };
   state.gitLoading = true;
   notify();
   try {
-    const diff = await window.ide!.getGitDiff(state.currentFolder, filePath, staged);
+    const diff = await window.ide!.getGitDiff(folder, filePath, staged);
     state.gitDiff = diff;
   } catch (err) {
     console.error("[IDE] git diff failed:", err);
@@ -92,8 +96,9 @@ function hideDiff(): void {
 }
 
 async function doCommit(): Promise<void> {
+  const folder = getActiveRootPath();
   const message = gitCommitInput.value.trim();
-  if (!message || !state.currentFolder) return;
+  if (!message || !folder) return;
   if (!state.gitStatus || state.gitStatus.staged.length === 0) {
     state.statusMessage = "没有已暂存的文件可以提交";
     notify();
@@ -102,7 +107,7 @@ async function doCommit(): Promise<void> {
   state.gitLoading = true;
   notify();
   try {
-    const result = await window.ide!.commitGit(state.currentFolder, message);
+    const result = await window.ide!.commitGit(folder, message);
     if (result.ok) {
       gitCommitInput.value = "";
       state.statusMessage = "提交成功";
@@ -202,9 +207,9 @@ function renderDiff(): void {
   gitDiffContentEl.scrollTop = 0;
 }
 
-function renderGitPanel(): void {
-  if (lastFolder !== state.currentFolder) {
-    lastFolder = state.currentFolder;
+function renderGitPanel() {
+  if (lastRootId !== state.activeRootId) {
+    lastRootId = state.activeRootId;
     void refreshGitStatus();
   }
 
@@ -262,7 +267,7 @@ export function initGitPanel(): void {
 
   // Refresh when folder changes or window regains focus
   window.addEventListener("focus", () => {
-    if (state.gitPanelVisible && state.currentFolder) {
+    if (state.gitPanelVisible && state.roots.length > 0) {
       void refreshGitStatus();
     }
   });

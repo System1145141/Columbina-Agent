@@ -6,7 +6,9 @@ import {
   closeTabState,
   markTabSaved,
   updateTabPath,
-  setCurrentFolder,
+  setRoots,
+  setActiveRoot,
+  createWorkspaceRoot,
   setTreeRoot,
   clearTabsAndEditor,
   type IdeDirEntry,
@@ -120,16 +122,15 @@ export async function pickFolder(): Promise<string | null> {
 }
 
 export async function loadDirectory(dirPath: string): Promise<void> {
-  setCurrentFolder(dirPath);
+  const root = createWorkspaceRoot(dirPath);
+  setRoots([root]);
+  setActiveRoot(root.id);
   clearTabsAndEditor();
-  setTreeRoot([]);
+  setTreeRoot([{ name: root.name, path: root.path, isDirectory: true }]);
   state.projectIndex = [];
   notify();
 
   try {
-    const entries = await readDir(dirPath);
-    setTreeRoot(entries);
-    notify();
     void indexProject(dirPath);
   } catch (err) {
     console.error("[IDE] load directory failed:", err);

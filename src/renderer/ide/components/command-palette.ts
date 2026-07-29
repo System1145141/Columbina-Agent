@@ -1,4 +1,4 @@
-import { state, subscribe, type CommandItem } from "../services/state";
+import { state, subscribe, getActiveRootPath, getRootForPath, type CommandItem } from "../services/state";
 import {
   pickFolder,
   loadDirectory,
@@ -119,7 +119,7 @@ function getBaseCommands(): CommandItem[] {
 }
 
 async function showQuickOpen() {
-  if (!state.currentFolder) {
+  if (state.roots.length === 0) {
     commandInputEl.value = "";
     state.commandItems = [];
     renderCommandList();
@@ -128,16 +128,23 @@ async function showQuickOpen() {
   commandInputEl.placeholder = "输入文件名快速打开";
   commandInputEl.value = "";
   commandInputEl.focus();
-  const files = await collectFilesForQuickOpen(state.currentFolder);
-  state.fileCommandItems = files.map((f) => ({
-    id: `file:${f.path}`,
-    label: f.path.replace(state.currentFolder + "/", ""),
-    icon: "📄",
-    run: () => {
-      void openFile(f.path);
-      hideCommandPalette();
-    },
-  }));
+  const files: import("../services/state").IdeDirEntry[] = [];
+  for (const root of state.roots) {
+    files.push(...(await collectFilesForQuickOpen(root.path)));
+  }
+  state.fileCommandItems = files.map((f) => {
+    const root = getRootForPath(f.path);
+    const label = root ? f.path.replace(root.path.replace(/\\/g, "/") + "/", "") : f.path;
+    return {
+      id: `file:${f.path}`,
+      label,
+      icon: "📄",
+      run: () => {
+        void openFile(f.path);
+        hideCommandPalette();
+      },
+    };
+  });
   state.commandItems = state.fileCommandItems.slice(0, 50);
   state.commandSelectedIndex = state.commandItems.length > 0 ? 0 : -1;
   renderCommandList();

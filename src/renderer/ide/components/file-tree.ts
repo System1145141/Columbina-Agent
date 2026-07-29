@@ -1,4 +1,4 @@
-import { state, subscribe, notify, type IdeDirEntry } from "../services/state";
+import { state, subscribe, notify, getActiveRootPath, getRootForPath, type IdeDirEntry } from "../services/state";
 import {
   openFile,
   readDir,
@@ -35,7 +35,7 @@ const promptOkBtn = document.getElementById("prompt-ok-btn") as HTMLButtonElemen
 const promptCancelBtn = document.getElementById("prompt-cancel-btn") as HTMLButtonElement;
 
 let treeContextMenu: HTMLElement | null = null;
-let lastFolder = "";
+let lastRootsKey = "";
 
 function createTreeItem(entry: IdeDirEntry, level = 0): HTMLElement {
   const item = document.createElement("div");
@@ -157,7 +157,7 @@ function createTreeItem(entry: IdeDirEntry, level = 0): HTMLElement {
 }
 
 export async function refreshTreeItem(dirPath: string): Promise<void> {
-  if (!state.currentFolder) return;
+  if (state.roots.length === 0) return;
   const item = document.querySelector(`.ide__tree-item[data-path="${CSS.escape(dirPath)}"]`) as HTMLElement | null;
   if (!item) return;
   const childrenContainer = item.querySelector(".ide__tree-children") as HTMLElement | null;
@@ -306,7 +306,7 @@ async function promptRename(entry: IdeDirEntry) {
   }
   const parentDirPath = parentDir(entry.path);
   await refreshAfterRename(entry.path, result.path, entry.isDirectory);
-  await refreshTreeItem(parentDirPath || state.currentFolder);
+  await refreshTreeItem(parentDirPath || getActiveRootPath());
 }
 
 async function confirmDelete(entry: IdeDirEntry) {
@@ -320,19 +320,20 @@ async function confirmDelete(entry: IdeDirEntry) {
   }
   const parentDirPath = parentDir(entry.path);
   await refreshAfterDelete(entry.path, entry.isDirectory);
-  await refreshTreeItem(parentDirPath || state.currentFolder);
+  await refreshTreeItem(parentDirPath || getActiveRootPath());
 }
 
 function renderTree() {
-  if (lastFolder === state.currentFolder && treeRootEl.children.length > 0 && state.treeRoot.length > 0) {
-    // Only full rebuild when folder changes or treeRoot is empty
+  const rootsKey = state.roots.map((r) => r.id).join("|");
+  if (lastRootsKey === rootsKey && treeRootEl.children.length > 0 && state.treeRoot.length > 0) {
+    // Only full rebuild when roots change or treeRoot is empty
     highlightCurrentFileInTree();
     return;
   }
 
-  lastFolder = state.currentFolder;
+  lastRootsKey = rootsKey;
   treeRootEl.innerHTML = "";
-  folderPathEl.textContent = state.currentFolder;
+  folderPathEl.textContent = getActiveRootPath();
 
   if (state.statusMessage && state.statusMessage.startsWith("加载")) {
     // Loading state handled by status bar
@@ -353,7 +354,7 @@ function highlightCurrentFileInTree() {
 
 // Search panel
 async function runSearch() {
-  if (!state.currentFolder) {
+  if (state.roots.length === 0) {
     searchResultsEl.innerHTML = '<div class="ide__search-empty">请先打开文件夹</div>';
     return;
   }
@@ -365,12 +366,16 @@ async function runSearch() {
 
   searchResultsEl.innerHTML = '<div class="ide__search-empty">搜索中...</div>';
   try {
-    const results = await searchFiles(state.currentFolder, query, {
-      caseSensitive: searchCaseEl.checked,
-      wholeWord: searchWordEl.checked,
-      regex: searchRegexEl.checked,
-      maxResults: 200,
-    });
+    const results: IdeSearchResult[] = [];
+    for (const root of state.roots) {
+      const rootResults = await searchFiles(root.path, query, {
+        caseSensitive: searchCaseEl.checked,
+        wholeWord: searchWordEl.checked,
+        regex: searchRegexEl.checked,
+        maxResults: 200,
+      });
+      results.push(...rootResults);
+    }
     renderSearchResults(results);
   } catch (err) {
     searchResultsEl.innerHTML = `<div class="ide__search-empty">搜索失败: ${String(err)}</div>`;

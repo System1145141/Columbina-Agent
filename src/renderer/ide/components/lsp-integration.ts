@@ -3,7 +3,7 @@ import { autocompletion, type Completion, type CompletionContext, type Completio
 import { hoverTooltip, keymap, ViewPlugin, EditorView, type ViewUpdate } from "@codemirror/view";
 import { StateEffect, StateField, EditorState, type Extension, type Text } from "@codemirror/state";
 import { getLspClient, type LspClient, type LspDiagnostic, type LspRange } from "../services/lsp-client";
-import { state, notify, setLspDiagnostics, getLspDiagnostics, type IdeSearchResult } from "../services/state";
+import { state, notify, setLspDiagnostics, getLspDiagnostics, getRootForPath, type IdeSearchResult } from "../services/state";
 import { getFileExtension, openFileAt, readFile, writeFile } from "../services/file-service";
 import { showReferencesResults } from "./file-tree";
 
@@ -157,7 +157,8 @@ function ensureDiagnosticsHandler(client: LspClient): void {
 
 function getLspContext(filePath: string): { client: LspClient; languageId: string; workspacePath: string } | null {
   const languageId = getLanguageId(filePath);
-  const workspacePath = state.currentFolder;
+  const root = getRootForPath(filePath) || state.roots[0];
+  const workspacePath = root?.path;
   if (!languageId || !workspacePath) return null;
   const client = getLspClient(languageId, workspacePath);
   ensureResponseHandler(client);
@@ -547,7 +548,7 @@ export async function formatDocument(view?: EditorView): Promise<void> {
 }
 
 export function lspExtension(filePath: string): Extension[] {
-  if (!state.currentFolder || !getLanguageId(filePath)) return [];
+  if (state.roots.length === 0 || !getLanguageId(filePath)) return [];
 
   const trackEditor = ViewPlugin.fromClass(
     class {

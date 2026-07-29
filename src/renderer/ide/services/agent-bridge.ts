@@ -1,6 +1,7 @@
 import {
   state,
   notify,
+  getActiveRootPath,
   type AgentAction,
   type AgentActionResult,
   type AiContextScope,
@@ -129,9 +130,10 @@ export async function executeAction(action: AgentAction): Promise<AgentActionRes
       return { actionId: action.id, ok: false, error: result.error || "写入失败" };
     }
     case "search_files": {
-      if (!action.query || !state.currentFolder) return { actionId: action.id, ok: false, error: "缺少 query 或项目文件夹" };
+      const projectFolder = getActiveRootPath();
+      if (!action.query || !projectFolder) return { actionId: action.id, ok: false, error: "缺少 query 或项目文件夹" };
       try {
-        const results = await searchFiles(state.currentFolder, action.query, { maxResults: 20 });
+        const results = await searchFiles(projectFolder, action.query, { maxResults: 20 });
         if (results.length === 0) return { actionId: action.id, ok: true, output: "未找到匹配结果" };
         const lines = results.map((r) => `${r.filePath}:${r.line}:${r.column}  ${r.text.trim()}`);
         return { actionId: action.id, ok: true, output: lines.join("\n") };
@@ -229,9 +231,10 @@ export async function buildAiContext(scope: AiContextScope, query?: string): Pro
   }
 
   if (scope === "project") {
-    if (state.currentFolder) {
-      parts.push(`当前打开的项目文件夹: ${state.currentFolder}`);
-      parts.push(await collectProjectContext(state.currentFolder, query));
+    const projectFolder = getActiveRootPath();
+    if (projectFolder) {
+      parts.push(`当前打开的项目文件夹: ${projectFolder}`);
+      parts.push(await collectProjectContext(projectFolder, query));
     } else {
       parts.push("（当前没有打开项目文件夹）");
     }
