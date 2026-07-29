@@ -1,11 +1,11 @@
 import { linter, type Diagnostic } from "@codemirror/lint";
 import { autocompletion, type Completion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import { hoverTooltip, keymap, ViewPlugin, EditorView, type ViewUpdate } from "@codemirror/view";
-import { StateEffect, StateField, type Extension, type Text } from "@codemirror/state";
+import { StateEffect, StateField, EditorState, type Extension, type Text } from "@codemirror/state";
 import { getLspClient, type LspClient, type LspDiagnostic, type LspRange } from "../services/lsp-client";
-import { state, notify, setLspDiagnostics, getLspDiagnostics } from "../services/state";
-import { getFileExtension } from "../services/file-service";
-import { openFileAt } from "../services/file-service";
+import { state, notify, setLspDiagnostics, getLspDiagnostics, type IdeSearchResult } from "../services/state";
+import { getFileExtension, openFileAt, readFile, writeFile } from "../services/file-service";
+import { showReferencesResults } from "./file-tree";
 
 const extToLanguageId: Record<string, string> = {
   ts: "typescript",
@@ -237,6 +237,103 @@ function parseDefinitionResult(result: unknown): { uri: string; range: LspRange 
   return [result as { uri: string; range: LspRange }];
 }
 
+interface LspTextEdit {
+  range: LspRange;
+  newText: string;
+}
+
+interface LspWorkspaceEdit {
+  changes?: Record<string, LspTextEdit[]>;
+  documentChanges?: unknown[];
+}
+
+function collectWorkspaceChanges(edit: LspWorkspaceEdit): Map<string, LspTextEdit[]> {
+  const map = new Map<string, LspTextEdit[]>();
+  if (edit.changes) {
+    for (const [uri, edits] of Object.entries(edit.changes)) {
+      map.set(uriToFilePath(uri), edits as LspTextEdit[]);
+    }
+  }
+  if (Array.isArray(edit.documentChanges)) {
+    for (const docChange of edit.documentChanges) {
+      if (docChange && typeof docChange === "object" && "textDocument" in docChange && "edits" in docChange) {
+        const td = (docChange as { textDocument: { uri: string }; edits: LspTextEdit[] }).textDocument;
+        const edits = (docChange as { edits: LspTextEdit[] }).edits;
+        map.set(uriToFilePath(td.uri), edits);
+      }
+    }
+  }
+  return map;
+}
+
+function applyTextEditsToText(text: string, edits: LspTextEdit[]): string {
+  let docState = EditorState.create({ doc: text });
+  const sorted = [...edits].sort((a, b) => {
+    const aFrom = lspPosToCm(docState.doc, a.range.start);
+    const bFrom = lspPosToCm(docState.doc, b.range.start);
+    return bFrom - aFrom;
+  });
+  for (const edit of sorted) {
+    const from = lspPosToCm(docState.doc, edit.range.start);
+    const to = lspPosToCm(docState.doc, edit.range.end);
+    docState = docState.update({ changes: { from, to, insert: edit.newText } }).state;
+  }
+  return docState.doc.toString();
+}
+
+function lspPosToOffset(text: string, pos: { line: number; character: number }): number {
+  let line = 0;
+  let character = 0;
+  let offset = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (line === pos.line && character === pos.character) return offset;
+    if (text[i] === "\n") {
+      line++;
+      character = 0;
+    } else {
+      character++;
+    }
+    offset++;
+  }
+  return offset;
+}
+
+function applyTextEditsToRawText(text: string, edits: LspTextEdit[]): string {
+  const sorted = [...edits].sort((a, b) => {
+    if (a.range.start.line !== b.range.start.line) return b.range.start.line - a.range.start.line;
+    return b.range.start.character - a.range.start.character;
+  });
+  let result = text;
+  for (const edit of sorted) {
+    const from = lspPosToOffset(result, edit.range.start);
+    const to = lspPosToOffset(result, edit.range.end);
+    result = result.slice(0, from) + edit.newText + result.slice(to);
+  }
+  return result;
+}
+
+function applyTextEditsToView(view: EditorView, edits: LspTextEdit[]): void {
+  const sorted = [...edits].sort((a, b) => {
+    const aFrom = lspPosToCm(view.state.doc, a.range.start);
+    const bFrom = lspPosToCm(view.state.doc, b.range.start);
+    return bFrom - aFrom;
+  });
+  for (const edit of sorted) {
+    const from = lspPosToCm(view.state.doc, edit.range.start);
+    const to = lspPosToCm(view.state.doc, edit.range.end);
+    view.dispatch({ changes: { from, to, insert: edit.newText } });
+  }
+}
+
+function showStatusMessage(message: string, duration = 3000): void {
+  state.statusMessage = message;
+  notify();
+  setTimeout(() => {
+    state.statusMessage = "";
+    notify();
+  }, duration);
+}
+
 function moveCursorTo(view: EditorView, line: number, col: number): void {
   try {
     const doc = view.state.doc;
@@ -278,6 +375,136 @@ export async function goToDefinition(view?: EditorView, pos?: number): Promise<v
     }
   } catch (err) {
     console.error("[LSP] goToDefinition failed:", err);
+  }
+}
+
+export async function renameSymbol(view: EditorView, newName: string): Promise<void> {
+  const filePath = editorFilePaths.get(view);
+  if (!filePath) return;
+  const ctx = getLspContext(filePath);
+  if (!ctx) return;
+
+  const lspPos = cmPosToLsp(view.state.doc, view.state.selection.main.head);
+  try {
+    const result = (await sendLspRequest(ctx.client, "textDocument/rename", {
+      textDocument: { uri: filePathToUri(filePath) },
+      position: lspPos,
+      newName,
+    })) as LspWorkspaceEdit | null;
+    if (!result) {
+      showStatusMessage("重命名失败: 语言服务器返回空结果");
+      return;
+    }
+
+    const changes = collectWorkspaceChanges(result);
+    if (changes.size === 0) {
+      showStatusMessage("未找到可重命名的符号");
+      return;
+    }
+
+    for (const [targetPath, edits] of changes) {
+      if (targetPath === state.activeTabId && state.editorView) {
+        applyTextEditsToView(state.editorView, edits);
+      } else {
+        const tab = state.tabs.get(targetPath);
+        if (tab) {
+          tab.currentContent = applyTextEditsToText(tab.currentContent, edits);
+          tab.modified = tab.currentContent !== tab.initialContent;
+          notifyLspChange(targetPath, tab.currentContent);
+          notify();
+        } else {
+          try {
+            const content = await readFile(targetPath);
+            const updated = applyTextEditsToRawText(content, edits);
+            const writeResult = await writeFile(targetPath, updated);
+            if (!writeResult.ok) {
+              console.error(`[LSP] rename write failed for ${targetPath}:`, writeResult.error);
+            }
+          } catch (err) {
+            console.error(`[LSP] rename failed for ${targetPath}:`, err);
+          }
+        }
+      }
+    }
+
+    showStatusMessage(`已重命名为 ${newName}`);
+  } catch (err) {
+    console.error("[LSP] renameSymbol failed:", err);
+    showStatusMessage(`重命名失败: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+export async function findReferences(view?: EditorView): Promise<void> {
+  const targetView = view || state.editorView;
+  if (!targetView) return;
+  const filePath = editorFilePaths.get(targetView);
+  if (!filePath) return;
+  const ctx = getLspContext(filePath);
+  if (!ctx) return;
+
+  const lspPos = cmPosToLsp(targetView.state.doc, targetView.state.selection.main.head);
+  try {
+    const result = await sendLspRequest(ctx.client, "textDocument/references", {
+      textDocument: { uri: filePathToUri(filePath) },
+      position: lspPos,
+      context: { includeDeclaration: true },
+    });
+    const locations = parseDefinitionResult(result);
+    if (locations.length === 0) {
+      showStatusMessage("未找到引用");
+      return;
+    }
+
+    const fileContents = new Map<string, string[]>();
+    const results: IdeSearchResult[] = [];
+    for (const loc of locations) {
+      const targetFilePath = uriToFilePath(loc.uri);
+      const line = loc.range.start.line + 1;
+      const column = loc.range.start.character + 1;
+      let lines = fileContents.get(targetFilePath);
+      if (!lines) {
+        try {
+          const content = await readFile(targetFilePath);
+          lines = content.split("\n");
+        } catch {
+          lines = [];
+        }
+        fileContents.set(targetFilePath, lines);
+      }
+      const text = lines[line - 1]?.trim() || "";
+      results.push({ filePath: targetFilePath, line, column, text });
+    }
+
+    showReferencesResults(results);
+  } catch (err) {
+    console.error("[LSP] findReferences failed:", err);
+    showStatusMessage(`查找引用失败: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+export async function formatDocument(view?: EditorView): Promise<void> {
+  const targetView = view || state.editorView;
+  if (!targetView) return;
+  const filePath = editorFilePaths.get(targetView);
+  if (!filePath) return;
+  const ctx = getLspContext(filePath);
+  if (!ctx) return;
+
+  try {
+    const result = await sendLspRequest(ctx.client, "textDocument/formatting", {
+      textDocument: { uri: filePathToUri(filePath) },
+      options: { tabSize: state.ideSettings.tabSize, insertSpaces: true },
+    });
+    const edits = Array.isArray(result) ? (result as LspTextEdit[]) : [];
+    if (edits.length === 0) {
+      showStatusMessage("无需格式化");
+      return;
+    }
+    applyTextEditsToView(targetView, edits);
+    showStatusMessage("格式化完成");
+  } catch (err) {
+    console.error("[LSP] formatDocument failed:", err);
+    showStatusMessage(`格式化失败: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 

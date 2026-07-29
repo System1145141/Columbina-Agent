@@ -16,6 +16,10 @@ import {
   notifyLspChange,
   notifyLspSave,
   notifyLspClose,
+  goToDefinition,
+  renameSymbol,
+  findReferences,
+  formatDocument,
 } from "./lsp-integration";
 
 const editorEl = document.getElementById("editor") as HTMLElement;
@@ -287,6 +291,20 @@ function doCreateEditor(initialContent = "", filePath = ""): EditorView | null {
           return true;
         },
       },
+      {
+        key: "F2",
+        run: () => {
+          promptRenameSymbol();
+          return true;
+        },
+      },
+      {
+        key: "Shift-Alt-f",
+        run: () => {
+          void formatDocument();
+          return true;
+        },
+      },
     ]),
     detectLanguage(filePath),
     lspExtension(filePath),
@@ -294,10 +312,8 @@ function doCreateEditor(initialContent = "", filePath = ""): EditorView | null {
     inlineChatPlugin,
     EditorView.domEventHandlers({
       contextmenu: (event) => {
-        const selection = state.editorView?.state.selection.main;
-        if (!selection || selection.from === selection.to) return false;
         event.preventDefault();
-        showInlineChatContextMenu(event.clientX, event.clientY);
+        showEditorContextMenu(event.clientX, event.clientY);
         return true;
       },
     }),
@@ -378,20 +394,30 @@ function onStateChange(): void {
 }
 
 // Inline chat
-let inlineChatContextMenu: HTMLElement | null = null;
+let editorContextMenu: HTMLElement | null = null;
 
-function showInlineChatContextMenu(x: number, y: number) {
-  hideInlineChatContextMenu();
+function showEditorContextMenu(x: number, y: number) {
+  hideEditorContextMenu();
+  const selection = state.editorView?.state.selection.main;
+  const hasSelection = !!selection && selection.from !== selection.to;
+
   const menu = document.createElement("div");
   menu.className = "ide__context-menu";
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;
 
-  const items = [
-    { label: "询问 Columbina", action: () => openInlineChat() },
-    { label: "解释选中代码", action: () => { openInlineChat(); void runInlineChat("解释这段代码"); } },
-    { label: "重构选中代码", action: () => { openInlineChat(); void runInlineChat("重构这段代码，提高可读性"); } },
+  const items: { label: string; action: () => void }[] = [
+    { label: "跳转到定义", action: () => void goToDefinition() },
+    { label: "重命名符号", action: () => promptRenameSymbol() },
+    { label: "查找引用", action: () => void findReferences() },
+    { label: "格式化文档", action: () => void formatDocument() },
   ];
+
+  if (hasSelection) {
+    items.push({ label: "询问 Columbina", action: () => openInlineChat() });
+    items.push({ label: "解释选中代码", action: () => { openInlineChat(); void runInlineChat("解释这段代码"); } });
+    items.push({ label: "重构选中代码", action: () => { openInlineChat(); void runInlineChat("重构这段代码，提高可读性"); } });
+  }
 
   for (const item of items) {
     const btn = document.createElement("button");
@@ -399,25 +425,32 @@ function showInlineChatContextMenu(x: number, y: number) {
     btn.className = "ide__context-menu-item";
     btn.textContent = item.label;
     btn.addEventListener("click", () => {
-      hideInlineChatContextMenu();
+      hideEditorContextMenu();
       item.action();
     });
     menu.appendChild(btn);
   }
 
   document.body.appendChild(menu);
-  inlineChatContextMenu = menu;
+  editorContextMenu = menu;
 
   const rect = menu.getBoundingClientRect();
   if (rect.right > window.innerWidth) menu.style.left = `${window.innerWidth - rect.width - 8}px`;
   if (rect.bottom > window.innerHeight) menu.style.top = `${window.innerHeight - rect.height - 8}px`;
 }
 
-function hideInlineChatContextMenu() {
-  if (inlineChatContextMenu) {
-    inlineChatContextMenu.remove();
-    inlineChatContextMenu = null;
+function hideEditorContextMenu() {
+  if (editorContextMenu) {
+    editorContextMenu.remove();
+    editorContextMenu = null;
   }
+}
+
+function promptRenameSymbol() {
+  if (!state.editorView) return;
+  const newName = window.prompt("请输入新名称:");
+  if (!newName || !newName.trim()) return;
+  void renameSymbol(state.editorView, newName.trim());
 }
 
 function getInlineChatState(): InlineChatState {
@@ -604,8 +637,8 @@ function acceptInlineSuggestion() {
 export function initEditorPane(): void {
   subscribe(onStateChange);
   document.addEventListener("click", (e) => {
-    if (inlineChatContextMenu && !inlineChatContextMenu.contains(e.target as Node)) {
-      hideInlineChatContextMenu();
+    if (editorContextMenu && !editorContextMenu.contains(e.target as Node)) {
+      hideEditorContextMenu();
     }
   });
 }

@@ -16,7 +16,7 @@ import {
   basename,
   pickFolder,
 } from "../services/file-service";
-import { toggleSearchPanel, hideSearchPanel } from "../services/layout";
+import { showSearchPanel, toggleSearchPanel, hideSearchPanel } from "../services/layout";
 
 const treeRootEl = document.getElementById("tree-root") as HTMLElement;
 const folderPathEl = document.getElementById("folder-path") as HTMLSpanElement;
@@ -377,7 +377,7 @@ async function runSearch() {
   }
 }
 
-function renderSearchResults(results: import("../services/state").IdeSearchResult[]) {
+function renderSearchResults(results: import("../services/state").IdeSearchResult[], title?: string) {
   searchResultsEl.innerHTML = "";
   if (results.length === 0) {
     searchResultsEl.innerHTML = '<div class="ide__search-empty">未找到结果</div>';
@@ -386,7 +386,7 @@ function renderSearchResults(results: import("../services/state").IdeSearchResul
 
   const summary = document.createElement("div");
   summary.className = "ide__search-summary";
-  summary.textContent = `共 ${results.length} 条结果`;
+  summary.textContent = title || `共 ${results.length} 条结果`;
   searchResultsEl.appendChild(summary);
 
   const groups = new Map<string, import("../services/state").IdeSearchResult[]>();
@@ -423,6 +423,12 @@ function renderSearchResults(results: import("../services/state").IdeSearchResul
 
     searchResultsEl.appendChild(fileGroup);
   }
+}
+
+export function showReferencesResults(results: import("../services/state").IdeSearchResult[]): void {
+  showSearchPanel();
+  searchInputEl.value = "";
+  renderSearchResults(results, `引用 (${results.length})`);
 }
 
 export function initFileTree(): void {

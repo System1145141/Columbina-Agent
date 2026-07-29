@@ -7,6 +7,12 @@ import {
 } from "../services/file-service";
 import { saveCurrentTab } from "./editor-pane";
 import {
+  goToDefinition,
+  renameSymbol,
+  findReferences,
+  formatDocument,
+} from "./lsp-integration";
+import {
   toggleSearchPanel,
   toggleTerminalPanel,
   toggleIdeTheme,
@@ -41,6 +47,39 @@ function getBaseCommands(): CommandItem[] {
       icon: "💾",
       shortcut: "Ctrl+S",
       run: () => saveCurrentTab(),
+    },
+    {
+      id: "go-to-definition",
+      label: "跳转到定义",
+      icon: "➡️",
+      shortcut: "F12",
+      run: () => void goToDefinition(),
+    },
+    {
+      id: "rename-symbol",
+      label: "重命名符号",
+      icon: "✏️",
+      shortcut: "F2",
+      run: () => {
+        if (!state.editorView) return;
+        const newName = window.prompt("请输入新名称:");
+        if (newName && newName.trim()) {
+          void renameSymbol(state.editorView, newName.trim());
+        }
+      },
+    },
+    {
+      id: "find-references",
+      label: "查找引用",
+      icon: "🔗",
+      run: () => void findReferences(),
+    },
+    {
+      id: "format-document",
+      label: "格式化文档",
+      icon: "🧹",
+      shortcut: "Shift+Alt+F",
+      run: () => void formatDocument(),
     },
     {
       id: "toggle-search",
