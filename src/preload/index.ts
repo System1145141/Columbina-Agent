@@ -189,6 +189,27 @@ const ideApi = {
     ipcRenderer.on(IPC.IDE_TERMINAL_EXIT, listener);
     return () => ipcRenderer.off(IPC.IDE_TERMINAL_EXIT, listener);
   },
+  getGitStatus: (folderPath: string) => ipcRenderer.invoke(IPC.IDE_GIT_STATUS, folderPath),
+  getGitDiff: (folderPath: string, filePath: string, staged?: boolean) =>
+    ipcRenderer.invoke(IPC.IDE_GIT_DIFF, folderPath, filePath, staged),
+  stageGitFile: (folderPath: string, filePath: string) =>
+    ipcRenderer.invoke(IPC.IDE_GIT_STAGE, folderPath, filePath),
+  unstageGitFile: (folderPath: string, filePath: string) =>
+    ipcRenderer.invoke(IPC.IDE_GIT_UNSTAGE, folderPath, filePath),
+  commitGit: (folderPath: string, message: string) =>
+    ipcRenderer.invoke(IPC.IDE_GIT_COMMIT, folderPath, message),
+  getGitBranch: (folderPath: string) => ipcRenderer.invoke(IPC.IDE_GIT_BRANCH, folderPath),
+  getGitLog: (folderPath: string, maxCount?: number) => ipcRenderer.invoke(IPC.IDE_GIT_LOG, folderPath, maxCount),
+  saveWorkspace: (filePath: string | null, state: Record<string, unknown>) =>
+    ipcRenderer.invoke(IPC.IDE_SAVE_WORKSPACE, filePath, state) as Promise<{ ok: boolean; filePath?: string; error?: string }>,
+  saveWorkspaceSync: (filePath: string | null, state: Record<string, unknown>) =>
+    ipcRenderer.sendSync(IPC.IDE_SAVE_WORKSPACE_SYNC, filePath, state) as { ok: boolean; filePath?: string; error?: string },
+  openWorkspace: (filePath?: string) =>
+    ipcRenderer.invoke(IPC.IDE_OPEN_WORKSPACE, filePath) as Promise<{ ok: boolean; workspace?: Record<string, unknown>; filePath?: string; error?: string }>,
+  getWorkspaceState: () =>
+    ipcRenderer.invoke(IPC.IDE_GET_WORKSPACE_STATE) as Promise<{ workspace?: Record<string, unknown>; filePath?: string }>,
+  relocateRoot: (oldPath: string) =>
+    ipcRenderer.invoke(IPC.IDE_RELOCATE_ROOT, oldPath) as Promise<string | null>,
 };
 contextBridge.exposeInMainWorld("ide", ideApi);
 

@@ -40,6 +40,27 @@ function filePathToUri(filePath: string): string {
   return `file://${normalized.startsWith("/") ? normalized : `/${normalized}`}`;
 }
 
+function uriToFilePath(uri: string): string {
+  let p: string;
+  if (uri.startsWith("file:///")) {
+    p = uri.slice("file:///".length);
+    // Windows: file:///C:/... → C:/...; Unix: file:///path → /path
+    p = /^[A-Za-z]:/.test(p) ? p : `/${p}`;
+  } else if (uri.startsWith("file://")) {
+    // file://host/path → /path (忽略 host)
+    p = uri.slice("file://".length);
+    const slash = p.indexOf("/");
+    p = slash >= 0 ? p.slice(slash) : "";
+  } else {
+    p = uri;
+  }
+  try {
+    return decodeURIComponent(p);
+  } catch {
+    return p;
+  }
+}
+
 class LspClient {
   private languageId: string;
   private workspacePath: string;

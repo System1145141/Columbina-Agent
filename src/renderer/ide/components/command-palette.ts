@@ -1,4 +1,4 @@
-import { state, subscribe, type CommandItem } from "../services/state";
+import { state, subscribe, getActiveRootPath, getRootForPath, type CommandItem } from "../services/state";
 import {
   pickFolder,
   loadDirectory,
@@ -7,11 +7,18 @@ import {
 } from "../services/file-service";
 import { saveCurrentTab } from "./editor-pane";
 import {
+  goToDefinition,
+  renameSymbol,
+  findReferences,
+  formatDocument,
+} from "./lsp-integration";
+import {
   toggleSearchPanel,
   toggleTerminalPanel,
   toggleIdeTheme,
   changeEditorFontSize,
 } from "../services/layout";
+import { saveWorkspace, openWorkspace } from "../services/workspace-service";
 
 const commandPanelEl = document.getElementById("command-panel") as HTMLElement;
 const commandInputEl = document.getElementById("command-input") as HTMLInputElement;
@@ -29,6 +36,22 @@ function getBaseCommands(): CommandItem[] {
       },
     },
     {
+      id: "open-workspace",
+      label: "打开工作区",
+      icon: "🗂️",
+      run: async () => {
+        await openWorkspace();
+      },
+    },
+    {
+      id: "save-workspace",
+      label: "保存工作区",
+      icon: "💾",
+      run: async () => {
+        await saveWorkspace();
+      },
+    },
+    {
       id: "quick-open",
       label: "打开文件",
       icon: "📄",
@@ -41,6 +64,39 @@ function getBaseCommands(): CommandItem[] {
       icon: "💾",
       shortcut: "Ctrl+S",
       run: () => saveCurrentTab(),
+    },
+    {
+      id: "go-to-definition",
+      label: "跳转到定义",
+      icon: "➡️",
+      shortcut: "F12",
+      run: () => void goToDefinition(),
+    },
+    {
+      id: "rename-symbol",
+      label: "重命名符号",
+      icon: "✏️",
+      shortcut: "F2",
+      run: async () => {
+        if (!state.editorView) return;
+        const newName = await showPromptDialog("请输入新名称:");
+        if (newName && newName.trim()) {
+          void renameSymbol(state.editorView, newName.trim());
+        }
+      },
+    },
+    {
+      id: "find-references",
+      label: "查找引用",
+      icon: "🔗",
+      run: () => void findReferences(),
+    },
+    {
+      id: "format-document",
+      label: "格式化文档",
+      icon: "🧹",
+      shortcut: "Shift+Alt+F",
+      run: () => void formatDocument(),
     },
     {
       id: "toggle-search",
@@ -80,7 +136,7 @@ function getBaseCommands(): CommandItem[] {
 }
 
 async function showQuickOpen() {
-  if (!state.currentFolder) {
+  if (state.roots.length === 0) {
     commandInputEl.value = "";
     state.commandItems = [];
     renderCommandList();
@@ -89,31 +145,57 @@ async function showQuickOpen() {
   commandInputEl.placeholder = "输入文件名快速打开";
   commandInputEl.value = "";
   commandInputEl.focus();
-  const files = await collectFilesForQuickOpen(state.currentFolder);
-  state.fileCommandItems = files.map((f) => ({
-    id: `file:${f.path}`,
-    label: f.path.replace(state.currentFolder + "/", ""),
-    icon: "📄",
-    run: () => {
-      void openFile(f.path);
-      hideCommandPalette();
-    },
-  }));
+  const files: import("../services/state").IdeDirEntry[] = [];
+  for (const root of state.roots) {
+    files.push(...(await collectFilesForQuickOpen(root.path)));
+  }
+  state.fileCommandItems = files.map((f) => {
+    const root = getRootForPath(f.path);
+    const label = root ? f.path.replace(root.path.replace(/\\/g, "/") + "/", "") : f.path;
+    return {
+      id: `file:${f.path}`,
+      label,
+      icon: "📄",
+      run: () => {
+        void openFile(f.path);
+        hideCommandPalette();
+      },
+    };
+  });
   state.commandItems = state.fileCommandItems.slice(0, 50);
   state.commandSelectedIndex = state.commandItems.length > 0 ? 0 : -1;
   renderCommandList();
 }
 
-function showCommandPalette() {
+async function showCommandPalette() {
   state.commandPaletteVisible = true;
   commandPanelEl.style.display = "flex";
   commandInputEl.placeholder = "键入命令或搜索文件";
   commandInputEl.value = "";
   commandInputEl.focus();
-  state.commandItems = getBaseCommands();
+  const base = getBaseCommands();
+  const recent = await loadRecentWorkspaceCommands();
+  state.commandItems = [...base, ...recent];
   state.commandSelectedIndex = state.commandItems.length > 0 ? 0 : -1;
   state.fileCommandItems = [];
   renderCommandList();
+}
+
+async function loadRecentWorkspaceCommands(): Promise<CommandItem[]> {
+  try {
+    const general = await window.settings?.getGeneral();
+    const recent = (general?.recentWorkspaces || []) as { path: string; name: string }[];
+    return recent.slice(0, 5).map((item) => ({
+      id: `recent-workspace:${item.path}`,
+      label: `打开最近工作区: ${item.name}`,
+      icon: "🕓",
+      run: async () => {
+        await openWorkspace(item.path);
+      },
+    }));
+  } catch {
+    return [];
+  }
 }
 
 export function hideCommandPalette() {

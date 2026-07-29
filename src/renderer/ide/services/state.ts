@@ -33,6 +33,13 @@ export interface IdeSettings {
   tabSize: number;
 }
 
+export interface WorkspaceRoot {
+  id: string;
+  path: string;
+  name: string;
+  missing?: boolean;
+}
+
 export interface AiMessage {
   id: string;
   role: "user" | "model";
@@ -84,6 +91,17 @@ export interface InlineChatSuggestion {
   explanation: string;
 }
 
+export interface GitStatus {
+  branch: string;
+  ahead: number;
+  behind: number;
+  modified: string[];
+  staged: string[];
+  untracked: string[];
+  conflicted: string[];
+  clean: boolean;
+}
+
 export interface InlineChatState {
   open: boolean;
   from: number;
@@ -114,7 +132,9 @@ export interface CommandItem {
 export type AiContextScope = "file" | "selection" | "project";
 
 export const state = {
-  currentFolder: "",
+  roots: [] as WorkspaceRoot[],
+  activeRootId: "",
+  workspaceFilePath: "" as string,
   treeRoot: [] as IdeDirEntry[],
   editorView: null as EditorView | null,
   tabs: new Map<string, Tab>(),
@@ -158,6 +178,14 @@ export const state = {
   statusMessage: "" as string,
   lspDiagnostics: new Map<string, LspDiagnostic[]>(),
   lspStatusMessage: "" as string,
+
+  gitStatusByRoot: {} as Record<string, GitStatus>,
+  gitPanelVisible: false,
+  gitSelectedFileByRoot: {} as Record<string, { path: string; staged: boolean }>,
+  gitDiffByRoot: {} as Record<string, string>,
+  gitLoading: false,
+
+  searchSelectedRootIds: [] as string[],
 };
 
 type Listener = () => void;
@@ -221,8 +249,109 @@ export function updateTabPath(oldPath: string, newPath: string, newFileName: str
   }
 }
 
-export function setCurrentFolder(folder: string): void {
-  state.currentFolder = folder;
+function normalizeRootPath(p: string): string {
+  return p.replace(/\\/g, "/");
+}
+
+function rootBasename(p: string): string {
+  const normalized = normalizeRootPath(p);
+  return normalized.split("/").pop() || p;
+}
+
+export function createWorkspaceRoot(path: string): WorkspaceRoot {
+  return { id: normalizeRootPath(path), path, name: rootBasename(path) };
+}
+
+export function getActiveRoot(): WorkspaceRoot | undefined {
+  return state.roots.find((r) => r.id === state.activeRootId);
+}
+
+export function getActiveRootPath(): string {
+  return getActiveRoot()?.path || "";
+}
+
+export function getRootForPath(filePath: string): WorkspaceRoot | undefined {
+  const norm = normalizeRootPath(filePath);
+  let best: WorkspaceRoot | undefined;
+  for (const r of state.roots) {
+    const rp = normalizeRootPath(r.path);
+    if (norm === rp || norm.startsWith(rp + "/")) {
+      if (!best || rp.length > normalizeRootPath(best.path).length) {
+        best = r;
+      }
+    }
+  }
+  return best;
+}
+
+export function setRoots(roots: WorkspaceRoot[]): void {
+  state.roots = roots;
+  if (!state.roots.some((r) => r.id === state.activeRootId)) {
+    state.activeRootId = state.roots[0]?.id || "";
+  }
+}
+
+export function addRoot(path: string): WorkspaceRoot {
+  const normalized = normalizeRootPath(path);
+  const existing = state.roots.find((r) => normalizeRootPath(r.path) === normalized);
+  if (existing) {
+    setActiveRoot(existing.id);
+    return existing;
+  }
+  const root = createWorkspaceRoot(path);
+  state.roots.push(root);
+  setActiveRoot(root.id);
+  return root;
+}
+
+export function removeRoot(id: string): void {
+  state.roots = state.roots.filter((r) => r.id !== id);
+  if (state.activeRootId === id) {
+    state.activeRootId = state.roots[0]?.id || "";
+  }
+}
+
+export function setActiveRoot(id: string): void {
+  if (state.roots.some((r) => r.id === id)) {
+    state.activeRootId = id;
+  }
+}
+
+export function reorderRoots(ids: string[]): void {
+  const map = new Map(state.roots.map((r) => [r.id, r]));
+  state.roots = ids.map((id) => map.get(id)).filter((r): r is WorkspaceRoot => !!r);
+}
+
+export function setGitStatusForRoot(rootId: string, status: GitStatus | null): void {
+  if (status) state.gitStatusByRoot[rootId] = status;
+  else delete state.gitStatusByRoot[rootId];
+}
+
+export function getGitStatusForRoot(rootId: string): GitStatus | null {
+  return state.gitStatusByRoot[rootId] || null;
+}
+
+export function setGitSelectedFileForRoot(rootId: string, file: { path: string; staged: boolean } | null): void {
+  if (file) state.gitSelectedFileByRoot[rootId] = file;
+  else delete state.gitSelectedFileByRoot[rootId];
+}
+
+export function getGitSelectedFileForRoot(rootId: string): { path: string; staged: boolean } | null {
+  return state.gitSelectedFileByRoot[rootId] || null;
+}
+
+export function setGitDiffForRoot(rootId: string, diff: string): void {
+  state.gitDiffByRoot[rootId] = diff;
+}
+
+export function getGitDiffForRoot(rootId: string): string {
+  return state.gitDiffByRoot[rootId] || "";
+}
+
+export function removeGitRootData(rootId: string): void {
+  delete state.gitStatusByRoot[rootId];
+  delete state.gitSelectedFileByRoot[rootId];
+  delete state.gitDiffByRoot[rootId];
 }
 
 export function setTreeRoot(entries: IdeDirEntry[]): void {
@@ -283,6 +412,18 @@ declare global {
       killTerminal: (id: string) => void;
       onTerminalData: (callback: (payload: { id: string; data: string }) => void) => () => void;
       onTerminalExit: (callback: (payload: { id: string; exitCode?: number }) => void) => () => void;
+      getGitStatus: (folderPath: string) => Promise<GitStatus>;
+      getGitDiff: (folderPath: string, filePath: string, staged?: boolean) => Promise<string>;
+      stageGitFile: (folderPath: string, filePath: string) => Promise<{ ok: boolean; error?: string }>;
+      unstageGitFile: (folderPath: string, filePath: string) => Promise<{ ok: boolean; error?: string }>;
+      commitGit: (folderPath: string, message: string) => Promise<{ ok: boolean; error?: string }>;
+      getGitBranch: (folderPath: string) => Promise<string>;
+      getGitLog: (folderPath: string, maxCount?: number) => Promise<{ hash: string; message: string; author: string; date: string }[]>;
+      saveWorkspace: (filePath: string | null, state: Record<string, unknown>) => Promise<{ ok: boolean; filePath?: string; error?: string }>;
+      saveWorkspaceSync: (filePath: string | null, state: Record<string, unknown>) => { ok: boolean; filePath?: string; error?: string };
+      openWorkspace: () => Promise<{ ok: boolean; workspace?: Record<string, unknown>; filePath?: string; error?: string }>;
+      getWorkspaceState: () => Promise<{ workspace?: Record<string, unknown>; filePath?: string }>;
+      relocateRoot: (oldPath: string) => Promise<string | null>;
     };
     settings?: {
       getGeneral: () => Promise<Record<string, unknown>>;

@@ -43,6 +43,7 @@ import { normalizeWindowVisibilitySettings } from "./window-visibility-settings"
 import type { StickerConfigItem } from "../shared/sticker-types";
 import { initReranker, getRerankerInstallStatus } from "./rag/reranker";
 import { setupLspIpc } from "./lsp-manager";
+import { setupGitIpc } from "./git-service";
 import { memoryStore } from "./memory/memory-store"
 import type { L0Profile, L1Profile } from "./memory/memory-types";
 import { registerChatsIpc } from "./chats/chats-ipc";
@@ -89,6 +90,7 @@ let settingsWindow: BrowserWindow | null = null;
 let stickerManagerWindow: BrowserWindow | null = null;
 let callWindow: BrowserWindow | null = null;
 let ideWindow: BrowserWindow | null = null;
+let currentIdeWorkspaceFile: string | null = null;
 let schedulerEngine: SchedulerEngine | null = null;
 // 聊天窗口当前活跃的会话 id（通过 IPC 由聊天窗口上报）；
 // 设置面板"删除当前会话"差异化提示用。聊天窗口关闭时由 closed 事件置 null。
@@ -471,6 +473,10 @@ interface GeneralSettings {
   maxHandoffRounds: number;
   /** IDE 编辑器设置（主题、字体、缩进） */
   ideSettings: IdeSettings;
+  /** 最近打开的 IDE 工作区文件列表 */
+  recentWorkspaces: { path: string; name: string; lastOpenedAt: number }[];
+  /** 上次打开的 IDE 工作区文件路径 */
+  lastIdeWorkspaceFile?: string;
 }
 
 interface IdeSettings {
@@ -618,6 +624,7 @@ const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
     fontSize: 13,
     tabSize: 2,
   },
+  recentWorkspaces: [],
 };
 
 function getSettingsPath(): string {
@@ -639,6 +646,121 @@ function getAvatarPath(): string {
 
 function getRagStorePath(): string {
   return path.join(app.getPath("userData"), "rag-data", "memory-store.json");
+}
+
+function getIdeAutosaveWorkspacePath(): string {
+  return path.join(app.getPath("userData"), "ide-autosave-workspace.json");
+}
+
+interface IdeWorkspaceRootEntry {
+  id: string;
+  path: string;
+  name: string;
+  missing?: boolean;
+}
+
+interface IdeWorkspaceFile {
+  version: 1;
+  roots: IdeWorkspaceRootEntry[];
+  activeRootId: string;
+  openFiles: string[];
+  activeTabId: string;
+  expandedDirs: string[];
+  panels: {
+    aiVisible: boolean;
+    terminalVisible: boolean;
+    searchVisible: boolean;
+    gitVisible: boolean;
+  };
+  bounds?: { x: number; y: number; width: number; height: number };
+}
+
+function sanitizeWorkspaceRoots(input: unknown): IdeWorkspaceRootEntry[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+    .map((item) => {
+      const p = typeof item.path === "string" ? item.path : "";
+      const name = typeof item.name === "string" && item.name ? item.name : (p ? path.basename(p) : "");
+      const id = typeof item.id === "string" && item.id ? item.id : p;
+      return { id, path: p, name, missing: !p || !fs.existsSync(p) };
+    })
+    .filter((item) => item.path.length > 0);
+}
+
+function sanitizeWorkspaceFile(data: unknown): IdeWorkspaceFile | null {
+  const input = typeof data === "object" && data !== null ? (data as Record<string, unknown>) : {};
+  const roots = sanitizeWorkspaceRoots(input.roots);
+  if (roots.length === 0) return null;
+  const panels = typeof input.panels === "object" && input.panels !== null ? (input.panels as Record<string, unknown>) : {};
+  return {
+    version: 1,
+    roots,
+    activeRootId: typeof input.activeRootId === "string" ? input.activeRootId : roots[0]?.id || "",
+    openFiles: Array.isArray(input.openFiles) ? input.openFiles.filter((p): p is string => typeof p === "string") : [],
+    activeTabId: typeof input.activeTabId === "string" ? input.activeTabId : "",
+    expandedDirs: Array.isArray(input.expandedDirs) ? input.expandedDirs.filter((p): p is string => typeof p === "string") : [],
+    panels: {
+      aiVisible: panels.aiVisible === true,
+      terminalVisible: panels.terminalVisible === true,
+      searchVisible: panels.searchVisible === true,
+      gitVisible: panels.gitVisible === true,
+    },
+    bounds:
+      typeof input.bounds === "object" && input.bounds !== null
+        ? {
+            x: typeof (input.bounds as Record<string, unknown>).x === "number" ? Number((input.bounds as Record<string, unknown>).x) : 0,
+            y: typeof (input.bounds as Record<string, unknown>).y === "number" ? Number((input.bounds as Record<string, unknown>).y) : 0,
+            width: typeof (input.bounds as Record<string, unknown>).width === "number" ? Number((input.bounds as Record<string, unknown>).width) : 1400,
+            height: typeof (input.bounds as Record<string, unknown>).height === "number" ? Number((input.bounds as Record<string, unknown>).height) : 900,
+          }
+        : undefined,
+  };
+}
+
+function readWorkspaceFile(filePath: string): IdeWorkspaceFile | null {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    const raw = JSON.parse(fs.readFileSync(filePath, "utf8")) as unknown;
+    return sanitizeWorkspaceFile(raw);
+  } catch (err: any) {
+    console.error("[Columbina IDE] read workspace file failed:", err?.message || err);
+    return null;
+  }
+}
+
+function writeWorkspaceFile(filePath: string, data: IdeWorkspaceFile): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
+}
+
+function workspaceNameFromPath(filePath: string): string {
+  const base = path.basename(filePath);
+  return base.replace(/\.columbina-workspace\.json$/i, "");
+}
+
+function updateRecentWorkspaces(filePath: string): void {
+  const before = loadGeneralSettings();
+  const name = workspaceNameFromPath(filePath);
+  const list = before.recentWorkspaces.filter((item) => item.path !== filePath);
+  list.unshift({ path: filePath, name, lastOpenedAt: Date.now() });
+  const next = list.slice(0, 10);
+  saveGeneralSettings({ ...before, recentWorkspaces: next, lastIdeWorkspaceFile: filePath });
+}
+
+function updateLastIdeWorkspaceFile(filePath: string): void {
+  const before = loadGeneralSettings();
+  saveGeneralSettings({ ...before, lastIdeWorkspaceFile: filePath });
+}
+
+function getIdeInitialBounds(): IdeWorkspaceFile["bounds"] | undefined {
+  const filePath = currentIdeWorkspaceFile || loadGeneralSettings().lastIdeWorkspaceFile;
+  if (filePath) {
+    const workspace = readWorkspaceFile(filePath);
+    if (workspace?.bounds) return workspace.bounds;
+  }
+  const autosave = readWorkspaceFile(getIdeAutosaveWorkspacePath());
+  return autosave?.bounds;
 }
 
 const DEFAULT_USER_PROFILE: UserProfile = {
@@ -1069,6 +1191,18 @@ function normalizeGeneralSettings(input: Partial<GeneralSettings> | null | undef
         ? Math.max(1, Math.min(8, Math.round(input.ideSettings.tabSize)))
         : DEFAULT_GENERAL_SETTINGS.ideSettings.tabSize,
     },
+    recentWorkspaces: Array.isArray(input?.recentWorkspaces)
+      ? input!.recentWorkspaces
+          .filter((item: unknown): item is Record<string, unknown> => typeof item === "object" && item !== null)
+          .map((item) => ({
+            path: typeof item.path === "string" ? item.path : "",
+            name: typeof item.name === "string" ? item.name : "",
+            lastOpenedAt: typeof item.lastOpenedAt === "number" && Number.isFinite(item.lastOpenedAt) ? item.lastOpenedAt : 0,
+          }))
+          .filter((item) => item.path.length > 0)
+          .slice(0, 20)
+      : DEFAULT_GENERAL_SETTINGS.recentWorkspaces,
+    lastIdeWorkspaceFile: typeof input?.lastIdeWorkspaceFile === "string" ? input.lastIdeWorkspaceFile : undefined,
   };
 }
 
@@ -2350,9 +2484,11 @@ function createIdeWindow(): void {
     return;
   }
 
+  const bounds = getIdeInitialBounds();
   ideWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
+    ...(bounds
+      ? { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
+      : { width: 1400, height: 900 }),
     minWidth: 800,
     minHeight: 600,
     title: "Columbina · IDE",
@@ -2908,6 +3044,7 @@ ipcMain.handle(IPC.IDE_MOVE, async (_event, sourcePath: unknown, targetDir: unkn
 });
 
 setupLspIpc();
+setupGitIpc();
 
 ipcMain.handle(IPC.IDE_GET_MEMORY_CONTEXT, async (_event, query: unknown) => {
   try {
@@ -2988,6 +3125,150 @@ ipcMain.handle(IPC.IDE_RENAME, async (_event, targetPath: unknown, newName: unkn
     console.error("[Columbina IDE] rename failed:", err?.message || err);
     return { ok: false, error: err?.message || "重命名失败" };
   }
+});
+
+function ensureWorkspaceExtension(filePath: string): string {
+  if (/\.columbina-workspace\.json$/i.test(filePath)) return filePath;
+  return filePath + ".columbina-workspace.json";
+}
+
+function normalizeBounds(bounds: unknown): IdeWorkspaceFile["bounds"] {
+  if (typeof bounds !== "object" || bounds === null) return undefined;
+  const b = bounds as Record<string, unknown>;
+  return {
+    x: typeof b.x === "number" ? Math.round(b.x) : 0,
+    y: typeof b.y === "number" ? Math.round(b.y) : 0,
+    width: typeof b.width === "number" ? Math.round(b.width) : 1400,
+    height: typeof b.height === "number" ? Math.round(b.height) : 900,
+  };
+}
+
+function buildWorkspaceFileFromRenderer(payload: unknown): IdeWorkspaceFile | null {
+  const input = typeof payload === "object" && payload !== null ? (payload as Record<string, unknown>) : {};
+  const rawRoots = Array.isArray(input.roots) ? input.roots : [];
+  const roots: IdeWorkspaceRootEntry[] = rawRoots
+    .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+    .map((item) => {
+      const p = typeof item.path === "string" ? item.path : "";
+      return {
+        id: typeof item.id === "string" && item.id ? item.id : p,
+        path: p,
+        name: typeof item.name === "string" && item.name ? item.name : (p ? path.basename(p) : ""),
+        missing: typeof item.missing === "boolean" ? item.missing : false,
+      };
+    })
+    .filter((item) => item.path.length > 0);
+  if (roots.length === 0) return null;
+  const panels = typeof input.panels === "object" && input.panels !== null ? (input.panels as Record<string, unknown>) : {};
+  const bounds = normalizeBounds(input.bounds) || (ideWindow && !ideWindow.isDestroyed() ? ideWindow.getBounds() : undefined);
+  return {
+    version: 1,
+    roots,
+    activeRootId: typeof input.activeRootId === "string" ? input.activeRootId : roots[0]?.id || "",
+    openFiles: Array.isArray(input.openFiles) ? input.openFiles.filter((p): p is string => typeof p === "string") : [],
+    activeTabId: typeof input.activeTabId === "string" ? input.activeTabId : "",
+    expandedDirs: Array.isArray(input.expandedDirs) ? input.expandedDirs.filter((p): p is string => typeof p === "string") : [],
+    panels: {
+      aiVisible: panels.aiVisible === true,
+      terminalVisible: panels.terminalVisible === true,
+      searchVisible: panels.searchVisible === true,
+      gitVisible: panels.gitVisible === true,
+    },
+    bounds,
+  };
+}
+
+ipcMain.handle(IPC.IDE_SAVE_WORKSPACE, async (_event, filePath: unknown, payload: unknown) => {
+  try {
+    const data = buildWorkspaceFileFromRenderer(payload);
+    if (!data) return { ok: false, error: "工作区为空" };
+    let targetPath = typeof filePath === "string" && filePath.length > 0 ? filePath : currentIdeWorkspaceFile || "";
+    if (!targetPath) {
+      if (!ideWindow || ideWindow.isDestroyed()) return { ok: false, error: "没有可用窗口" };
+      const result = await dialog.showSaveDialog(ideWindow, {
+        defaultPath: path.join(app.getPath("documents"), "workspace.columbina-workspace.json"),
+        filters: [{ name: "Columbina Workspace", extensions: ["columbina-workspace.json"] }],
+      });
+      if (result.canceled || !result.filePath) return { ok: false, error: "用户取消" };
+      targetPath = ensureWorkspaceExtension(result.filePath);
+    }
+    writeWorkspaceFile(targetPath, data);
+    currentIdeWorkspaceFile = targetPath;
+    updateRecentWorkspaces(targetPath);
+    return { ok: true, filePath: targetPath };
+  } catch (err: any) {
+    console.error("[Columbina IDE] save workspace failed:", err?.message || err);
+    return { ok: false, error: err?.message || "保存失败" };
+  }
+});
+
+ipcMain.on(IPC.IDE_SAVE_WORKSPACE_SYNC, (event, filePath: unknown, payload: unknown) => {
+  try {
+    const data = buildWorkspaceFileFromRenderer(payload);
+    if (!data) {
+      (event as Electron.IpcMainEvent).returnValue = { ok: false, error: "工作区为空" };
+      return;
+    }
+    let targetPath = typeof filePath === "string" && filePath.length > 0 ? filePath : currentIdeWorkspaceFile || "";
+    if (!targetPath) {
+      targetPath = getIdeAutosaveWorkspacePath();
+    }
+    writeWorkspaceFile(targetPath, data);
+    currentIdeWorkspaceFile = targetPath;
+    if (targetPath !== getIdeAutosaveWorkspacePath()) {
+      updateRecentWorkspaces(targetPath);
+    } else {
+      updateLastIdeWorkspaceFile(targetPath);
+    }
+    (event as Electron.IpcMainEvent).returnValue = { ok: true, filePath: targetPath };
+  } catch (err: any) {
+    console.error("[Columbina IDE] sync save workspace failed:", err?.message || err);
+    (event as Electron.IpcMainEvent).returnValue = { ok: false, error: err?.message || "保存失败" };
+  }
+});
+
+ipcMain.handle(IPC.IDE_OPEN_WORKSPACE, async (_event, filePath?: unknown) => {
+  try {
+    let targetPath = typeof filePath === "string" && filePath.length > 0 ? filePath : "";
+    if (!targetPath) {
+      if (!ideWindow || ideWindow.isDestroyed()) return { ok: false, error: "没有可用窗口" };
+      const result = await dialog.showOpenDialog(ideWindow, {
+        properties: ["openFile"],
+        filters: [{ name: "Columbina Workspace", extensions: ["columbina-workspace.json"] }],
+      });
+      if (result.canceled || result.filePaths.length === 0) return { ok: false, error: "用户取消" };
+      targetPath = result.filePaths[0];
+    }
+    const workspace = readWorkspaceFile(targetPath);
+    if (!workspace) return { ok: false, error: "无法读取工作区文件" };
+    currentIdeWorkspaceFile = targetPath;
+    updateRecentWorkspaces(targetPath);
+    if (workspace.bounds && ideWindow && !ideWindow.isDestroyed()) {
+      ideWindow.setBounds(workspace.bounds);
+    }
+    return { ok: true, workspace, filePath: targetPath };
+  } catch (err: any) {
+    console.error("[Columbina IDE] open workspace failed:", err?.message || err);
+    return { ok: false, error: err?.message || "打开失败" };
+  }
+});
+
+ipcMain.handle(IPC.IDE_GET_WORKSPACE_STATE, async () => {
+  const filePath = currentIdeWorkspaceFile || loadGeneralSettings().lastIdeWorkspaceFile;
+  if (filePath && fs.existsSync(filePath)) {
+    const workspace = readWorkspaceFile(filePath);
+    if (workspace) return { workspace, filePath };
+  }
+  const autosave = readWorkspaceFile(getIdeAutosaveWorkspacePath());
+  if (autosave) return { workspace: autosave, filePath: getIdeAutosaveWorkspacePath() };
+  return {};
+});
+
+ipcMain.handle(IPC.IDE_RELOCATE_ROOT, async (_event, oldPath: unknown) => {
+  if (typeof oldPath !== "string" || !ideWindow || ideWindow.isDestroyed()) return null;
+  const result = await dialog.showOpenDialog(ideWindow, { properties: ["openDirectory"] });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
 });
 
 interface IdeSearchResult {
@@ -4173,6 +4454,7 @@ app.whenReady().then(async () => {
 
   // 内置 MCP 自动连接：Playwright (默认关闭,选项控制)
   const initialSettings = loadGeneralSettings();
+  currentIdeWorkspaceFile = initialSettings.lastIdeWorkspaceFile || null;
 
   // 一次性清理已下架的内置 MCP（Firecrawl hosted 等）
   const removed = await pruneMcpServersByIds([...REMOVED_BUILTIN_MCP_IDS]);

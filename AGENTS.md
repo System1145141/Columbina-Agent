@@ -98,17 +98,17 @@
 - Agent 搜索项目文件
 - 所有 Agent 操作都需要用户确认或撤销机制
 
-#### 3.3 Inline Chat / 代码补全
+#### 3.3 Inline Chat / 代码补全 ✅ 已完成
 - 选中代码后呼出 inline 对话框
 - 让 Agent 解释、重构、补全、修复 bug
 - 支持 Accept / Reject / Diff 预览
 
-#### 3.4 项目级上下文
+#### 3.4 项目级上下文 ✅ 已完成
 - 自动索引项目文件摘要（轻量 RAG）
 - Agent 能理解项目结构
 - 结合现有 L0/L1/L2 记忆，Agent 记得用户编码习惯
 
-#### 3.5 与现有系统打通
+#### 3.5 与现有系统打通 ✅ 已完成
 - 复用 `chat` 模块的会话机制
 - 复用 `skills` 限制 Agent 可执行的操作
 - 复用 `plugins` 扩展 Agent 可调用工具
@@ -144,7 +144,9 @@
 | CodeMirror 集成 | `components/lsp-integration.ts` | 将 LSP 能力映射到 CodeMirror 6 扩展：lint、autocomplete、hover tooltip、跳转命令。 |
 | 进程管理 | 主进程启动子进程 | 每种语言对应一个语言服务器进程，按当前打开文件按需启动；项目关闭或 IDE 退出时统一销毁。 |
 
-##### 第一阶段：LSP 基础设施（1-2 周）
+##### 状态：✅ 已完成（第一至第三阶段均已完成）
+
+##### 第一阶段：LSP 基础设施
 
 1. **新增 IPC 通道**
    - `IDE_LSP_START`: 渲染进程 → 主进程，请求启动某语言的语言服务器。
@@ -208,7 +210,7 @@
       ```json
       {
         "typescript": { "command": "typescript-language-server", "args": ["--stdio"] },
-        "python": { "command": "pylsp" }
+        "python": { "command": "pyright-langserver", "args": ["--stdio"] }
       }
       ```
     - 若未配置，按内置映射自动尝试启动常见语言服务器。
@@ -234,9 +236,112 @@
 #### 4.3 Git 集成
 - 分支、提交、diff、日志可视化
 
-#### 4.4 多工作区
-- 同时打开多个文件夹
-- 工作区配置持久化
+#### 4.4 多工作区 ✅ 已完成
+
+##### 目标
+- 支持在单个 IDE 窗口中同时打开多个文件夹（多根工作区），类似 VS Code 的 Multi-root Workspaces。
+- 每个根目录拥有独立的文件树、搜索范围、Git 状态、项目索引和 LSP 进程。
+- 工作区配置持久化，关闭 IDE 后再次打开可恢复上次的工作区。
+
+##### 核心概念
+
+| 概念 | 说明 |
+|------|------|
+| Workspace | 整个 IDE 窗口的工作区，包含一个或多个 Root。 |
+| Root | 工作区中的单个文件夹根目录，对应一个绝对路径。 |
+| Root ID | 每个 Root 的唯一标识，使用路径的规范化字符串或 UUID。 |
+| Workspace File | 可选的持久化文件（`.code-workspace` 风格），保存 Root 列表、窗口尺寸、打开文件等。 |
+
+##### 数据模型变更
+
+1. **`state.ts` 中的 workspace 模型**
+   - 将 `currentFolder: string` 改为 `roots: WorkspaceRoot[]`。
+   - `WorkspaceRoot` 结构：
+     ```ts
+     interface WorkspaceRoot {
+       id: string;
+       path: string;
+       name: string;
+     }
+     ```
+   - 新增 `activeRootId: string` 表示当前选中的根目录（用于新建文件/文件夹的默认位置、命令面板的默认上下文等）。
+   - `tabs` 中的 `filePath` 保持为绝对路径，通过路径前缀判断属于哪个 Root。
+
+2. **工作区配置持久化**
+   - 使用 `electron-store` 或已有的 settings 模块保存最近工作区。
+   - 保存内容：
+     - `roots: WorkspaceRoot[]`
+     - `activeRootId`
+     - 窗口尺寸与位置
+     - 打开的文件路径列表
+     - 展开的文件树目录
+     - 侧边栏/AI/终端面板的显隐状态
+
+##### 第一阶段：数据模型与状态改造（1 周）
+
+1. **改造 `services/state.ts`**
+   - 将 `currentFolder` 替换为 `roots` 和 `activeRootId`。
+   - 添加 `addRoot(path)`、`removeRoot(id)`、`setActiveRoot(id)`、`reorderRoots(...)`。
+   - 保持向后兼容：如果老配置只有 `currentFolder`，启动时自动转换为单 Root 工作区。
+   - 所有依赖 `currentFolder` 的组件和服务改为遍历 `roots` 或根据路径查找对应 Root。
+
+2. **改造 `services/file-service.ts`**
+   - `loadDirectory` 改为接受 Root ID 或路径。
+   - 搜索、项目索引、RAG 支持跨 Root 聚合结果（每个 Root 独立索引，搜索时合并）。
+   - 新建文件/文件夹默认在 `activeRootId` 对应 Root 下。
+
+3. **改造 `components/file-tree.ts`**
+   - 文件树顶部显示多个 Root，每个 Root 可独立展开/折叠。
+   - Root 支持右键：从工作区移除、重命名显示名称、刷新。
+   - 新增"添加文件夹到工作区"按钮。
+
+##### 第二阶段：功能范围改造（1 周）
+
+4. **搜索**
+   - `searchFiles` 同时搜索所有 Root，结果按 Root 分组。
+   - 全局搜索面板支持勾选/取消勾选参与搜索的 Root。
+
+5. **Git**
+   - 每个 Root 独立运行 `git-service` 状态查询。
+   - Git 面板按 Root 分组显示变更文件，每个 Root 有独立的提交输入框。
+   - 提交时自动判断文件属于哪个 Root 并调用对应的 Git 操作。
+
+6. **LSP**
+   - 每个 Root 对应独立的语言服务器进程（同一语言不同 Root 可启动多个进程）。
+   - `lsp-manager.ts` 的 key 从 `languageId` 改为 `rootPath + languageId`。
+   - 文件打开时根据文件路径找到对应 Root 并启动/复用 LSP 进程。
+
+7. **Agent 上下文**
+   - "整个项目"上下文改为聚合所有 Root 的文件列表与索引。
+   - Agent 操作文件时根据绝对路径定位 Root。
+
+##### 第三阶段：持久化与恢复（3-5 天）
+
+8. **工作区保存**
+   - 新增菜单项："保存工作区"、"打开工作区文件"。
+   - 工作区文件格式：`.columbina-workspace.json`。
+   - 自动保存当前工作区到应用级 settings 的 `recentWorkspaces`。
+
+9. **启动恢复**
+   - IDE 启动时读取上次工作区配置，恢复 Root 列表、打开的文件、展开目录、面板状态。
+   - 如果某个 Root 路径已不存在，标记为"缺失"但保留在列表中，等待用户重新定位或删除。
+
+##### 验收标准
+
+- 能同时打开 2 个以上文件夹并在文件树中并列显示。
+- 搜索、Git、LSP 能正确按 Root 隔离或聚合。
+- 新建文件默认落在当前激活 Root。
+- 关闭并重新打开 IDE 后恢复上次工作区。
+- 单 Root 工作区行为与之前完全一致（向后兼容）。
+- `npm run build` 通过。
+
+##### 风险与注意事项
+
+- **状态模型改动面大**：`currentFolder` 被广泛使用，需要逐个检查所有 services 和 components。
+- **LSP 进程倍增**：多 Root 意味着更多语言服务器进程，需要限制最大进程数并妥善销毁。
+- **路径解析歧义**：不同 Root 下可能存在同名文件，所有显示都应使用绝对路径或带 Root 前缀的相对路径。
+- **Git 仓库嵌套**：某个 Root 可能是另一个 Root 的子目录，需要避免重复扫描和状态冲突。
+- **向后兼容**：必须保证升级后老用户的单文件夹工作区能正常加载。
 
 #### 4.5 性能优化
 - 大文件懒加载
@@ -420,11 +525,11 @@ src/renderer/ide/
 
 ## 7. 下一步行动
 
-立即进入 **阶段 1**，优先完成：
+阶段 1、2、3 已完成，阶段 4.2 LSP 支持已完成。接下来进入 **阶段 4.3 Git 集成**，优先完成：
 
-1. 修复 dev 模式端口硬编码问题。
-2. 实现文件树展开/折叠与右键菜单。
-3. 实现顶部标签栏。
-4. 实现保存逻辑与未保存提示。
+1. 在状态栏显示当前分支名与 Git 状态（clean / modified / ahead / behind）。
+2. 在侧边栏新增 Git 面板，展示变更文件列表（已修改、已暂存、未跟踪）。
+3. 支持点击文件查看 diff，并勾选/取消暂存。
+4. 提供提交输入框与"提交"按钮。
 
-完成以上四项后，Columbina-IDE 即可作为日常轻量编辑器使用。
+完成后 Columbina-IDE 将具备基础 Git 工作流支持。

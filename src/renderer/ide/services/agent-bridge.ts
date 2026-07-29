@@ -16,7 +16,7 @@ import {
   normalizeLineEndings,
   encodeLineEndings,
   detectLineEnding,
-  collectProjectContext,
+  collectProjectContextAcrossRoots,
 } from "./file-service";
 
 let runCommandInTerminalImpl: ((command: string) => Promise<void>) | null = null;
@@ -129,11 +129,22 @@ export async function executeAction(action: AgentAction): Promise<AgentActionRes
       return { actionId: action.id, ok: false, error: result.error || "写入失败" };
     }
     case "search_files": {
-      if (!action.query || !state.currentFolder) return { actionId: action.id, ok: false, error: "缺少 query 或项目文件夹" };
+      if (!action.query) return { actionId: action.id, ok: false, error: "缺少 query" };
+      if (state.roots.length === 0) return { actionId: action.id, ok: false, error: "当前没有打开项目文件夹" };
       try {
-        const results = await searchFiles(state.currentFolder, action.query, { maxResults: 20 });
-        if (results.length === 0) return { actionId: action.id, ok: true, output: "未找到匹配结果" };
-        const lines = results.map((r) => `${r.filePath}:${r.line}:${r.column}  ${r.text.trim()}`);
+        const allResults: { root: string; results: import("./state").IdeSearchResult[] }[] = [];
+        for (const root of state.roots) {
+          const results = await searchFiles(root.path, action.query, { maxResults: 20 });
+          if (results.length > 0) allResults.push({ root: root.name, results });
+        }
+        if (allResults.length === 0) return { actionId: action.id, ok: true, output: "未找到匹配结果" };
+        const lines: string[] = [];
+        for (const group of allResults) {
+          lines.push(`[${group.root}]`);
+          for (const r of group.results) {
+            lines.push(`  ${r.filePath}:${r.line}:${r.column}  ${r.text.trim()}`);
+          }
+        }
         return { actionId: action.id, ok: true, output: lines.join("\n") };
       } catch (err) {
         return { actionId: action.id, ok: false, error: `搜索失败: ${String(err)}` };
@@ -229,9 +240,8 @@ export async function buildAiContext(scope: AiContextScope, query?: string): Pro
   }
 
   if (scope === "project") {
-    if (state.currentFolder) {
-      parts.push(`当前打开的项目文件夹: ${state.currentFolder}`);
-      parts.push(await collectProjectContext(state.currentFolder, query));
+    if (state.roots.length > 0) {
+      parts.push(await collectProjectContextAcrossRoots(query));
     } else {
       parts.push("（当前没有打开项目文件夹）");
     }

@@ -1,7 +1,7 @@
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import { state } from "../services/state";
+import { state, getActiveRootPath } from "../services/state";
 import { registerTerminalToggle } from "../services/layout";
 import { registerRunCommandInTerminal } from "../services/agent-bridge";
 
@@ -64,7 +64,7 @@ async function ensureTerminal() {
   state.fitAddon = fit;
 
   try {
-    state.terminalId = (await window.ide?.createTerminal(state.currentFolder || undefined)) ?? null;
+    state.terminalId = (await window.ide?.createTerminal(getActiveRootPath() || undefined)) ?? null;
     fitTerminal();
   } catch (err) {
     term.writeln(`\r\n[创建终端失败: ${String(err)}]`);
@@ -79,13 +79,13 @@ function fitTerminal() {
   }
 }
 
-function showTerminalPanel() {
+export function showTerminalPanel() {
   state.terminalVisible = true;
   terminalPanelEl.style.display = "flex";
   void ensureTerminal();
 }
 
-function hideTerminalPanel() {
+export function hideTerminalPanel() {
   state.terminalVisible = false;
   terminalPanelEl.style.display = "none";
 }

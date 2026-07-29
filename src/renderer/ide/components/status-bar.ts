@@ -1,22 +1,42 @@
 import { diagnosticCount } from "@codemirror/lint";
-import { state, subscribe, getLspDiagnostics } from "../services/state";
+import { state, subscribe, getLspDiagnostics, getGitStatusForRoot, getActiveRoot } from "../services/state";
 import { getFileExtension, lineEndingLabel } from "../services/file-service";
 
 const statusLeftEl = document.getElementById("status-left") as HTMLElement;
 const statusRightEl = document.getElementById("status-right") as HTMLElement;
 
+function buildGitSummary(gitStatus: import("../services/state").GitStatus): string {
+  const parts: string[] = [gitStatus.branch];
+  if (gitStatus.ahead > 0) parts.push(`${gitStatus.ahead}↑`);
+  if (gitStatus.behind > 0) parts.push(`${gitStatus.behind}↓`);
+  const changes = gitStatus.modified.length + gitStatus.staged.length + gitStatus.untracked.length + gitStatus.conflicted.length;
+  if (changes > 0) {
+    parts.push(`${changes} 修改`);
+  } else {
+    parts.push("clean");
+  }
+  return parts.join(" · ");
+}
+
 function renderStatusBar() {
   const tab = state.activeTabId ? state.tabs.get(state.activeTabId) : null;
+  const activeRoot = getActiveRoot();
+  const gitStatus = activeRoot ? getGitStatusForRoot(activeRoot.id) : null;
 
   if (state.statusMessage || state.lspStatusMessage) {
     statusLeftEl.textContent = state.statusMessage || state.lspStatusMessage;
-  } else if (!tab) {
-    statusLeftEl.textContent = "就绪";
   } else {
     const leftParts: string[] = [];
-    leftParts.push(tab.filePath);
-    if (tab.modified) {
-      leftParts.push("已修改");
+    if (gitStatus?.branch) {
+      leftParts.push(buildGitSummary(gitStatus));
+    }
+    if (tab) {
+      leftParts.push(tab.filePath);
+      if (tab.modified) {
+        leftParts.push("已修改");
+      }
+    } else if (leftParts.length === 0) {
+      leftParts.push("就绪");
     }
     statusLeftEl.textContent = leftParts.join("  ·  ");
   }

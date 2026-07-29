@@ -141,6 +141,12 @@ html, body, .ide {
   background: #3e3e42;
 }
 
+.ide__sidebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 /* Search panel */
 .ide__search {
   flex: 1;
@@ -185,6 +191,41 @@ html, body, .ide {
   margin: 0;
 }
 
+.ide__search-roots {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ide__search-roots-label {
+  font-size: 11px;
+  color: #bbbbbb;
+}
+
+.ide__search-roots-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ide__search-root-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #cccccc;
+  cursor: pointer;
+}
+
+.ide__search-root-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: #9cdcfe;
+  padding: 6px 0 2px;
+  border-bottom: 1px solid #3e3e42;
+  margin-bottom: 4px;
+}
+
 .ide__search-back {
   background: transparent;
   border: none;
@@ -203,6 +244,354 @@ html, body, .ide {
   flex: 1;
   overflow: auto;
   margin-top: 4px;
+}
+
+/* Git panel */
+.ide__git {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 8px;
+  gap: 8px;
+}
+
+.ide__git-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ide__git-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ide__git-branch {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide__git-ahead-behind {
+  font-size: 11px;
+  color: #858585;
+}
+
+.ide__git-refresh {
+  background: transparent;
+  border: none;
+  color: #bbbbbb;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.ide__git-refresh:hover {
+  background: #3e3e42;
+}
+
+.ide__git-roots {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ide__git-root {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #3e3e42;
+}
+
+.ide__git-root-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ide__git-root-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ide__git-root-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide__git-root-branch {
+  font-size: 11px;
+  color: #858585;
+}
+
+.ide__git-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+}
+
+.ide__git-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #bbbbbb;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  user-select: none;
+}
+
+.ide__git-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: auto;
+  max-height: 120px;
+}
+
+.ide__git-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: 3px;
+  cursor: default;
+}
+
+.ide__git-file:hover {
+  background: #37373d;
+}
+
+.ide__git-file input[type="checkbox"] {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.ide__git-file-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: #cccccc;
+  cursor: pointer;
+}
+
+.ide__git-file-status {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.ide__git-file-status--staged {
+  background: rgba(137, 209, 133, 0.15);
+  color: #89d185;
+}
+
+.ide__git-file-status--modified {
+  background: rgba(204, 167, 0, 0.15);
+  color: #cca700;
+}
+
+.ide__git-file-status--untracked {
+  background: rgba(117, 190, 255, 0.15);
+  color: #75beff;
+}
+
+.ide__git-file-status--conflicted {
+  background: rgba(244, 135, 113, 0.15);
+  color: #f48771;
+}
+
+.ide__git-empty {
+  color: #858585;
+  font-size: 12px;
+  padding: 4px 0;
+}
+
+.ide__git-commit {
+  display: flex;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.ide__git-commit-input {
+  flex: 1;
+  padding: 5px 8px;
+  background: #3c3c3c;
+  border: 1px solid #3e3e42;
+  color: #cccccc;
+  border-radius: 3px;
+  font-size: 12px;
+  outline: none;
+}
+
+.ide__git-commit-input:focus {
+  border-color: #007acc;
+}
+
+.ide__git-commit-btn {
+  background: #238636;
+  color: #ffffff;
+  border: none;
+  border-radius: 3px;
+  padding: 0 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ide__git-commit-btn:hover:not(:disabled) {
+  background: #2ea043;
+}
+
+.ide__git-commit-btn:disabled {
+  background: #3e3e42;
+  color: #858585;
+  cursor: not-allowed;
+}
+
+.ide__git-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #858585;
+  font-size: 12px;
+  padding: 4px 0;
+}
+
+.ide__git-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #3e3e42;
+  border-top-color: #007acc;
+  border-radius: 50%;
+  animation: ide-ai-spin 1s linear infinite;
+}
+
+.ide__git-diff {
+  flex: 1;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  background: #1e1e1e;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.ide__git-diff-header {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  background: #2d2d30;
+  border-bottom: 1px solid #3e3e42;
+  flex-shrink: 0;
+}
+
+.ide__git-diff-path {
+  font-size: 11px;
+  color: #cccccc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.ide__git-diff-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ide__git-diff-open {
+  background: transparent;
+  border: none;
+  color: #9cdcfe;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.ide__git-diff-open:hover {
+  background: #3e3e42;
+}
+
+.ide__git-diff-close {
+  width: 18px;
+  height: 18px;
+  background: transparent;
+  border: none;
+  color: #bbbbbb;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 14px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ide__git-diff-close:hover {
+  background: #3e3e42;
+  color: #ffffff;
+}
+
+.ide__git-diff-content {
+  flex: 1;
+  overflow: auto;
+  padding: 8px;
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.ide__git-diff-line {
+  padding: 0 4px;
+}
+
+.ide__git-diff-line--add {
+  background: rgba(35, 134, 54, 0.2);
+  color: #89d185;
+}
+
+.ide__git-diff-line--del {
+  background: rgba(244, 135, 113, 0.2);
+  color: #f48771;
+}
+
+.ide__git-diff-line--info {
+  color: #75beff;
+}
+
+.ide__git-diff-empty {
+  color: #858585;
+  font-size: 12px;
+  padding: 8px 0;
+  text-align: center;
 }
 
 .ide__search-empty {
@@ -1444,6 +1833,67 @@ html, body, .ide {
 
 .ide.ide--light .ide__prompt-btn--primary:hover {
   background: #0062a3;
+}
+
+/* Git panel light theme */
+.ide.ide--light .ide__git-branch {
+  color: #333333;
+}
+
+.ide.ide--light .ide__git-ahead-behind,
+.ide.ide--light .ide__git-empty,
+.ide.ide--light .ide__git-diff-empty,
+.ide.ide--light .ide__git-loading {
+  color: #666666;
+}
+
+.ide.ide--light .ide__git-refresh,
+.ide.ide--light .ide__git-diff-close {
+  color: #666666;
+}
+
+.ide.ide--light .ide__git-refresh:hover,
+.ide.ide--light .ide__git-diff-close:hover,
+.ide.ide--light .ide__git-file:hover {
+  background: #e8e8e8;
+}
+
+.ide.ide--light .ide__git-section-title {
+  color: #666666;
+}
+
+.ide.ide--light .ide__git-file-label {
+  color: #333333;
+}
+
+.ide.ide--light .ide__git-commit-input {
+  background: #ffffff;
+  border-color: #e5e5e5;
+  color: #333333;
+}
+
+.ide.ide--light .ide__git-commit-btn:disabled {
+  background: #e5e5e5;
+  color: #999999;
+}
+
+.ide.ide--light .ide__git-diff {
+  background: #ffffff;
+  border-color: #e5e5e5;
+}
+
+.ide.ide--light .ide__git-diff-header {
+  background: #f3f3f3;
+  border-color: #e5e5e5;
+}
+
+.ide.ide--light .ide__git-diff-path,
+.ide.ide--light .ide__git-diff-content {
+  color: #333333;
+}
+
+.ide.ide--light .ide__git-diff-open:hover {
+  background: #e8e8e8;
 }
 
 /* LSP hover tooltip */
