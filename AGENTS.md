@@ -208,7 +208,7 @@
       ```json
       {
         "typescript": { "command": "typescript-language-server", "args": ["--stdio"] },
-        "python": { "command": "pylsp" }
+        "python": { "command": "pyright-langserver", "args": ["--stdio"] }
       }
       ```
     - 若未配置，按内置映射自动尝试启动常见语言服务器。

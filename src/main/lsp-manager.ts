@@ -31,7 +31,7 @@ const defaultLspCommands: Record<string, LspServerConfig> = {
   scss: { command: "vscode-css-languageserver", args: ["--stdio"] },
   less: { command: "vscode-css-languageserver", args: ["--stdio"] },
   html: { command: "vscode-html-languageserver", args: ["--stdio"] },
-  python: { command: "pylsp", args: [] },
+  python: { command: "pyright-langserver", args: ["--stdio"] },
 };
 
 function getLanguageIdFromFile(filePath: string): string {
