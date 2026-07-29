@@ -7,6 +7,7 @@ import { initFileTree } from "./components/file-tree";
 import { initCommandPalette } from "./components/command-palette";
 import { initAiPanel } from "./components/ai-panel";
 import { initTerminalPanel } from "./components/terminal-panel";
+import { initGitPanel } from "./components/git-panel";
 
 function initWindowControls(): void {
   document.getElementById("min-btn")?.addEventListener("click", () => window.ide?.minimize());
@@ -55,6 +56,7 @@ function init(): void {
   initCommandPalette();
   initAiPanel();
   initTerminalPanel();
+  initGitPanel();
 
   void loadIdeSettings();
 }

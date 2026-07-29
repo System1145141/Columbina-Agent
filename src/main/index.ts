@@ -43,6 +43,7 @@ import { normalizeWindowVisibilitySettings } from "./window-visibility-settings"
 import type { StickerConfigItem } from "../shared/sticker-types";
 import { initReranker, getRerankerInstallStatus } from "./rag/reranker";
 import { setupLspIpc } from "./lsp-manager";
+import { setupGitIpc } from "./git-service";
 import { memoryStore } from "./memory/memory-store"
 import type { L0Profile, L1Profile } from "./memory/memory-types";
 import { registerChatsIpc } from "./chats/chats-ipc";
@@ -2908,6 +2909,7 @@ ipcMain.handle(IPC.IDE_MOVE, async (_event, sourcePath: unknown, targetDir: unkn
 });
 
 setupLspIpc();
+setupGitIpc();
 
 ipcMain.handle(IPC.IDE_GET_MEMORY_CONTEXT, async (_event, query: unknown) => {
   try {

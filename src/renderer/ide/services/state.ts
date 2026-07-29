@@ -84,6 +84,17 @@ export interface InlineChatSuggestion {
   explanation: string;
 }
 
+export interface GitStatus {
+  branch: string;
+  ahead: number;
+  behind: number;
+  modified: string[];
+  staged: string[];
+  untracked: string[];
+  conflicted: string[];
+  clean: boolean;
+}
+
 export interface InlineChatState {
   open: boolean;
   from: number;
@@ -158,6 +169,12 @@ export const state = {
   statusMessage: "" as string,
   lspDiagnostics: new Map<string, LspDiagnostic[]>(),
   lspStatusMessage: "" as string,
+
+  gitStatus: null as GitStatus | null,
+  gitPanelVisible: false,
+  gitSelectedFile: null as { path: string; staged: boolean } | null,
+  gitDiff: "" as string,
+  gitLoading: false,
 };
 
 type Listener = () => void;
@@ -225,6 +242,10 @@ export function setCurrentFolder(folder: string): void {
   state.currentFolder = folder;
 }
 
+export function setGitStatus(status: GitStatus | null): void {
+  state.gitStatus = status;
+}
+
 export function setTreeRoot(entries: IdeDirEntry[]): void {
   state.treeRoot = entries;
 }
@@ -283,6 +304,13 @@ declare global {
       killTerminal: (id: string) => void;
       onTerminalData: (callback: (payload: { id: string; data: string }) => void) => () => void;
       onTerminalExit: (callback: (payload: { id: string; exitCode?: number }) => void) => () => void;
+      getGitStatus: (folderPath: string) => Promise<GitStatus>;
+      getGitDiff: (folderPath: string, filePath: string, staged?: boolean) => Promise<string>;
+      stageGitFile: (folderPath: string, filePath: string) => Promise<{ ok: boolean; error?: string }>;
+      unstageGitFile: (folderPath: string, filePath: string) => Promise<{ ok: boolean; error?: string }>;
+      commitGit: (folderPath: string, message: string) => Promise<{ ok: boolean; error?: string }>;
+      getGitBranch: (folderPath: string) => Promise<string>;
+      getGitLog: (folderPath: string, maxCount?: number) => Promise<{ hash: string; message: string; author: string; date: string }[]>;
     };
     settings?: {
       getGeneral: () => Promise<Record<string, unknown>>;

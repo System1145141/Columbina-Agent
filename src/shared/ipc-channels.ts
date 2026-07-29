@@ -243,6 +243,14 @@ export const IPC = {
   IDE_LSP_NOTIFY: "ide:lsp-notify",           // LSP JSON-RPC notification
   IDE_LSP_DATA: "ide:lsp-data",               // 主进程 → 渲染进程：LSP 响应/通知
 
+  IDE_GIT_STATUS: "ide:git-status",           // 获取 Git 工作区状态
+  IDE_GIT_DIFF: "ide:git-diff",               // 获取文件 diff
+  IDE_GIT_STAGE: "ide:git-stage",             // 暂存文件
+  IDE_GIT_UNSTAGE: "ide:git-unstage",         // 取消暂存
+  IDE_GIT_COMMIT: "ide:git-commit",           // 提交
+  IDE_GIT_BRANCH: "ide:git-branch",           // 获取当前分支
+  IDE_GIT_LOG: "ide:git-log",                 // 获取提交日志
+
   // call window (voice call)
   CALL_OPEN: "call:open",                 // sidebar → main：打开通话窗口
   CALL_START: "call:start",               // renderer → main：开始通话（初始化 ASR）

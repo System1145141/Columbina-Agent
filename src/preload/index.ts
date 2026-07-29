@@ -189,6 +189,17 @@ const ideApi = {
     ipcRenderer.on(IPC.IDE_TERMINAL_EXIT, listener);
     return () => ipcRenderer.off(IPC.IDE_TERMINAL_EXIT, listener);
   },
+  getGitStatus: (folderPath: string) => ipcRenderer.invoke(IPC.IDE_GIT_STATUS, folderPath),
+  getGitDiff: (folderPath: string, filePath: string, staged?: boolean) =>
+    ipcRenderer.invoke(IPC.IDE_GIT_DIFF, folderPath, filePath, staged),
+  stageGitFile: (folderPath: string, filePath: string) =>
+    ipcRenderer.invoke(IPC.IDE_GIT_STAGE, folderPath, filePath),
+  unstageGitFile: (folderPath: string, filePath: string) =>
+    ipcRenderer.invoke(IPC.IDE_GIT_UNSTAGE, folderPath, filePath),
+  commitGit: (folderPath: string, message: string) =>
+    ipcRenderer.invoke(IPC.IDE_GIT_COMMIT, folderPath, message),
+  getGitBranch: (folderPath: string) => ipcRenderer.invoke(IPC.IDE_GIT_BRANCH, folderPath),
+  getGitLog: (folderPath: string, maxCount?: number) => ipcRenderer.invoke(IPC.IDE_GIT_LOG, folderPath, maxCount),
 };
 contextBridge.exposeInMainWorld("ide", ideApi);
 
