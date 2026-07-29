@@ -16,7 +16,7 @@ interface LspSession {
   workspacePath: string;
   requestId: number;
   pending: Map<number, { resolve: (value: unknown) => void; reject: (reason?: unknown) => void }>;
-  buffer: string;
+  buffer: Buffer;
   closed: boolean;
 }
 
@@ -105,26 +105,30 @@ function sendJsonRpc(session: LspSession, message: unknown): void {
 }
 
 function handleSessionData(session: LspSession, chunk: Buffer): void {
-  session.buffer += chunk.toString("utf8");
+  // 累积为字节序列，避免在多字节 UTF-8 字符处跨界导致 JSON 解析错位
+  session.buffer = session.buffer.length === 0 ? chunk : Buffer.concat([session.buffer, chunk]);
+
+  // 头部定界符 "\r\n\r\n" 的字节表示
+  const HEADER_DELIM = Buffer.from("\r\n\r\n");
 
   while (true) {
-    const headerEnd = session.buffer.indexOf("\r\n\r\n");
+    const headerEnd = session.buffer.indexOf(HEADER_DELIM);
     if (headerEnd === -1) break;
 
-    const header = session.buffer.slice(0, headerEnd);
+    const header = session.buffer.subarray(0, headerEnd).toString("utf8");
     const contentLength = parseHeaderLength(header);
     if (contentLength === null) {
-      // Malformed header, drop up to next double CRLF
-      session.buffer = session.buffer.slice(headerEnd + 4);
+      // 头部解析失败，丢弃到下一个分隔符后重试
+      session.buffer = session.buffer.subarray(headerEnd + HEADER_DELIM.length);
       continue;
     }
 
-    const messageStart = headerEnd + 4;
+    const messageStart = headerEnd + HEADER_DELIM.length;
     const messageEnd = messageStart + contentLength;
     if (session.buffer.length < messageEnd) break;
 
-    const raw = session.buffer.slice(messageStart, messageEnd);
-    session.buffer = session.buffer.slice(messageEnd);
+    const raw = session.buffer.subarray(messageStart, messageEnd).toString("utf8");
+    session.buffer = session.buffer.subarray(messageEnd);
 
     try {
       const message = JSON.parse(raw) as { id?: number; method?: string; params?: unknown; result?: unknown; error?: unknown };
@@ -187,7 +191,7 @@ async function startLanguageServer(languageId: string, workspacePath: string): P
       workspacePath,
       requestId: 0,
       pending: new Map(),
-      buffer: "",
+      buffer: Buffer.alloc(0),
       closed: false,
     };
 
