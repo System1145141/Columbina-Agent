@@ -1,5 +1,5 @@
 import { ipcMain } from "electron";
-import { exec } from "child_process";
+import { spawn } from "child_process";
 import * as path from "path";
 import { IPC } from "../shared/ipc-channels";
 
@@ -32,22 +32,53 @@ function execGit(
   options: { timeout?: number; maxBuffer?: number } = {}
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve) => {
-    const command = ["git", ...args].map((a) => (a.includes(" ") ? `"${a.replace(/"/g, "\\\"")}"` : a)).join(" ");
-    exec(
-      command,
-      {
-        cwd: folderPath,
-        timeout: options.timeout ?? 30_000,
-        maxBuffer: options.maxBuffer ?? 1024 * 1024,
-      },
-      (error, stdout, stderr) => {
-        resolve({
-          stdout: stdout ?? "",
-          stderr: stderr ?? "",
-          exitCode: typeof error?.code === "number" ? error.code : 1,
-        });
+    const maxBuffer = options.maxBuffer ?? 1024 * 1024;
+    const timeout = options.timeout ?? 30_000;
+
+    const child = spawn("git", args, {
+      cwd: folderPath,
+      shell: false,
+      timeout,
+    });
+
+    let stdout = "";
+    let stderr = "";
+    let killedByBufferLimit = false;
+
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+
+    child.stdout?.on("data", (chunk: string) => {
+      stdout += chunk;
+      if (Buffer.byteLength(stdout) + Buffer.byteLength(stderr) > maxBuffer) {
+        killedByBufferLimit = true;
+        child.kill();
       }
-    );
+    });
+
+    child.stderr?.on("data", (chunk: string) => {
+      stderr += chunk;
+      if (Buffer.byteLength(stdout) + Buffer.byteLength(stderr) > maxBuffer) {
+        killedByBufferLimit = true;
+        child.kill();
+      }
+    });
+
+    child.on("error", (err) => {
+      resolve({
+        stdout,
+        stderr: stderr || err.message,
+        exitCode: 1,
+      });
+    });
+
+    child.on("close", (code) => {
+      resolve({
+        stdout,
+        stderr: killedByBufferLimit ? "输出超过最大缓冲区" : stderr,
+        exitCode: typeof code === "number" ? code : 1,
+      });
+    });
   });
 }
 
