@@ -556,11 +556,12 @@ function applySearchReplace(original: string, blocks: SearchReplaceBlock[]): { m
   const errors: string[] = [];
 
   for (const block of blocks) {
-    if (!modified.includes(block.search)) {
+    const index = modified.indexOf(block.search);
+    if (index === -1) {
       errors.push(`未找到匹配文本:\n${block.search.slice(0, 120)}`);
       continue;
     }
-    modified = modified.replace(block.search, block.replace);
+    modified = modified.slice(0, index) + block.replace + modified.slice(index + block.search.length);
   }
 
   return { modified, errors };
