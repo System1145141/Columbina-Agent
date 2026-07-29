@@ -1,6 +1,7 @@
 import {
   state,
   notify,
+  subscribe,
   addTab,
   setActiveTab,
   closeTabState,
