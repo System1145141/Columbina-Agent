@@ -41,160 +41,46 @@ const promptCancelBtn = document.getElementById("prompt-cancel-btn") as HTMLButt
 let treeContextMenu: HTMLElement | null = null;
 let lastRootsKey = "";
 
-function createTreeItem(entry: IdeDirEntry, level = 0): HTMLElement {
-  const item = document.createElement("div");
-  item.className = "ide__tree-item";
-  item.dataset.path = entry.path;
-  item.dataset.isdir = String(entry.isDirectory);
+const TREE_ITEM_HEIGHT = 22;
+const TREE_VIRTUAL_BUFFER = 15;
+let visibleTreeItems: { entry: IdeDirEntry; level: number }[] = [];
+const loadingDirs = new Set<string>();
 
-  const root = entry.isDirectory ? state.roots.find((r) => r.path === entry.path) : undefined;
-  const isMissingRoot = !!root?.missing;
-
-  const row = document.createElement("div");
-  row.className = "ide__tree-row" + (isMissingRoot ? " ide__tree-row--missing" : "");
-  row.style.paddingLeft = `${level * 12 + 4}px`;
-  row.draggable = true;
-
-  const toggle = document.createElement("span");
-  toggle.className = "ide__tree-toggle";
-  toggle.textContent = entry.isDirectory ? (state.expandedDirs.has(entry.path) ? "▾" : "▸") : " ";
-
-  const icon = document.createElement("span");
-  icon.className = "ide__tree-icon";
-  if (entry.isDirectory) {
-    icon.classList.add("ide__tree-icon--folder");
-    icon.textContent = state.expandedDirs.has(entry.path) ? "📂" : "📁";
-  } else {
-    icon.classList.add("ide__tree-icon--file", `ide__tree-icon--${getFileIconClass(entry.path)}`);
-    icon.textContent = "📄";
+function findTreeEntry(dirPath: string, entries = state.treeRoot): IdeDirEntry | undefined {
+  for (const entry of entries) {
+    if (entry.path === dirPath) return entry;
+    if (entry.children) {
+      const found = findTreeEntry(dirPath, entry.children);
+      if (found) return found;
+    }
   }
+  return undefined;
+}
 
-  const label = document.createElement("span");
-  label.className = "ide__tree-label";
-  label.textContent = entry.name + (isMissingRoot ? " (路径缺失)" : "");
-  label.title = entry.path;
-
-  row.appendChild(toggle);
-  row.appendChild(icon);
-  row.appendChild(label);
-  item.appendChild(row);
-
-  row.addEventListener("dragstart", (e) => {
-    e.stopPropagation();
-    e.dataTransfer?.setData("text/plain", entry.path);
-    e.dataTransfer?.setData("ide/path", entry.path);
-    e.dataTransfer?.setData("ide/isDirectory", String(entry.isDirectory));
-    if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
-    row.classList.add("is-dragging");
-  });
-  row.addEventListener("dragend", () => {
-    row.classList.remove("is-dragging");
-    document.querySelectorAll(".ide__tree-row.is-drop-target").forEach((el) => el.classList.remove("is-drop-target"));
-  });
-
-  if (entry.isDirectory) {
-    const childrenContainer = document.createElement("div");
-    childrenContainer.className = "ide__tree-children";
-    childrenContainer.style.display = state.expandedDirs.has(entry.path) ? "block" : "none";
-    item.appendChild(childrenContainer);
-
-    row.addEventListener("click", async () => {
-      if (isMissingRoot) {
-        state.statusMessage = "根目录路径缺失，请右键选择“重新定位文件夹”";
-        notify();
-        return;
-      }
-      const isExpanded = state.expandedDirs.has(entry.path);
-      if (isExpanded) {
-        state.expandedDirs.delete(entry.path);
-        childrenContainer.style.display = "none";
-        toggle.textContent = "▸";
-        icon.textContent = "📁";
-      } else {
-        state.expandedDirs.add(entry.path);
-        childrenContainer.style.display = "block";
-        toggle.textContent = "▾";
-        icon.textContent = "📂";
-        if (!item.dataset.loaded) {
-          item.dataset.loaded = "true";
-          try {
-            const children = await readDir(entry.path);
-            for (const child of children) {
-              childrenContainer.appendChild(createTreeItem(child, level + 1));
-            }
-          } catch (err) {
-            label.textContent += " (加载失败)";
-          }
-        }
-      }
-    });
-
-    row.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-      row.classList.add("is-drop-target");
-    });
-    row.addEventListener("dragleave", () => {
-      row.classList.remove("is-drop-target");
-    });
-    row.addEventListener("drop", async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      row.classList.remove("is-drop-target");
-      const sourcePath = e.dataTransfer?.getData("ide/path");
-      if (!sourcePath || sourcePath === entry.path) return;
-      const result = await move(sourcePath, entry.path);
-      if (!result.ok) {
-        state.statusMessage = `移动失败: ${result.error || "未知错误"}`;
-        notify();
-        return;
-      }
-      await refreshTreeItem(entry.path);
-      const sourceDir = parentDir(sourcePath);
-      if (sourceDir && sourceDir !== entry.path) {
-        await refreshTreeItem(sourceDir);
-      }
-    });
-  } else {
-    row.addEventListener("click", () => void openFile(entry.path));
+function getVisibleTreeItems(entries = state.treeRoot, level = 0): { entry: IdeDirEntry; level: number }[] {
+  const result: { entry: IdeDirEntry; level: number }[] = [];
+  for (const entry of entries) {
+    result.push({ entry, level });
+    if (entry.isDirectory && state.expandedDirs.has(entry.path) && entry.children) {
+      result.push(...getVisibleTreeItems(entry.children, level + 1));
+    }
   }
-
-  row.addEventListener("contextmenu", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    showTreeContextMenu(e.clientX, e.clientY, entry);
-  });
-
-  return item;
+  return result;
 }
 
 export async function refreshTreeItem(dirPath: string): Promise<void> {
   if (state.roots.length === 0) return;
-  const item = document.querySelector(`.ide__tree-item[data-path="${CSS.escape(dirPath)}"]`) as HTMLElement | null;
-  if (!item) return;
-  const childrenContainer = item.querySelector(".ide__tree-children") as HTMLElement | null;
-  if (!childrenContainer) return;
+  const entry = findTreeEntry(dirPath);
+  if (!entry || !entry.isDirectory) return;
 
-  item.dataset.loaded = "true";
   state.expandedDirs.add(dirPath);
-  childrenContainer.style.display = "block";
-  childrenContainer.innerHTML = "";
-
-  const toggle = item.querySelector(".ide__tree-toggle") as HTMLElement | null;
-  const icon = item.querySelector(".ide__tree-icon") as HTMLElement | null;
-  if (toggle) toggle.textContent = "▾";
-  if (icon) icon.textContent = "📂";
-
   try {
-    const children = await readDir(dirPath);
-    const row = item.querySelector(".ide__tree-row") as HTMLElement | null;
-    const level = Math.max(0, (row?.style.paddingLeft ? parseInt(row.style.paddingLeft, 10) / 12 : 0));
-    for (const child of children) {
-      childrenContainer.appendChild(createTreeItem(child, level + 1));
-    }
+    entry.children = await readDir(dirPath);
   } catch (err) {
-    childrenContainer.innerHTML = `<div style="padding:4px 12px;color:#858585">刷新失败: ${String(err)}</div>`;
+    entry.children = [];
+    state.statusMessage = `刷新失败: ${String(err)}`;
   }
+  notify();
 }
 
 function showTreeContextMenu(x: number, y: number, entry: IdeDirEntry) {
@@ -355,26 +241,177 @@ async function confirmDelete(entry: IdeDirEntry) {
 
 function renderTree() {
   const rootsKey = state.roots.map((r) => r.id).join("|");
-  if (lastRootsKey === rootsKey && treeRootEl.children.length > 0 && state.treeRoot.length > 0) {
-    // Only full rebuild when roots change or treeRoot is empty
-    highlightCurrentFileInTree();
-    return;
+  if (lastRootsKey !== rootsKey) {
+    lastRootsKey = rootsKey;
   }
 
-  lastRootsKey = rootsKey;
-  treeRootEl.innerHTML = "";
   folderPathEl.textContent = state.workspaceFilePath
     ? basename(state.workspaceFilePath)
     : getActiveRootPath();
 
-  if (state.statusMessage && state.statusMessage.startsWith("加载")) {
-    // Loading state handled by status bar
-  }
+  renderVirtualTree();
+}
 
-  for (const entry of state.treeRoot) {
-    treeRootEl.appendChild(createTreeItem(entry));
+function updateVisibleRange() {
+  if (visibleTreeItems.length === 0) return;
+  const scrollTop = treeRootEl.scrollTop;
+  const containerHeight = treeRootEl.clientHeight || 600;
+  const startIndex = Math.max(0, Math.floor(scrollTop / TREE_ITEM_HEIGHT) - TREE_VIRTUAL_BUFFER);
+  const endIndex = Math.min(visibleTreeItems.length, Math.ceil((scrollTop + containerHeight) / TREE_ITEM_HEIGHT) + TREE_VIRTUAL_BUFFER);
+  const container = treeRootEl.querySelector(".ide__tree-scroll-container") as HTMLElement | null;
+  if (container) {
+    renderVirtualTreeSlice(container, startIndex, endIndex);
   }
   highlightCurrentFileInTree();
+}
+
+function renderVirtualTree() {
+  treeRootEl.innerHTML = "";
+  visibleTreeItems = getVisibleTreeItems();
+  const totalHeight = visibleTreeItems.length * TREE_ITEM_HEIGHT;
+
+  const scrollContainer = document.createElement("div");
+  scrollContainer.className = "ide__tree-scroll-container";
+  scrollContainer.style.position = "relative";
+  scrollContainer.style.height = `${totalHeight}px`;
+  scrollContainer.style.minHeight = `${totalHeight}px`;
+  treeRootEl.appendChild(scrollContainer);
+
+  const containerHeight = treeRootEl.clientHeight || 600;
+  const startIndex = 0;
+  const endIndex = Math.min(visibleTreeItems.length, Math.ceil(containerHeight / TREE_ITEM_HEIGHT) + TREE_VIRTUAL_BUFFER);
+
+  renderVirtualTreeSlice(scrollContainer, startIndex, endIndex);
+  highlightCurrentFileInTree();
+}
+
+function renderVirtualTreeSlice(container: HTMLElement, startIndex: number, endIndex: number) {
+  // Clear existing visible items without removing the container
+  container.innerHTML = "";
+  for (let i = startIndex; i < endIndex && i < visibleTreeItems.length; i++) {
+    const { entry, level } = visibleTreeItems[i];
+    const item = createVirtualTreeItem(entry, level, i);
+    container.appendChild(item);
+  }
+}
+
+function createVirtualTreeItem(entry: IdeDirEntry, level: number, index: number): HTMLElement {
+  const item = document.createElement("div");
+  item.className = "ide__tree-item";
+  item.dataset.path = entry.path;
+  item.dataset.index = String(index);
+  item.style.position = "absolute";
+  item.style.top = `${index * TREE_ITEM_HEIGHT}px`;
+  item.style.left = "0";
+  item.style.right = "0";
+  item.style.height = `${TREE_ITEM_HEIGHT}px`;
+
+  const root = entry.isDirectory ? state.roots.find((r) => r.path === entry.path) : undefined;
+  const isMissingRoot = !!root?.missing;
+
+  const row = document.createElement("div");
+  row.className = "ide__tree-row" + (isMissingRoot ? " ide__tree-row--missing" : "");
+  row.style.paddingLeft = `${level * 12 + 4}px`;
+  row.draggable = true;
+
+  const toggle = document.createElement("span");
+  toggle.className = "ide__tree-toggle";
+  toggle.textContent = entry.isDirectory ? (state.expandedDirs.has(entry.path) ? "▾" : "▸") : " ";
+
+  const icon = document.createElement("span");
+  icon.className = "ide__tree-icon";
+  if (entry.isDirectory) {
+    icon.classList.add("ide__tree-icon--folder");
+    icon.textContent = state.expandedDirs.has(entry.path) ? "📂" : "📁";
+  } else {
+    icon.classList.add("ide__tree-icon--file", `ide__tree-icon--${getFileIconClass(entry.path)}`);
+    icon.textContent = "📄";
+  }
+
+  const label = document.createElement("span");
+  label.className = "ide__tree-label";
+  label.textContent = entry.name + (isMissingRoot ? " (路径缺失)" : "");
+  label.title = entry.path;
+
+  row.appendChild(toggle);
+  row.appendChild(icon);
+  row.appendChild(label);
+  item.appendChild(row);
+
+  row.addEventListener("dragstart", (e) => {
+    e.stopPropagation();
+    e.dataTransfer?.setData("text/plain", entry.path);
+    e.dataTransfer?.setData("ide/path", entry.path);
+    e.dataTransfer?.setData("ide/isDirectory", String(entry.isDirectory));
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+    row.classList.add("is-dragging");
+  });
+  row.addEventListener("dragend", () => {
+    row.classList.remove("is-dragging");
+    document.querySelectorAll(".ide__tree-row.is-drop-target").forEach((el) => el.classList.remove("is-drop-target"));
+  });
+
+  if (entry.isDirectory) {
+    row.addEventListener("click", async () => {
+      if (isMissingRoot) {
+        state.statusMessage = "根目录路径缺失，请右键选择“重新定位文件夹”";
+        notify();
+        return;
+      }
+      const isExpanded = state.expandedDirs.has(entry.path);
+      if (isExpanded) {
+        state.expandedDirs.delete(entry.path);
+      } else {
+        state.expandedDirs.add(entry.path);
+        const existing = findTreeEntry(entry.path);
+        if (existing && !existing.children) {
+          try {
+            existing.children = await readDir(entry.path);
+          } catch {
+            label.textContent += " (加载失败)";
+          }
+        }
+      }
+      notify();
+    });
+
+    row.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+      row.classList.add("is-drop-target");
+    });
+    row.addEventListener("dragleave", () => {
+      row.classList.remove("is-drop-target");
+    });
+    row.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      row.classList.remove("is-drop-target");
+      const sourcePath = e.dataTransfer?.getData("ide/path");
+      if (!sourcePath || sourcePath === entry.path) return;
+      const result = await move(sourcePath, entry.path);
+      if (!result.ok) {
+        state.statusMessage = `移动失败: ${result.error || "未知错误"}`;
+        notify();
+        return;
+      }
+      await refreshTreeItem(entry.path);
+      const sourceDir = parentDir(sourcePath);
+      if (sourceDir && sourceDir !== entry.path) {
+        await refreshTreeItem(sourceDir);
+      }
+    });
+  } else {
+    row.addEventListener("click", () => void openFile(entry.path));
+  }
+
+  row.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showTreeContextMenu(e.clientX, e.clientY, entry);
+  });
+
+  return item;
 }
 
 function highlightCurrentFileInTree() {
@@ -568,6 +605,15 @@ export function initFileTree(): void {
       e.preventDefault();
       void runSearch();
     }
+  });
+
+  let scrollRaf = 0;
+  treeRootEl.addEventListener("scroll", () => {
+    if (scrollRaf) return;
+    scrollRaf = window.requestAnimationFrame(() => {
+      scrollRaf = 0;
+      updateVisibleRange();
+    });
   });
 
   document.addEventListener("click", (e) => {

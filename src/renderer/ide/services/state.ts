@@ -25,6 +25,9 @@ export interface Tab {
   currentContent: string;
   modified: boolean;
   lineEnding: "crlf" | "lf" | "mixed" | "unknown";
+  largeFile?: boolean;
+  fullSize?: number;
+  loadedFull?: boolean;
 }
 
 export interface IdeSettings {
@@ -388,6 +391,7 @@ declare global {
       pickFolder: () => Promise<string | null>;
       readDir: (dirPath: string) => Promise<IdeDirEntry[]>;
       readFile: (filePath: string) => Promise<string>;
+      readFileChunk: (filePath: string, offset: number, length: number) => Promise<{ content: string; totalSize: number; isEnd: boolean }>;
       writeFile: (filePath: string, content: string) => Promise<{ ok: boolean; error?: string }>;
       getFileInfo: (filePath: string) => Promise<{ isDirectory: boolean; size: number }>;
       searchFiles: (

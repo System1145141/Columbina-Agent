@@ -88,6 +88,10 @@ export async function readFile(filePath: string): Promise<string> {
   return window.ide!.readFile(filePath);
 }
 
+export async function readFileChunk(filePath: string, offset: number, length: number): Promise<{ content: string; totalSize: number; isEnd: boolean }> {
+  return window.ide!.readFileChunk(filePath, offset, length);
+}
+
 export async function writeFile(filePath: string, content: string): Promise<{ ok: boolean; error?: string }> {
   return window.ide!.writeFile(filePath, content);
 }
@@ -152,6 +156,9 @@ export async function addFolderToWorkspace(dirPath: string): Promise<void> {
   notify();
 }
 
+const LARGE_FILE_THRESHOLD = 2 * 1024 * 1024; // 2 MB
+const LARGE_FILE_INITIAL_SIZE = 500_000; // 500 KB
+
 export async function openFile(filePath: string, anchorLine = 1, anchorCol = 1): Promise<void> {
   if (state.tabs.has(filePath)) {
     state.pendingAnchor = { line: anchorLine, col: anchorCol };
@@ -161,7 +168,22 @@ export async function openFile(filePath: string, anchorLine = 1, anchorCol = 1):
   }
 
   try {
-    const rawContent = await readFile(filePath);
+    const info = await getFileInfo(filePath);
+    let rawContent: string;
+    let largeFile = false;
+    let fullSize: number | undefined;
+    let loadedFull = true;
+
+    if (!info.isDirectory && info.size > LARGE_FILE_THRESHOLD) {
+      const chunk = await readFileChunk(filePath, 0, LARGE_FILE_INITIAL_SIZE);
+      rawContent = chunk.content;
+      largeFile = true;
+      fullSize = chunk.totalSize;
+      loadedFull = chunk.isEnd;
+    } else {
+      rawContent = await readFile(filePath);
+    }
+
     const lineEnding = detectLineEnding(rawContent);
     const content = normalizeLineEndings(rawContent);
     const tab: Tab = {
@@ -172,6 +194,9 @@ export async function openFile(filePath: string, anchorLine = 1, anchorCol = 1):
       currentContent: content,
       modified: false,
       lineEnding,
+      largeFile,
+      fullSize,
+      loadedFull,
     };
     addTab(tab);
     state.pendingAnchor = { line: anchorLine, col: anchorCol };
@@ -183,6 +208,25 @@ export async function openFile(filePath: string, anchorLine = 1, anchorCol = 1):
   }
 }
 
+export async function loadFullFile(tabId: string): Promise<boolean> {
+  const tab = state.tabs.get(tabId);
+  if (!tab || !tab.largeFile) return false;
+  try {
+    const rawContent = await readFile(tab.filePath);
+    tab.initialContent = normalizeLineEndings(rawContent);
+    tab.currentContent = tab.initialContent;
+    tab.modified = false;
+    tab.loadedFull = true;
+    tab.lineEnding = detectLineEnding(rawContent);
+    notify();
+    return true;
+  } catch (err) {
+    state.statusMessage = `加载完整文件失败: ${String(err)}`;
+    notify();
+    return false;
+  }
+}
+
 export async function openFileAt(filePath: string, line: number, col: number): Promise<void> {
   await openFile(filePath, line, col);
 }
@@ -190,6 +234,16 @@ export async function openFileAt(filePath: string, line: number, col: number): P
 export async function saveTab(tabId: string): Promise<boolean> {
   const tab = state.tabs.get(tabId);
   if (!tab) return false;
+
+  if (tab.largeFile && !tab.loadedFull) {
+    const load = confirm(`"${tab.fileName}" 为超大文件且尚未完整加载，保存将覆盖磁盘上的完整文件。\n\n建议先加载完整文件再编辑。是否现在加载完整文件？`);
+    if (load) {
+      const ok = await loadFullFile(tabId);
+      if (!ok) return false;
+    } else {
+      return false;
+    }
+  }
 
   const content = tab.currentContent;
   if (content === tab.initialContent && !tab.modified) return true;
@@ -261,6 +315,11 @@ const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".cache", ".
 const BINARY_EXTS = new Set(["png", "jpg", "jpeg", "gif", "svg", "ico", "woff", "woff2", "ttf", "eot", "mp3", "mp4", "zip", "gz", "rar", "7z", "pdf", "exe", "dll", "so", "dylib"]);
 const CODE_EXTS = new Set(["ts", "js", "tsx", "jsx", "json", "css", "scss", "less", "html", "htm", "md", "py", "java", "go", "rs", "c", "cpp", "h", "hpp", "rb", "php", "swift", "kt"]);
 
+const INDEX_BATCH_SIZE = 30;
+const INDEX_FILE_SIZE_LIMIT = 200_000;
+const SEARCH_BATCH_SIZE = 500;
+const CONTEXT_READ_BATCH_SIZE = 4;
+
 export function isCodeFile(ext: string): boolean {
   return CODE_EXTS.has(ext);
 }
@@ -278,8 +337,33 @@ export function extractKeywords(text: string, maxKeywords = 40): string[] {
   return Array.from(keywords).slice(0, maxKeywords);
 }
 
-export async function indexProject(folderPath: string, rootName?: string): Promise<void> {
+function yieldControl(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+      window.requestIdleCallback(() => resolve(), { timeout: 16 });
+    } else {
+      setTimeout(resolve, 0);
+    }
+  });
+}
+
+const indexingControllers = new Map<string, AbortController>();
+
+function startIndexController(rootId: string): AbortSignal {
+  indexingControllers.get(rootId)?.abort();
+  const controller = new AbortController();
+  indexingControllers.set(rootId, controller);
+  return controller.signal;
+}
+
+function clearIndexController(rootId: string): void {
+  indexingControllers.delete(rootId);
+}
+
+export async function indexProject(folderPath: string, rootName?: string, rootId?: string): Promise<void> {
   const normFolder = normalizePath(folderPath);
+  const id = rootId || normFolder;
+  const signal = startIndexController(id);
   const prefix = rootName ? `${rootName}/` : "";
   const newEntries: ProjectIndexEntry[] = [];
 
@@ -289,19 +373,31 @@ export async function indexProject(folderPath: string, rootName?: string): Promi
     return ep !== normFolder && !ep.startsWith(normFolder + "/");
   });
 
-  async function walk(dirPath: string) {
+  const dirQueue: string[] = [folderPath];
+  let processedSinceYield = 0;
+
+  while (dirQueue.length > 0) {
+    if (signal.aborted) {
+      clearIndexController(id);
+      return;
+    }
+    const dirPath = dirQueue.shift()!;
     try {
       const entries = await readDir(dirPath);
       for (const entry of entries) {
+        if (signal.aborted) {
+          clearIndexController(id);
+          return;
+        }
         if (entry.isDirectory) {
           if (SKIP_DIRS.has(entry.name.toLowerCase())) continue;
-          await walk(entry.path);
+          dirQueue.push(entry.path);
         } else {
           const ext = getFileExtension(entry.path);
           if (BINARY_EXTS.has(ext)) continue;
           try {
             const info = await getFileInfo(entry.path);
-            if (info.size > 200_000) continue;
+            if (info.size > INDEX_FILE_SIZE_LIMIT) continue;
             const text = await readFile(entry.path);
             const previewLines = text.split("\n").slice(0, 30).join("\n");
             const keywords = isCodeFile(ext) ? extractKeywords(text) : [];
@@ -317,6 +413,11 @@ export async function indexProject(folderPath: string, rootName?: string): Promi
           } catch {
             // ignore unreadable files
           }
+          processedSinceYield++;
+          if (processedSinceYield >= INDEX_BATCH_SIZE) {
+            processedSinceYield = 0;
+            await yieldControl();
+          }
         }
       }
     } catch {
@@ -324,16 +425,25 @@ export async function indexProject(folderPath: string, rootName?: string): Promi
     }
   }
 
-  await walk(folderPath);
-  state.projectIndex = [...existing, ...newEntries];
-  console.log(`[IDE] project index built for ${rootName || folderPath}: ${newEntries.length} files`);
+  if (!signal.aborted) {
+    state.projectIndex = [...existing, ...newEntries];
+    notify();
+    console.log(`[IDE] project index built for ${rootName || folderPath}: ${newEntries.length} files`);
+  }
+  clearIndexController(id);
 }
 
 export async function reindexAllRoots(): Promise<void> {
+  // Abort any in-flight indexing
+  for (const controller of indexingControllers.values()) {
+    controller.abort();
+  }
+  indexingControllers.clear();
   state.projectIndex = [];
+  notify();
   for (const root of state.roots) {
     try {
-      await indexProject(root.path, root.name);
+      await indexProject(root.path, root.name, root.id);
     } catch (err) {
       console.error(`[IDE] reindex root ${root.path} failed:`, err);
     }
@@ -372,15 +482,25 @@ function scoreProjectEntry(entry: ProjectIndexEntry, queryTokens: string[]): num
   return score;
 }
 
-export function searchProjectIndex(query: string, topK = 10): ProjectIndexEntry[] {
+export async function searchProjectIndex(query: string, topK = 10): Promise<ProjectIndexEntry[]> {
   const tokens = tokenizeQuery(query);
   if (tokens.length === 0) return state.projectIndex.slice(0, topK);
-  return state.projectIndex
-    .map((entry) => ({ entry, score: scoreProjectEntry(entry, tokens) }))
-    .filter((item) => item.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, topK)
-    .map((item) => item.entry);
+
+  const scored: { entry: ProjectIndexEntry; score: number }[] = [];
+  const entries = state.projectIndex;
+  for (let i = 0; i < entries.length; i += SEARCH_BATCH_SIZE) {
+    const batch = entries.slice(i, i + SEARCH_BATCH_SIZE);
+    for (const entry of batch) {
+      const score = scoreProjectEntry(entry, tokens);
+      if (score > 0) scored.push({ entry, score });
+    }
+    if (i + SEARCH_BATCH_SIZE < entries.length) {
+      await yieldControl();
+    }
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, topK).map((item) => item.entry);
 }
 
 export async function collectProjectContext(folderPath: string, query?: string, maxFiles = 12, maxChars = 10000): Promise<string> {
@@ -388,7 +508,7 @@ export async function collectProjectContext(folderPath: string, query?: string, 
     return "（项目索引尚未构建完成，请稍后再试）";
   }
 
-  const matched = query ? searchProjectIndex(query, maxFiles) : state.projectIndex.slice(0, maxFiles);
+  const matched = query ? await searchProjectIndex(query, maxFiles) : state.projectIndex.slice(0, maxFiles);
   if (matched.length === 0) {
     return "（未找到与问题相关的项目文件）";
   }
@@ -397,20 +517,29 @@ export async function collectProjectContext(folderPath: string, query?: string, 
   const contents: string[] = [];
   let totalChars = 0;
 
-  for (const entry of matched) {
-    try {
-      const text = await readFile(entry.path);
-      if (totalChars + text.length > maxChars) {
-        fileList.push(entry.relativePath);
-        contents.push(`\n--- FILE: ${entry.relativePath} ---\n${text.slice(0, Math.max(0, maxChars - totalChars))}\n...（内容已截断）`);
-        totalChars = maxChars;
-        break;
-      }
-      totalChars += text.length;
-      fileList.push(entry.relativePath);
-      contents.push(`\n--- FILE: ${entry.relativePath} ---\n${text}`);
-    } catch {
-      // ignore unreadable files
+  for (let i = 0; i < matched.length; i += CONTEXT_READ_BATCH_SIZE) {
+    const batch = matched.slice(i, i + CONTEXT_READ_BATCH_SIZE);
+    await Promise.all(
+      batch.map(async (entry) => {
+        if (totalChars >= maxChars) return;
+        try {
+          const text = await readFile(entry.path);
+          if (totalChars + text.length > maxChars) {
+            fileList.push(entry.relativePath);
+            contents.push(`\n--- FILE: ${entry.relativePath} ---\n${text.slice(0, Math.max(0, maxChars - totalChars))}\n...（内容已截断）`);
+            totalChars = maxChars;
+            return;
+          }
+          totalChars += text.length;
+          fileList.push(entry.relativePath);
+          contents.push(`\n--- FILE: ${entry.relativePath} ---\n${text}`);
+        } catch {
+          // ignore unreadable files
+        }
+      })
+    );
+    if (i + CONTEXT_READ_BATCH_SIZE < matched.length && totalChars < maxChars) {
+      await yieldControl();
     }
   }
 

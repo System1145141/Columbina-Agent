@@ -824,6 +824,34 @@ html, body, .ide {
   height: 100%;
 }
 
+.ide__large-file-banner {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  background: #2d2d30;
+  color: #cccccc;
+  font-size: 12px;
+  border-bottom: 1px solid #3e3e42;
+  flex-shrink: 0;
+}
+
+.ide__large-file-banner-btn {
+  background: #0e639c;
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ide__large-file-banner-btn:disabled {
+  background: #3e3e42;
+  cursor: not-allowed;
+}
+
 /* Status bar */
 .ide__statusbar {
   height: 24px;

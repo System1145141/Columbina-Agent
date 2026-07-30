@@ -3007,6 +3007,25 @@ ipcMain.handle(IPC.IDE_READ_FILE, async (_event, filePath: unknown) => {
     throw new Error(err?.message || "读取失败");
   }
 });
+ipcMain.handle(IPC.IDE_READ_FILE_CHUNK, async (_event, filePath: unknown, offset: unknown, length: unknown) => {
+  if (typeof filePath !== "string") throw new Error("Invalid path");
+  const off = typeof offset === "number" && offset >= 0 ? offset : 0;
+  const len = typeof length === "number" && length > 0 ? length : 500_000;
+  try {
+    const totalSize = fs.statSync(filePath).size;
+    const fd = fs.openSync(filePath, "r");
+    try {
+      const buffer = Buffer.alloc(Math.min(len, totalSize - off));
+      const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, off);
+      const content = buffer.slice(0, bytesRead).toString("utf8");
+      return { content, totalSize, isEnd: off + bytesRead >= totalSize };
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch (err: any) {
+    throw new Error(err?.message || "读取失败");
+  }
+});
 ipcMain.handle(IPC.IDE_WRITE_FILE, async (_event, filePath: unknown, content: unknown) => {
   if (typeof filePath !== "string" || typeof content !== "string") return { ok: false, error: "Invalid args" };
   try {

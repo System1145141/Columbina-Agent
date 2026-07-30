@@ -153,6 +153,8 @@ const ideApi = {
   pickFolder: () => ipcRenderer.invoke(IPC.IDE_PICK_FOLDER),
   readDir: (dirPath: string) => ipcRenderer.invoke(IPC.IDE_READ_DIR, dirPath),
   readFile: (filePath: string) => ipcRenderer.invoke(IPC.IDE_READ_FILE, filePath),
+  readFileChunk: (filePath: string, offset: number, length: number) =>
+    ipcRenderer.invoke(IPC.IDE_READ_FILE_CHUNK, filePath, offset, length) as Promise<{ content: string; totalSize: number; isEnd: boolean }>,
   writeFile: (filePath: string, content: string) => ipcRenderer.invoke(IPC.IDE_WRITE_FILE, filePath, content),
   getFileInfo: (filePath: string) => ipcRenderer.invoke(IPC.IDE_GET_FILE_INFO, filePath),
   searchFiles: (folderPath: string, query: string, options?: { caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean; maxResults?: number }) =>

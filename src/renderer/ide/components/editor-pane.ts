@@ -8,7 +8,7 @@ import { html } from "@codemirror/lang-html";
 import { markdown } from "@codemirror/lang-markdown";
 import { defaultKeymap, indentWithTab } from "@codemirror/commands";
 import { state, subscribe, notify, type InlineChatState } from "../services/state";
-import { saveTab, getFileExtension } from "../services/file-service";
+import { saveTab, getFileExtension, loadFullFile } from "../services/file-service";
 import { callAgentStream } from "../services/agent-bridge";
 import {
   lspExtension,
@@ -388,10 +388,38 @@ function onStateChange(): void {
         state.pendingAnchor = null;
         moveCursorTo(state.editorView, anchor.line, anchor.col);
       }
+      renderLargeFileBanner(activeTab);
     } else {
       destroyEditor();
+      renderLargeFileBanner(null);
     }
   }
+}
+
+function renderLargeFileBanner(tab: import("../services/state").Tab | null) {
+  const existing = document.getElementById("large-file-banner");
+  if (existing) existing.remove();
+  if (!tab || !tab.largeFile) return;
+
+  const banner = document.createElement("div");
+  banner.id = "large-file-banner";
+  banner.className = "ide__large-file-banner";
+  const size = tab.fullSize ? `${(tab.fullSize / 1024 / 1024).toFixed(2)} MB` : "超大文件";
+  banner.textContent = tab.loadedFull
+    ? `已加载完整大文件 (${size})`
+    : `仅加载前 500 KB，完整大小 ${size}`;
+
+  const loadBtn = document.createElement("button");
+  loadBtn.type = "button";
+  loadBtn.className = "ide__large-file-banner-btn";
+  loadBtn.textContent = "加载完整文件";
+  loadBtn.disabled = tab.loadedFull;
+  loadBtn.addEventListener("click", () => {
+    if (state.activeTabId) void loadFullFile(state.activeTabId);
+  });
+  banner.appendChild(loadBtn);
+
+  editorEl.parentElement?.insertBefore(banner, editorEl);
 }
 
 // Inline chat

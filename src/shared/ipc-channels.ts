@@ -221,6 +221,7 @@ export const IPC = {
   IDE_PICK_FOLDER: "ide:pick-folder",     // 选择文件夹
   IDE_READ_DIR: "ide:read-dir",           // 读取目录
   IDE_READ_FILE: "ide:read-file",         // 读取文件内容
+  IDE_READ_FILE_CHUNK: "ide:read-file-chunk", // 分块读取文件内容
   IDE_WRITE_FILE: "ide:write-file",       // 写入文件内容
   IDE_GET_FILE_INFO: "ide:get-file-info", // 获取文件信息
   IDE_SEARCH_FILES: "ide:search-files",   // 项目内文本搜索
