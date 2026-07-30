@@ -98,10 +98,10 @@ async function applyWorkspace(data: WorkspaceData, filePath?: string): Promise<v
 
   const openFiles = (data.openFiles || []).filter((p) => typeof p === "string");
   const validRoots = roots.filter((r) => !r.missing);
-  for (const filePath of openFiles) {
-    if (validRoots.some((r) => isPathUnderRoot(filePath, r.path))) {
+  for (const openFilePath of openFiles) {
+    if (validRoots.some((r) => isPathUnderRoot(openFilePath, r.path))) {
       try {
-        await openFile(filePath);
+        await openFile(openFilePath);
       } catch {
         // skip files that no longer exist
       }

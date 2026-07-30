@@ -21,6 +21,23 @@ export interface GitLogEntry {
   date: string;
 }
 
+export interface GitBranchInfo {
+  name: string;
+  current: boolean;
+  remote: boolean;
+}
+
+export interface GitStashEntry {
+  index: string;
+  message: string;
+}
+
+export interface GitResult {
+  ok: boolean;
+  error?: string;
+  stdout?: string;
+}
+
 function toRelativePath(folderPath: string, filePath: string): string {
   if (!path.isAbsolute(filePath)) return filePath.replace(/\\/g, "/");
   return path.relative(folderPath, filePath).replace(/\\/g, "/");
@@ -128,7 +145,8 @@ export async function getStatus(folderPath: string): Promise<GitStatusResult> {
     const workTree = line[1] ?? " ";
     const rest = line.slice(3);
 
-    const arrowIdx = rest.indexOf(" -> ");
+    const isRenameOrCopy = index === "R" || index === "C";
+    const arrowIdx = isRenameOrCopy ? rest.indexOf(" -> ") : -1;
     const filePath = arrowIdx > 0 ? rest.slice(arrowIdx + 4) : rest;
     if (!filePath) continue;
 
@@ -187,6 +205,154 @@ export async function commit(folderPath: string, message: string): Promise<{ ok:
   const { exitCode, stderr } = await execGit(["commit", "-m", message.trim()], folderPath);
   if (exitCode === 0) return { ok: true };
   return { ok: false, error: stderr.trim() || "提交失败" };
+}
+
+export async function fetch(folderPath: string): Promise<GitResult> {
+  const { exitCode, stderr, stdout } = await execGit(["fetch"], folderPath, { timeout: 60_000 });
+  if (exitCode === 0) return { ok: true, stdout: stdout.trim() };
+  return { ok: false, error: stderr.trim() || "fetch 失败" };
+}
+
+export async function pull(folderPath: string): Promise<GitResult> {
+  const { exitCode, stderr, stdout } = await execGit(["pull"], folderPath, { timeout: 120_000 });
+  if (exitCode === 0) return { ok: true, stdout: stdout.trim() };
+  return { ok: false, error: stderr.trim() || "pull 失败" };
+}
+
+export async function push(folderPath: string): Promise<GitResult> {
+  const { exitCode, stderr, stdout } = await execGit(["push"], folderPath, { timeout: 120_000 });
+  if (exitCode === 0) return { ok: true, stdout: stdout.trim() };
+  return { ok: false, error: stderr.trim() || "push 失败" };
+}
+
+export async function getBranches(folderPath: string): Promise<GitBranchInfo[]> {
+  const { stdout, exitCode } = await execGit(["branch", "-a", "--format=%(refname:short)%(HEAD)"], folderPath);
+  if (exitCode !== 0) return [];
+
+  const branches: GitBranchInfo[] = [];
+  const seen = new Set<string>();
+  for (const line of stdout.split("\n")) {
+    const raw = line.trim();
+    if (!raw) continue;
+    const current = raw.endsWith("*");
+    let name = current ? raw.slice(0, -1) : raw;
+    const remote = name.startsWith("remotes/");
+    if (remote) name = name.slice("remotes/".length);
+    if (seen.has(name)) continue;
+    seen.add(name);
+    branches.push({ name, current, remote });
+  }
+  return branches;
+}
+
+export async function checkoutBranch(folderPath: string, branchName: string): Promise<GitResult> {
+  const { exitCode, stderr, stdout } = await execGit(["checkout", branchName.trim()], folderPath);
+  if (exitCode === 0) return { ok: true, stdout: stdout.trim() };
+  return { ok: false, error: stderr.trim() || `切换到 ${branchName} 失败` };
+}
+
+export async function createBranch(folderPath: string, branchName: string, checkout = true): Promise<GitResult> {
+  const name = branchName.trim();
+  if (!name) return { ok: false, error: "分支名不能为空" };
+  const args = checkout ? ["checkout", "-b", name] : ["branch", name];
+  const { exitCode, stderr, stdout } = await execGit(args, folderPath);
+  if (exitCode === 0) return { ok: true, stdout: stdout.trim() };
+  return { ok: false, error: stderr.trim() || `创建分支 ${name} 失败` };
+}
+
+export async function deleteBranch(folderPath: string, branchName: string, force = false): Promise<GitResult> {
+  const name = branchName.trim();
+  if (!name) return { ok: false, error: "分支名不能为空" };
+  const args = force ? ["branch", "-D", name] : ["branch", "-d", name];
+  const { exitCode, stderr, stdout } = await execGit(args, folderPath);
+  if (exitCode === 0) return { ok: true, stdout: stdout.trim() };
+  return { ok: false, error: stderr.trim() || `删除分支 ${name} 失败` };
+}
+
+export async function listStashes(folderPath: string): Promise<GitStashEntry[]> {
+  const format = "%gd%x00%s";
+  const { stdout, exitCode } = await execGit(
+    ["stash", "list", `--format=${format}`],
+    folderPath
+  );
+  if (exitCode !== 0) return [];
+  const entries: GitStashEntry[] = [];
+  for (const line of stdout.split("\n")) {
+    if (!line) continue;
+    const idx = line.indexOf("\0");
+    if (idx < 0) {
+      entries.push({ index: line, message: "" });
+      continue;
+    }
+    entries.push({
+      index: line.slice(0, idx).trim(),
+      message: line.slice(idx + 1).trim(),
+    });
+  }
+  return entries;
+}
+
+export async function stashSave(folderPath: string, message?: string, includeUntracked = true): Promise<GitResult> {
+  const args = ["stash", "push"];
+  if (includeUntracked) args.push("-u");
+  if (message && message.trim()) {
+    args.push("-m", message.trim());
+  }
+  const { exitCode, stderr, stdout } = await execGit(args, folderPath, { timeout: 60_000 });
+  if (exitCode === 0) return { ok: true, stdout: stdout.trim() };
+  // "No local changes to save" 退出码为 0，但兜底处理
+  return { ok: false, error: stderr.trim() || stdout.trim() || "stash 失败" };
+}
+
+export async function stashPop(folderPath: string, stashRef: string, applyOnly = false): Promise<GitResult> {
+  const ref = stashRef.trim();
+  const args = applyOnly ? ["stash", "apply", ref].filter(Boolean) : ["stash", "pop", ref].filter(Boolean);
+  const { exitCode, stderr, stdout } = await execGit(args, folderPath, { timeout: 60_000 });
+  if (exitCode === 0) return { ok: true, stdout: stdout.trim() };
+  return { ok: false, error: stderr.trim() || stdout.trim() || "stash 操作失败" };
+}
+
+export async function stashDrop(folderPath: string, stashRef: string): Promise<GitResult> {
+  const ref = stashRef.trim();
+  if (!ref) return { ok: false, error: "stash 引用不能为空" };
+  const { exitCode, stderr, stdout } = await execGit(["stash", "drop", ref], folderPath);
+  if (exitCode === 0) return { ok: true, stdout: stdout.trim() };
+  return { ok: false, error: stderr.trim() || stdout.trim() || "stash drop 失败" };
+}
+
+export async function cherryPick(folderPath: string, commitHash: string, noCommit = false): Promise<GitResult> {
+  const hash = commitHash.trim();
+  if (!hash) return { ok: false, error: "提交 hash 不能为空" };
+  const args = ["cherry-pick"];
+  if (noCommit) args.push("-n");
+  args.push(hash);
+  const { exitCode, stderr, stdout } = await execGit(args, folderPath, { timeout: 60_000 });
+  if (exitCode === 0) return { ok: true, stdout: stdout.trim() };
+  // 冲突时退出码非 0，stderr 通常包含冲突信息
+  return { ok: false, error: stderr.trim() || stdout.trim() || `cherry-pick ${hash} 失败` };
+}
+
+export async function revertCommit(folderPath: string, commitHash: string, noCommit = false): Promise<GitResult> {
+  const hash = commitHash.trim();
+  if (!hash) return { ok: false, error: "提交 hash 不能为空" };
+  const args = ["revert"];
+  if (noCommit) args.push("-n");
+  args.push(hash);
+  const { exitCode, stderr, stdout } = await execGit(args, folderPath, { timeout: 60_000 });
+  if (exitCode === 0) return { ok: true, stdout: stdout.trim() };
+  return { ok: false, error: stderr.trim() || stdout.trim() || `revert ${hash} 失败` };
+}
+
+export async function abortCherryPick(folderPath: string): Promise<GitResult> {
+  const { exitCode, stderr, stdout } = await execGit(["cherry-pick", "--abort"], folderPath);
+  if (exitCode === 0) return { ok: true, stdout: stdout.trim() };
+  return { ok: false, error: stderr.trim() || "取消 cherry-pick 失败" };
+}
+
+export async function abortRevert(folderPath: string): Promise<GitResult> {
+  const { exitCode, stderr, stdout } = await execGit(["revert", "--abort"], folderPath);
+  if (exitCode === 0) return { ok: true, stdout: stdout.trim() };
+  return { ok: false, error: stderr.trim() || "取消 revert 失败" };
 }
 
 export async function getLog(folderPath: string, maxCount = 20): Promise<GitLogEntry[]> {
@@ -305,6 +471,150 @@ export function setupGitIpc(): void {
     } catch (err: any) {
       console.error("[Columbina IDE] git log failed:", err?.message || err);
       return [] as GitLogEntry[];
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_FETCH, async (_event, folderPath: unknown) => {
+    if (typeof folderPath !== "string") return { ok: false, error: "参数类型错误" };
+    try {
+      return await fetch(folderPath);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git fetch failed:", err?.message || err);
+      return { ok: false, error: err?.message || "fetch 失败" };
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_PULL, async (_event, folderPath: unknown) => {
+    if (typeof folderPath !== "string") return { ok: false, error: "参数类型错误" };
+    try {
+      return await pull(folderPath);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git pull failed:", err?.message || err);
+      return { ok: false, error: err?.message || "pull 失败" };
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_PUSH, async (_event, folderPath: unknown) => {
+    if (typeof folderPath !== "string") return { ok: false, error: "参数类型错误" };
+    try {
+      return await push(folderPath);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git push failed:", err?.message || err);
+      return { ok: false, error: err?.message || "push 失败" };
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_BRANCH_LIST, async (_event, folderPath: unknown) => {
+    if (typeof folderPath !== "string") return [] as GitBranchInfo[];
+    try {
+      return await getBranches(folderPath);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git branch list failed:", err?.message || err);
+      return [] as GitBranchInfo[];
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_CHECKOUT, async (_event, folderPath: unknown, branchName: unknown) => {
+    if (typeof folderPath !== "string" || typeof branchName !== "string") {
+      return { ok: false, error: "参数类型错误" };
+    }
+    try {
+      return await checkoutBranch(folderPath, branchName);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git checkout failed:", err?.message || err);
+      return { ok: false, error: err?.message || "切换分支失败" };
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_CREATE_BRANCH, async (_event, folderPath: unknown, branchName: unknown, checkout: unknown) => {
+    if (typeof folderPath !== "string" || typeof branchName !== "string") {
+      return { ok: false, error: "参数类型错误" };
+    }
+    try {
+      return await createBranch(folderPath, branchName, checkout !== false);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git create branch failed:", err?.message || err);
+      return { ok: false, error: err?.message || "创建分支失败" };
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_DELETE_BRANCH, async (_event, folderPath: unknown, branchName: unknown, force: unknown) => {
+    if (typeof folderPath !== "string" || typeof branchName !== "string") {
+      return { ok: false, error: "参数类型错误" };
+    }
+    try {
+      return await deleteBranch(folderPath, branchName, force === true);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git delete branch failed:", err?.message || err);
+      return { ok: false, error: err?.message || "删除分支失败" };
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_STASH_LIST, async (_event, folderPath: unknown) => {
+    if (typeof folderPath !== "string") return [] as GitStashEntry[];
+    try {
+      return await listStashes(folderPath);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git stash list failed:", err?.message || err);
+      return [] as GitStashEntry[];
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_STASH_SAVE, async (_event, folderPath: unknown, message: unknown, includeUntracked: unknown) => {
+    if (typeof folderPath !== "string") return { ok: false, error: "参数类型错误" };
+    try {
+      return await stashSave(folderPath, typeof message === "string" ? message : undefined, includeUntracked !== false);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git stash save failed:", err?.message || err);
+      return { ok: false, error: err?.message || "stash 失败" };
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_STASH_POP, async (_event, folderPath: unknown, stashRef: unknown, applyOnly: unknown) => {
+    if (typeof folderPath !== "string" || typeof stashRef !== "string") {
+      return { ok: false, error: "参数类型错误" };
+    }
+    try {
+      return await stashPop(folderPath, stashRef, applyOnly === true);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git stash pop failed:", err?.message || err);
+      return { ok: false, error: err?.message || "stash pop 失败" };
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_STASH_DROP, async (_event, folderPath: unknown, stashRef: unknown) => {
+    if (typeof folderPath !== "string" || typeof stashRef !== "string") {
+      return { ok: false, error: "参数类型错误" };
+    }
+    try {
+      return await stashDrop(folderPath, stashRef);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git stash drop failed:", err?.message || err);
+      return { ok: false, error: err?.message || "stash drop 失败" };
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_CHERRY_PICK, async (_event, folderPath: unknown, commitHash: unknown, noCommit: unknown) => {
+    if (typeof folderPath !== "string" || typeof commitHash !== "string") {
+      return { ok: false, error: "参数类型错误" };
+    }
+    try {
+      return await cherryPick(folderPath, commitHash, noCommit === true);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git cherry-pick failed:", err?.message || err);
+      return { ok: false, error: err?.message || "cherry-pick 失败" };
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_REVERT, async (_event, folderPath: unknown, commitHash: unknown, noCommit: unknown) => {
+    if (typeof folderPath !== "string" || typeof commitHash !== "string") {
+      return { ok: false, error: "参数类型错误" };
+    }
+    try {
+      return await revertCommit(folderPath, commitHash, noCommit === true);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git revert failed:", err?.message || err);
+      return { ok: false, error: err?.message || "revert 失败" };
     }
   });
 }

@@ -82,7 +82,7 @@
 
 ---
 
-### 阶段 3：Columbina AI IDE（3-4 周）
+### 阶段 3：Columbina AI IDE（3-4 周）✅ 已完成
 
 目标：把 Columbina Agent 能力注入 IDE，形成差异化竞争力。
 
@@ -123,13 +123,64 @@
 
 ### 阶段 4：工程化与扩展（长期）
 
-目标：让 Columbina-IDE 可维护、可扩展。
+目标：让 Columbina-IDE 可维护、可扩展，并逐步从"能用"走向"好用"。
 
-#### 4.1 插件机制
-- 定义 IDE 插件 API
-- 允许第三方扩展主题、语言支持、侧边栏面板
+#### 4.1 插件机制 ✅ 已完成
 
-#### 4.2 LSP 支持
+##### 目标
+- 定义 IDE 插件 API，允许第三方扩展命令与 Agent 工具（主题、语言、面板能力可后续扩展）。
+- 插件与现有 `plugins` / `skills` 体系打通，Agent 也能调用插件提供的工具。
+
+##### 状态
+- 已定义插件清单 `columbina.plugin.json` 与 `PluginContext` API。
+- 插件在独立 Web Worker 中运行，通过 `postMessage` 与 IDE 宿主通信。
+- 插件可注册命令（自动出现在命令面板）和 Agent 工具（自动加入 tools prompt）。
+- 插件发现路径：`~/.columbina/plugins/` 和工作区本地 `.columbina/plugins/`。
+- 插件崩溃不影响 IDE 主进程。
+- 提供示例插件 `examples/plugin-example/`。
+
+##### 插件能力分层
+
+| 层级 | 能力 | 示例 |
+|------|------|------|
+| 主题 | 提供 CSS 变量与主题配置 | 暗色/浅色/高对比主题 |
+| 语言 | 注册语法高亮、LSP 命令、格式化 | Rust、Python 增强 |
+| 面板 | 在侧边栏或底部添加自定义面板 | TODO 列表、数据库浏览器 |
+| 命令 | 向命令面板注册命令 | 自定义构建脚本 |
+| Agent 工具 | 向 Agent 暴露结构化工具 | 读取 Jira、查询 API |
+
+##### 实现计划
+
+1. **插件发现与加载**
+   - 插件目录：`~/.columbina/plugins/` 或工作区本地 `.columbina/plugins/`。
+   - 每个插件为一个文件夹，包含 `package.json` 风格的 `columbina.plugin.json` 清单。
+   - 清单字段：`name`、`version`、`main`（入口脚本）、`contributes`（主题/命令/面板/工具声明）。
+
+2. **插件运行时**
+   - 插件在独立 WebWorker 或受控 iframe 中运行，禁止直接访问 Node.js API。
+   - 通过 `postMessage` + 定义的 RPC 协议与 IDE 核心通信。
+   - 暴露 `ide` API：注册命令、读写面板 DOM、订阅文件事件、调用 Agent 工具等。
+
+3. **与 Agent 工具集成**
+   - 插件可声明 `tools`，每个工具包含名称、描述、参数 schema。
+   - Agent 在构造 tools prompt 时自动包含已启用插件的工具。
+   - Agent 调用插件工具后，由插件 Worker 执行并返回结果。
+
+4. **安全与权限**
+   - 插件安装需要用户确认。
+   - 插件清单声明所需权限（fileSystem、network、shell、agent）。
+   - 默认禁止插件访问工作区外文件与任意网络。
+
+##### 验收标准
+- 能安装/启用/禁用/卸载插件。
+- 插件能注册命令面板命令并执行。
+- 插件能向 Agent 暴露工具。
+- 插件崩溃不影响 IDE 主进程。
+- `npm run build` 通过。
+
+---
+
+#### 4.2 LSP 支持 ✅ 已完成
 
 ##### 目标
 - 接入 Language Server Protocol，为 IDE 提供代码补全、诊断、跳转到定义、悬停提示、重命名、引用查找等基础语言功能。
@@ -233,8 +284,116 @@
 - **CodeMirror 6 集成成本**：LSP 的补全、诊断模型与 CodeMirror 扩展模型需要手动桥接。
 - **性能**：大文件编辑时 `textDocument/didChange` 通知频率高，需要增量同步（`TextDocumentSyncKind.Incremental`）。
 
-#### 4.3 Git 集成
-- 分支、提交、diff、日志可视化
+---
+
+#### 4.3 Git 集成 ✅ 已完成
+
+##### 目标
+- 为 IDE 提供基础 Git 工作流支持，让用户无需离开编辑器即可完成日常版本控制操作。
+- 每个 Root 独立管理 Git 状态，支持多工作区场景。
+
+##### 状态
+- 状态栏显示当前分支、ahead/behind、变更数量。
+- Git 面板按 Root 分组展示已修改、已暂存、未跟踪、冲突文件列表。
+- 支持查看 diff、勾选/取消暂存、输入提交信息并提交。
+- 支持获取（fetch）、拉取（pull）、推送（push），pull/push 前用户确认。
+- 支持分支切换、新建分支、删除分支（失败时可选强制删除）。
+- 支持显示最近提交历史（作者、时间、message、hash）。
+- 支持 stash save / pop / apply / drop。
+- 支持在提交历史上右键执行 cherry-pick / revert / 复制 hash。
+- 所有 Git 命令统一使用 `spawn` + `shell: false` + 数组参数，防止命令注入。
+
+##### 第一阶段：状态展示（1 周）
+
+1. **状态栏 Git 状态**
+   - 显示当前活动文件所属 Root 的分支名。
+   - 显示 clean / modified / ahead / behind 状态指示器。
+   - 点击状态栏元素打开 Git 面板。
+
+2. **Git 面板骨架**
+   - 在侧边栏新增 Git 面板，按 Root 分组展示变更文件。
+   - 每个分组显示：分支名、 ahead/behind、已修改/已暂存/未跟踪/冲突文件列表。
+
+3. **文件状态图标**
+   - 在文件树中为变更文件添加状态图标（modified / added / untracked / conflicted）。
+   - 状态刷新频率：打开面板时、保存文件后、手动刷新时。
+
+##### 第二阶段：基础操作（1-2 周）
+
+4. **Diff 查看**
+   - 点击 Git 面板中的文件显示 diff。
+   - Diff 视图区分 add / delete / context 行。
+   - 提供"在编辑器中打开"按钮。
+
+5. **暂存与取消暂存**
+   - Git 面板中文件前显示复选框。
+   - 勾选 / 取消勾选触发 `git add` / `git reset`。
+   - 支持全选、仅暂存已修改、撤销所有更改等快捷操作。
+
+6. **提交**
+   - 每个 Root 提供独立提交输入框。
+   - "提交"按钮在 message 为空或没有暂存文件时禁用。
+   - 提交命令使用 `child_process.spawn` + `shell: false` + 数组参数，防止命令注入。
+   - 提交后刷新状态与 diff。
+
+7. **拉取 / 推送 / 获取**
+   - 在 Git 面板顶部提供 fetch / pull / push 按钮。
+   - 操作前确认，操作失败时显示错误信息。
+
+##### 第三阶段：进阶功能（2 周）
+
+8. **分支管理**
+   - 分支切换、新建分支、删除本地分支。
+   - 显示远程分支列表。
+   - 分支搜索与快速切换。
+
+9. **提交历史**
+   - 展示当前分支提交日志（作者、时间、message、hash）。
+   - 点击提交查看该提交变更的文件列表与 diff。
+   - 提交条目右键可触发 cherry-pick / revert / 复制 hash 操作。
+
+10. **Stash** ✅ 已完成
+    - 支持 stash save / pop / drop。
+    - 在 Git 面板中列出 stash 列表。
+    - 实现：新增 `IDE_GIT_STASH_LIST/SAVE/POP/DROP` IPC 通道，主进程 `listStashes/stashSave/stashPop/stashDrop` 使用 `spawn` + `shell: false`；Git 面板新增 Stash 折叠区，提供 Pop / Apply / Drop 三种操作及保存按钮。
+
+11. **Cherry-pick / Revert（可选）** ✅ 已完成
+    - 在提交历史中右键选择 cherry-pick 或 revert。
+    - 冲突时标记冲突文件。
+    - 实现：新增 `IDE_GIT_CHERRY_PICK/REVERT` IPC 通道与主进程 `cherryPick/revertCommit`；提交历史条目右键弹出菜单（Cherry-pick / Revert / 复制 hash），失败时刷新 `git status` 以显示冲突文件。
+
+##### 数据流
+
+```
+Git 面板 / 状态栏
+       │
+       ▼
+services/git-service.ts  (渲染进程，调用 IPC)
+       │
+       ▼
+src/main/git-manager.ts  (主进程，spawn git)
+       │
+       ▼
+    git CLI
+```
+
+##### 验收标准
+
+- 状态栏正确显示当前分支与 clean/modified 状态。
+- Git 面板能展示各 Root 的变更文件列表。
+- 能查看 diff、勾选暂存、输入 message 并提交。
+- pull/push/fetch 能正常执行并反馈结果。
+- 多 Root 工作区中各 Root Git 状态互不干扰。
+- `npm run build` 通过。
+
+##### 风险与依赖
+
+- **Git 可执行文件**：需要检测系统 Git 路径，Windows 下可能需要自带 Git 或引导安装。
+- **大仓库性能**：`git status` 在超大仓库可能较慢，需要缓存与增量刷新。
+- **多工作区嵌套**：某个 Root 可能是另一个 Root 的子目录，避免重复扫描。
+- **权限安全**：所有 Git 命令通过数组参数 + `shell: false` 执行，禁止拼接命令字符串。
+
+---
 
 #### 4.4 多工作区 ✅ 已完成
 
@@ -343,10 +502,138 @@
 - **Git 仓库嵌套**：某个 Root 可能是另一个 Root 的子目录，需要避免重复扫描和状态冲突。
 - **向后兼容**：必须保证升级后老用户的单文件夹工作区能正常加载。
 
-#### 4.5 性能优化
-- 大文件懒加载
-- 文件树虚拟滚动
-- 索引与搜索性能优化
+---
+
+#### 4.5 性能优化 ✅ 已完成
+- 大文件懒加载：超过 2 MB 的文件先加载前 500 KB，状态栏与编辑器横幅提示完整大小，保存前强制加载完整文件，避免误覆盖磁盘内容。
+- 文件树虚拟滚动：仅渲染可视区域内文件树节点，使用绝对定位与 `requestAnimationFrame` 滚动更新，减少大目录 DOM 数量。
+- 索引与搜索性能优化：项目索引改为异步队列遍历，每处理 30 个文件让出主线程；搜索评分与项目上下文收集改为异步分批，支持 `AbortController` 取消过期索引任务，降低 UI 阻塞。
+
+---
+
+#### 4.6 AI 能力增强 ✅ 已完成（第一、二阶段）
+
+##### 目标
+- 让 Agent 从"被动回答"升级为"主动协作者"，能够理解任务、规划步骤、自动执行并反馈。
+- 结合项目上下文、记忆与 LSP 诊断，提供更精准的代码建议与修复。
+
+##### 第一阶段：任务规划与多轮执行 ✅ 已完成
+
+1. **Agent 任务规划**
+   - 用户提出复杂需求时，Agent 先输出任务计划（Plan）。
+   - 计划显示在 AI 面板，用户可以确认、修改或取消。
+   - 每完成一步，Agent 自动进入下一步，直到任务完成或需要用户确认。
+   - 实现：新增 `runAgentPlan` / `generateTaskPlan` / `executeTaskPlan` / `confirmTaskPlan` / `cancelTaskPlan`，AI 面板支持"任务规划"模式，命令面板新增"AI: 规划并执行任务"。
+
+2. **持久化 Agent 会话**
+   - 将 AI 面板会话与 `chat` 模块的会话打通，支持跨窗口恢复。
+   - 每个工作区保留独立的 Agent 会话历史。
+   - *状态：待实现，可与 chat 模块会话打通时一并补充。*
+
+3. **自动错误修复**
+   - 当 LSP 诊断到错误时，AI 面板显示"一键修复"建议。
+   - Agent 读取相关文件、生成修复 patch，用户确认后应用。
+   - *状态：待实现，可与 Inline Chat 的 bug 修复能力整合。*
+
+##### 第二阶段：智能补全与预测 ✅ 已完成
+
+4. **Inline 自动补全**
+   - 在编辑器中实现类似 Copilot 的幽灵文本补全。
+   - 触发时机：停止输入 300ms 后或 `Alt+\` 快捷键。
+   - 补全建议基于当前文件上下文与光标位置。
+   - 实现：新增 `inline-completion.ts` CodeMirror 扩展，通过 `callAgentStream` 获取建议并以 `ide__ghost-text` 样式渲染。
+
+5. **下一行预测**
+   - Agent 根据光标上下文预测下一行或下一段代码。
+   - 按 `Tab` 接受，按 `Esc` 拒绝。
+   - 实现：Inline 补全的幽灵文本即下一行/下一段预测，`Tab` 插入、`Esc` 取消。
+
+6. **自然语言生成代码**
+   - 在 AI 面板输入自然语言需求，Agent 生成完整代码文件。
+   - 支持多文件生成与目录结构建议。
+   - *状态：待实现，当前可通过 Agent write_file 工具间接支持。*
+
+##### 第三阶段：项目级重构（可选未来重点）
+
+7. **跨文件重构**
+   - Agent 能够理解项目结构，执行重命名、提取函数、移动文件等跨文件操作。
+   - 所有变更生成 diff，用户确认后批量应用。
+
+8. **测试生成**
+   - 为当前函数或文件生成单元测试。
+   - 自动检测项目测试框架（Jest、Vitest、Mocha 等）。
+
+9. **代码审查**
+   - Agent 主动审查当前 PR / 变更文件，给出改进建议。
+   - 与 Git 面板集成，在提交前提示潜在问题。
+
+##### 验收标准
+- Agent 能根据用户目标制定并执行多步骤计划。
+- Inline 补全可用且响应时间 < 1s。
+- 跨文件重构能正确更新所有引用（第三阶段）。
+- 所有 Agent 写操作仍需用户确认。
+- `npm run build` 通过。
+
+---
+
+#### 4.7 设置同步与云备份（可选）
+
+##### 目标
+- 让用户在不同设备间同步 IDE 设置、快捷键、插件与工作区配置。
+- 提供可选的本地/云端备份方案。
+
+##### 实现计划
+
+1. **设置导出/导入**
+   - 支持导出 settings.json、workspaces.json 到本地文件。
+   - 支持从文件导入恢复。
+
+2. **端到端加密同步**
+   - 可选接入用户自选的云存储（GitHub Gist、S3、WebDAV）。
+   - 敏感数据在本地加密后再上传。
+
+3. **项目记忆同步**
+   - L0/L1/L2 记忆跟随用户账号同步，Agent 在不同设备上保持一致性。
+
+##### 验收标准
+- 能导出/导入完整 IDE 配置。
+- 云同步可选启用，默认关闭。
+- 敏感配置加密存储。
+
+---
+
+#### 4.8 稳定性与工程化（持续推进）
+
+##### 目标
+- 提升 IDE 稳定性、可测试性与可维护性，为正式发布做准备。
+
+##### 任务清单
+
+1. **自动化测试**
+   - 为 `services/file-service.ts`、`services/state.ts`、`workspace-service.ts` 添加单元测试。
+   - 为 Git、LSP、搜索等核心功能添加集成测试。
+   - 使用 Playwright / Vitest 测试渲染进程关键交互。
+
+2. **错误监控与崩溃上报**
+   - 捕获主进程与渲染进程未处理异常。
+   - 提供本地日志导出，可选匿名上报。
+
+3. **TypeScript 严格模式**
+   - 逐步提高 `strict` 配置覆盖率。
+   - 清理 `any` 类型与隐式转换。
+
+4. **构建与发布流水线**
+   - 配置 GitHub Actions 自动构建 Windows / macOS / Linux 安装包。
+   - 支持自动更新（auto-updater）。
+
+5. **文档**
+   - 编写用户文档：快捷键、命令面板、Agent 使用指南。
+   - 编写开发者文档：插件 API、LSP 集成、状态管理。
+
+##### 验收标准
+- 核心服务单元测试覆盖率 > 60%。
+- CI 自动构建通过。
+- 发布流程一键化。
 
 ## 3. 技术架构决策
 
@@ -391,99 +678,37 @@ src/renderer/ide/
     ai-panel.ts       # AI 侧边栏面板
     terminal-panel.ts # 底部终端面板
     command-palette.ts# 命令面板
+    git-panel.ts      # Git 面板组件
   services/
     file-service.ts   # 文件 IPC 操作、目录遍历、项目索引、搜索
     state.ts          # IDE 全局状态与状态变更通知
     layout.ts         # 布局管理（面板显隐、尺寸调整）
     agent-bridge.ts   # Agent 调用、工具解析、动作执行、确认/撤销
+    git-service.ts    # Git IPC 调用与状态聚合
+    lsp-client.ts     # LSP 客户端封装
+  main/
+    git-manager.ts    # 主进程 Git 子进程管理
+    lsp-manager.ts    # 主进程 LSP 子进程管理
+    workspace-manager.ts # 工作区持久化
   styles/
     ide.css           # IDE 级样式
     theme.css         # 主题变量
+  plugins/
+    api.ts            # 插件 API 定义
+    host.ts           # 插件宿主/Worker 管理
 ```
 
-### 4.2 拆分计划
-
-当前 `ide.ts` 已膨胀为单文件，包含约 190 个顶层定义。拆分按以下顺序进行，每步完成后运行 `npm run build` 验证。
-
-#### 第一步：抽象 services 层（状态与数据）
-
-1. **新建 `services/state.ts`**
-   - 导出所有全局状态：`currentFolder`、`tabs`、`activeTabId`、`editorView`、`ideSettings`、`aiMessages`、`projectIndex`、`expandedDirs` 等。
-   - 提供 `subscribe(callback)` 机制，让 UI 组件在状态变化时重新渲染。
-   - 导出纯状态操作函数：`addTab(tab)`、`setActiveTab(id)`、`updateTabContent(tabId, content)`、`closeTab(id)` 等。
-   - 状态变更不直接操作 DOM；DOM 更新由各组件订阅后自行处理。
-
-2. **新建 `services/file-service.ts`**
-   - 封装所有 `window.ide.*` 文件相关调用：`readDir`、`readFile`、`writeFile`、`searchFiles`、`move`、`createFile`、`createDir`、`delete`、`rename`、`getFileInfo`。
-   - 实现目录加载、文件树刷新、项目索引构建、轻量 RAG 检索。
-   - 暴露：`loadDirectory(dirPath)`、`refreshDirectory(dirPath)`、`indexProject(folderPath)`、`searchProject(query, topK)`。
-
-3. **新建 `services/agent-bridge.ts`**
-   - 封装 `window.agui.run` 与事件监听。
-   - 实现 `runAgentTurn(userText, scope)`、`callAgentStream(prompt)`。
-   - 实现工具解析：`parseActions(content)`、`stripActions(content)`、`buildToolsPrompt()`。
-   - 实现动作执行：`executeAction(action)`、`requestActionConfirmation(actions)`、`saveSnapshot(filePath)`、`undoLastWrite()`。
-
-#### 第二步：拆分 components 层（UI 与交互）
-
-4. **新建 `components/status-bar.ts`**
-   - 依赖 `services/state.ts`。
-   - 实现 `renderStatusBar()`，订阅状态变化自动更新。
-   - 显示文件路径、修改状态、光标位置、文件类型、换行符风格。
-
-5. **新建 `components/tab-bar.ts`**
-   - 依赖 `services/state.ts`。
-   - 实现 `renderTabs()`、`closeTab(tabId)`、`switchToTab(tabId)`、`reorderTabs(...)`。
-   - 绑定标签点击、关闭、拖拽事件。
-
-6. **新建 `components/editor-pane.ts`**
-   - 依赖 `services/state.ts` 和 `services/file-service.ts`。
-   - 负责 CodeMirror 实例创建/销毁、语言检测、主题/字体应用、快捷键绑定。
-   - 包含 Inline Chat 的 CodeMirror 状态字段、Widget、插件、接受/拒绝逻辑。
-   - 提供 `createEditor()`、`saveCurrentTab()`、`moveCursorTo()`、`getCurrentSelection()`。
-
-7. **新建 `components/file-tree.ts`**
-   - 依赖 `services/state.ts` 和 `services/file-service.ts`。
-   - 实现 `createTreeItem(entry)`、`refreshTreeItem(dirPath)`。
-   - 绑定展开/折叠、文件打开、右键菜单、拖拽移动事件。
-
-8. **新建 `components/command-palette.ts`**
-   - 依赖 `services/state.ts` 和 `services/file-service.ts`。
-   - 实现命令注册、渲染、过滤、执行。
-
-9. **新建 `components/ai-panel.ts`**
-   - 依赖 `services/state.ts` 和 `services/agent-bridge.ts`。
-   - 负责 AI 面板 UI、消息渲染、上下文选择、发送消息、动作确认/撤销。
-
-10. **新建 `components/terminal-panel.ts`**
-    - 依赖 `services/state.ts`。
-    - 负责 xterm.js 实例、终端创建/销毁、面板显隐。
-
-#### 第三步：重写入口与布局
-
-11. **新建 `services/layout.ts`**
-    - 管理面板布局状态：侧边栏、AI 面板、终端面板、搜索面板的显隐与尺寸。
-    - 提供 `toggleSearchPanel()`、`toggleTerminalPanel()`、`toggleAiPanel()`、`applyIdeTheme()`。
-
-12. **将 `ide.ts` 重命名为 `ide-main.ts`**
-    - 删除所有已拆分到 services/components 的逻辑。
-    - 仅保留：DOM 元素引用、窗口控制按钮事件、初始化流程、各组件初始化调用。
-    - 在 `DOMContentLoaded` 中初始化：`status-bar`、`tab-bar`、`editor-pane`、`file-tree`、`command-palette`、`ai-panel`、`terminal-panel`。
-
-13. **更新 `index.html`**
-    - 将 `<script type="module" src="./ide.ts">` 改为 `<script type="module" src="./ide-main.ts">`。
-
-### 4.3 拆分原则
+### 4.2 拆分原则
 
 - **状态单一来源**：所有状态集中在 `services/state.ts`，组件通过订阅更新，避免跨模块直接读写状态。
 - **DOM 归属明确**：每个组件只操作自己负责的 DOM 区域。
 - **IPC 不穿透组件**：所有 `window.ide.*` 调用统一封装到 `services/file-service.ts`，组件只调用 service 函数。
 - **Agent 调用不穿透组件**：所有 Agent 相关逻辑统一封装到 `services/agent-bridge.ts`。
+- **主进程服务隔离**：Git、LSP、文件系统各自独立管理子进程，统一错误处理与资源释放。
 - **逐步验证**：每完成一个文件拆分，运行 `npm run build:renderer` 检查 TypeScript 类型错误；全部完成后运行完整 `npm run build`。
 
-### 4.4 验收标准
+### 4.3 验收标准
 
-- `src/renderer/ide/ide.ts` 不再存在，入口为 `ide-main.ts`。
 - 所有组件和服务文件编译无类型错误。
 - `npm run build` 通过。
 - 功能保持等价：打开文件夹、编辑保存、标签管理、搜索、终端、命令面板、AI 面板、Inline Chat、文件树右键菜单均正常工作。
@@ -509,27 +734,48 @@ src/renderer/ide/
 - 用户确认后才真正调用 `IDE_WRITE_FILE`。
 - 提供「撤销上次 Agent 修改」功能（可保存修改前快照）。
 
-### 5.5 端口问题（阶段 1 必须修复）
-- 当前 `createIdeWindow` 硬编码 `http://localhost:5173/ide/`。
-- 方案 A：在 npm script 里固定 `vite --port 5173 --strictPort`。
-- 方案 B：主进程启动时扫描常用端口，找到 Vite 实际端口后再加载 URL。
-- 推荐方案 A 作为短期修复，方案 B 作为长期方案。
+### 5.5 Git 安全
+- 所有 Git 命令禁止字符串拼接，统一使用 `spawn(command, args, { shell: false })`。
+- 涉及远程仓库操作前需用户确认。
+
+### 5.6 端口问题（阶段 1 已修复）
+- 当前 `createIdeWindow` 已通过环境变量/端口探测动态获取 Vite 端口，不再硬编码 `5173`。
 
 ## 6. 风险与注意事项
 
 1. **范围膨胀**：不要一次性做太多功能。严格按阶段交付，每个阶段结束后验证再进入下一阶段。
 2. **权限安全**：Agent 能读写文件、运行命令，必须设置权限档位，默认 read-only，用户显式授权后才能修改。
 3. **跨平台差异**：Windows / macOS / Linux 路径、shell、快捷键不同，需在主进程做适配。
-4. **性能问题**：项目文件过多时文件树和搜索会变慢，阶段 2 后期需引入虚拟滚动和索引。
+4. **性能问题**：项目文件过多时文件树和搜索会变慢，已引入虚拟滚动与异步索引。
 5. **与现有功能耦合**：IDE 是新增窗口，不要破坏 chat、sidebar、tasks 等现有窗口的稳定性。
+6. **插件安全**：第三方插件运行在隔离环境，敏感操作必须声明权限并由用户授权。
 
 ## 7. 下一步行动
 
-阶段 1、2、3 已完成，阶段 4.2 LSP 支持已完成。接下来进入 **阶段 4.3 Git 集成**，优先完成：
+阶段 1、2、3、4.2 LSP、4.4 多工作区、4.5 性能优化均已完成。接下来优先推进：
 
+### 近期（4-6 周）：Git 集成
 1. 在状态栏显示当前分支名与 Git 状态（clean / modified / ahead / behind）。
-2. 在侧边栏新增 Git 面板，展示变更文件列表（已修改、已暂存、未跟踪）。
+2. 在侧边栏新增 Git 面板，展示变更文件列表（已修改、已暂存、未跟踪、冲突）。
 3. 支持点击文件查看 diff，并勾选/取消暂存。
-4. 提供提交输入框与"提交"按钮。
+4. 提供提交输入框与"提交"按钮，确保命令安全。
+5. 实现 fetch / pull / push 与分支切换。
 
-完成后 Columbina-IDE 将具备基础 Git 工作流支持。
+### 中期（6-10 周）：插件机制 + AI 增强
+1. 定义插件清单与 API，实现插件发现、加载、隔离运行。✅ 已完成
+2. 让插件能注册命令、面板与 Agent 工具。✅ 已完成
+3. 实现 Agent 任务规划与多轮自动执行。✅ 已完成
+4. 实现 Inline 幽灵文本补全与下一行预测。✅ 已完成
+
+### 中期可选扩展：项目级 AI 重构
+- 跨文件重构（重命名、提取函数、移动文件并批量更新引用）。
+- 测试生成（自动检测 Jest / Vitest / Mocha 并生成单元测试）。
+- 代码审查（审查 PR / 变更文件并给出改进建议）。
+
+### 长期（10 周以后）：工程化与发布
+1. 完善自动化测试与错误监控。
+2. 实现设置导出/导入与可选云同步。
+3. 配置 CI/CD，发布 Windows / macOS / Linux 安装包。
+4. 编写用户与开发者文档。
+
+完成后 Columbina-IDE 将具备完整的日常开发工作流支持，并逐步向可扩展、可发布的 AI 原生 IDE 演进。

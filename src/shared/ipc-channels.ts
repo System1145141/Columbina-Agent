@@ -221,6 +221,7 @@ export const IPC = {
   IDE_PICK_FOLDER: "ide:pick-folder",     // 选择文件夹
   IDE_READ_DIR: "ide:read-dir",           // 读取目录
   IDE_READ_FILE: "ide:read-file",         // 读取文件内容
+  IDE_READ_FILE_CHUNK: "ide:read-file-chunk", // 分块读取文件内容
   IDE_WRITE_FILE: "ide:write-file",       // 写入文件内容
   IDE_GET_FILE_INFO: "ide:get-file-info", // 获取文件信息
   IDE_SEARCH_FILES: "ide:search-files",   // 项目内文本搜索
@@ -250,12 +251,26 @@ export const IPC = {
   IDE_GIT_COMMIT: "ide:git-commit",           // 提交
   IDE_GIT_BRANCH: "ide:git-branch",           // 获取当前分支
   IDE_GIT_LOG: "ide:git-log",                 // 获取提交日志
+  IDE_GIT_FETCH: "ide:git-fetch",             // 获取远程更新
+  IDE_GIT_PULL: "ide:git-pull",               // 拉取并合并
+  IDE_GIT_PUSH: "ide:git-push",               // 推送到远程
+  IDE_GIT_BRANCH_LIST: "ide:git-branch-list", // 获取本地与远程分支列表
+  IDE_GIT_CHECKOUT: "ide:git-checkout",       // 切换分支
+  IDE_GIT_CREATE_BRANCH: "ide:git-create-branch", // 创建并切换分支
+  IDE_GIT_DELETE_BRANCH: "ide:git-delete-branch", // 删除本地分支
+  IDE_GIT_STASH_LIST: "ide:git-stash-list",       // 获取 stash 列表
+  IDE_GIT_STASH_SAVE: "ide:git-stash-save",       // stash save
+  IDE_GIT_STASH_POP: "ide:git-stash-pop",         // stash pop / apply
+  IDE_GIT_STASH_DROP: "ide:git-stash-drop",       // stash drop
+  IDE_GIT_CHERRY_PICK: "ide:git-cherry-pick",     // cherry-pick
+  IDE_GIT_REVERT: "ide:git-revert",               // revert
 
   IDE_SAVE_WORKSPACE: "ide:save-workspace",           // 保存工作区文件
   IDE_SAVE_WORKSPACE_SYNC: "ide:save-workspace-sync", // 同步保存工作区（beforeunload 用）
   IDE_OPEN_WORKSPACE: "ide:open-workspace",           // 打开工作区文件
   IDE_GET_WORKSPACE_STATE: "ide:get-workspace-state", // 获取当前/上次工作区状态
   IDE_RELOCATE_ROOT: "ide:relocate-root",             // 重新定位缺失的 Root 文件夹
+  IDE_SET_WORKSPACE_ROOTS: "ide:set-workspace-roots", // 渲染进程同步工作区 roots（用于主进程路径校验）
 
   // call window (voice call)
   CALL_OPEN: "call:open",                 // sidebar → main：打开通话窗口

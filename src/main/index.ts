@@ -42,7 +42,7 @@ import { parseLocalStickerFileFromUrl, resolveLocalStickerPath } from "./sticker
 import { normalizeWindowVisibilitySettings } from "./window-visibility-settings";
 import type { StickerConfigItem } from "../shared/sticker-types";
 import { initReranker, getRerankerInstallStatus } from "./rag/reranker";
-import { setupLspIpc } from "./lsp-manager";
+import { setupLspIpc, stopAllLanguageServers } from "./lsp-manager";
 import { setupGitIpc } from "./git-service";
 import { memoryStore } from "./memory/memory-store"
 import type { L0Profile, L1Profile } from "./memory/memory-types";
@@ -2519,6 +2519,7 @@ function createIdeWindow(): void {
   });
 
   ideWindow.on("closed", () => {
+    cleanupIdeSubprocesses();
     ideWindow = null;
   });
 }
@@ -2986,8 +2987,23 @@ ipcMain.handle(IPC.IDE_PICK_FOLDER, async () => {
   const result = await dialog.showOpenDialog(ideWindow, { properties: ["openDirectory"] });
   return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
 });
+
+// 渲染进程同步工作区 roots 到主进程，用于文件操作 IPC 的路径校验
+ipcMain.on(IPC.IDE_SET_WORKSPACE_ROOTS, (_event, roots: unknown) => {
+  if (!Array.isArray(roots)) return;
+  ideWorkspaceRoots.clear();
+  for (const r of roots) {
+    if (typeof r === "string" && r.length > 0) {
+      ideWorkspaceRoots.add(r);
+    }
+  }
+});
 ipcMain.handle(IPC.IDE_READ_DIR, async (_event, dirPath: unknown) => {
   if (typeof dirPath !== "string") return [];
+  if (!isPathWithinWorkspace(dirPath)) {
+    console.error("[Columbina IDE] readDir blocked: path outside workspace");
+    return [];
+  }
   try {
     const entries = fs.readdirSync(dirPath, { withFileTypes: true });
     return entries
@@ -3001,14 +3017,36 @@ ipcMain.handle(IPC.IDE_READ_DIR, async (_event, dirPath: unknown) => {
 });
 ipcMain.handle(IPC.IDE_READ_FILE, async (_event, filePath: unknown) => {
   if (typeof filePath !== "string") throw new Error("Invalid path");
+  if (!isPathWithinWorkspace(filePath)) throw new Error("路径不在工作区内");
   try {
     return fs.readFileSync(filePath, "utf8");
   } catch (err: any) {
     throw new Error(err?.message || "读取失败");
   }
 });
+ipcMain.handle(IPC.IDE_READ_FILE_CHUNK, async (_event, filePath: unknown, offset: unknown, length: unknown) => {
+  if (typeof filePath !== "string") throw new Error("Invalid path");
+  if (!isPathWithinWorkspace(filePath)) throw new Error("路径不在工作区内");
+  const off = typeof offset === "number" && offset >= 0 ? offset : 0;
+  const len = typeof length === "number" && length > 0 ? length : 500_000;
+  try {
+    const totalSize = fs.statSync(filePath).size;
+    const fd = fs.openSync(filePath, "r");
+    try {
+      const buffer = Buffer.alloc(Math.min(len, totalSize - off));
+      const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, off);
+      const content = buffer.slice(0, bytesRead).toString("utf8");
+      return { content, totalSize, isEnd: off + bytesRead >= totalSize };
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch (err: any) {
+    throw new Error(err?.message || "读取失败");
+  }
+});
 ipcMain.handle(IPC.IDE_WRITE_FILE, async (_event, filePath: unknown, content: unknown) => {
   if (typeof filePath !== "string" || typeof content !== "string") return { ok: false, error: "Invalid args" };
+  if (!isPathWithinWorkspace(filePath)) return { ok: false, error: "路径不在工作区内" };
   try {
     fs.writeFileSync(filePath, content, "utf8");
     return { ok: true };
@@ -3018,6 +3056,7 @@ ipcMain.handle(IPC.IDE_WRITE_FILE, async (_event, filePath: unknown, content: un
 });
 ipcMain.handle(IPC.IDE_GET_FILE_INFO, async (_event, filePath: unknown) => {
   if (typeof filePath !== "string") return { isDirectory: false, size: 0 };
+  if (!isPathWithinWorkspace(filePath)) return { isDirectory: false, size: 0 };
   try {
     const stat = fs.statSync(filePath);
     return { isDirectory: stat.isDirectory(), size: stat.size };
@@ -3029,6 +3068,9 @@ ipcMain.handle(IPC.IDE_GET_FILE_INFO, async (_event, filePath: unknown) => {
 ipcMain.handle(IPC.IDE_MOVE, async (_event, sourcePath: unknown, targetDir: unknown) => {
   if (typeof sourcePath !== "string" || typeof targetDir !== "string") {
     return { ok: false, error: "参数类型错误" };
+  }
+  if (!isPathWithinWorkspace(sourcePath) || !isPathWithinWorkspace(targetDir)) {
+    return { ok: false, error: "路径不在工作区内" };
   }
   try {
     const targetPath = path.join(targetDir, path.basename(sourcePath));
@@ -3061,8 +3103,10 @@ ipcMain.handle(IPC.IDE_CREATE_FILE, async (_event, dirPath: unknown, fileName: u
   if (typeof dirPath !== "string" || typeof fileName !== "string" || fileName.length === 0) {
     return { ok: false, error: "参数类型错误" };
   }
+  if (!isPathWithinWorkspace(dirPath)) return { ok: false, error: "路径不在工作区内" };
   try {
     const filePath = path.join(dirPath, fileName);
+    if (!isPathWithinWorkspace(filePath)) return { ok: false, error: "路径不在工作区内" };
     if (fs.existsSync(filePath)) {
       return { ok: false, error: "文件已存在" };
     }
@@ -3078,8 +3122,10 @@ ipcMain.handle(IPC.IDE_CREATE_DIR, async (_event, dirPath: unknown, dirName: unk
   if (typeof dirPath !== "string" || typeof dirName !== "string" || dirName.length === 0) {
     return { ok: false, error: "参数类型错误" };
   }
+  if (!isPathWithinWorkspace(dirPath)) return { ok: false, error: "路径不在工作区内" };
   try {
     const newDirPath = path.join(dirPath, dirName);
+    if (!isPathWithinWorkspace(newDirPath)) return { ok: false, error: "路径不在工作区内" };
     if (fs.existsSync(newDirPath)) {
       return { ok: false, error: "文件夹已存在" };
     }
@@ -3095,6 +3141,7 @@ ipcMain.handle(IPC.IDE_DELETE, async (_event, targetPath: unknown) => {
   if (typeof targetPath !== "string") {
     return { ok: false, error: "参数类型错误" };
   }
+  if (!isPathWithinWorkspace(targetPath)) return { ok: false, error: "路径不在工作区内" };
   try {
     const stat = await fs.promises.stat(targetPath);
     if (stat.isDirectory()) {
@@ -3113,9 +3160,11 @@ ipcMain.handle(IPC.IDE_RENAME, async (_event, targetPath: unknown, newName: unkn
   if (typeof targetPath !== "string" || typeof newName !== "string" || newName.length === 0) {
     return { ok: false, error: "参数类型错误" };
   }
+  if (!isPathWithinWorkspace(targetPath)) return { ok: false, error: "路径不在工作区内" };
   try {
     const parentDir = path.dirname(targetPath);
     const newPath = path.join(parentDir, newName);
+    if (!isPathWithinWorkspace(newPath)) return { ok: false, error: "路径不在工作区内" };
     if (fs.existsSync(newPath)) {
       return { ok: false, error: "目标名称已存在" };
     }
@@ -3364,6 +3413,48 @@ ipcMain.handle(IPC.IDE_SEARCH_FILES, async (_event, folderPath: unknown, query: 
 });
 
 const ideTerminals = new Map<string, pty.IPty>();
+
+// 主进程维护的工作区 roots 集合，用于文件操作 IPC 的路径校验
+const ideWorkspaceRoots = new Set<string>();
+
+function cleanupIdeSubprocesses(): void {
+  // 清理所有 pty 终端进程
+  for (const [id, term] of ideTerminals) {
+    try {
+      term.kill();
+    } catch (err) {
+      console.error(`[Columbina IDE] kill terminal ${id} failed:`, err);
+    }
+  }
+  ideTerminals.clear();
+
+  // 清理所有 LSP 语言服务器进程
+  try {
+    stopAllLanguageServers();
+  } catch (err) {
+    console.error("[Columbina IDE] stop all LSP servers failed:", err);
+  }
+}
+
+function normalizePathSeparator(p: string): string {
+  return p.replace(/\\/g, "/");
+}
+
+function isPathWithinWorkspace(targetPath: string): boolean {
+  if (ideWorkspaceRoots.size === 0) {
+    // 工作区为空时不强制限制（兼容老配置加载流程）
+    return true;
+  }
+  const resolved = path.resolve(targetPath);
+  const normalized = normalizePathSeparator(resolved);
+  for (const root of ideWorkspaceRoots) {
+    const normalizedRoot = normalizePathSeparator(path.resolve(root));
+    if (normalized === normalizedRoot || normalized.startsWith(normalizedRoot + "/")) {
+      return true;
+    }
+  }
+  return false;
+}
 
 function getDefaultShell(): string {
   const platform = os.platform();

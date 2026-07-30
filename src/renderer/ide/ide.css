@@ -594,6 +594,237 @@ html, body, .ide {
   text-align: center;
 }
 
+.ide__git-branch-row,
+.ide__git-remote-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.ide__git-branch-select {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  background: #3c3c3c;
+  border: 1px solid #3e3e42;
+  color: #cccccc;
+  border-radius: 3px;
+  font-size: 12px;
+  outline: none;
+}
+
+.ide__git-branch-select:focus {
+  border-color: #007acc;
+}
+
+.ide__git-branch-btn,
+.ide__git-remote-btn,
+.ide__git-log-toggle-btn {
+  background: #0e639c;
+  color: #ffffff;
+  border: none;
+  border-radius: 3px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ide__git-branch-btn:hover:not(:disabled),
+.ide__git-remote-btn:hover:not(:disabled),
+.ide__git-log-toggle-btn:hover:not(:disabled) {
+  background: #1177bb;
+}
+
+.ide__git-branch-btn:disabled,
+.ide__git-remote-btn:disabled,
+.ide__git-log-toggle-btn:disabled {
+  background: #3e3e42;
+  color: #858585;
+  cursor: not-allowed;
+}
+
+.ide__git-branch-btn--danger {
+  background: #c75450;
+}
+
+.ide__git-branch-btn--danger:hover:not(:disabled) {
+  background: #e06c75;
+}
+
+.ide__git-log-toggle {
+  display: flex;
+}
+
+.ide__git-log-list {
+  max-height: 160px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  padding: 4px;
+  background: #1e1e1e;
+}
+
+.ide__git-log-entry {
+  padding: 4px 6px;
+  border-radius: 3px;
+  cursor: default;
+}
+
+.ide__git-log-entry:hover {
+  background: #37373d;
+}
+
+.ide__git-log-message {
+  font-size: 12px;
+  color: #cccccc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide__git-log-meta {
+  font-size: 10px;
+  color: #858585;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Stash 列表 */
+.ide__git-stash-list {
+  max-height: 200px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  padding: 6px;
+  background: #1e1e1e;
+}
+
+.ide__git-stash-actions {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.ide__git-stash-btn {
+  flex: 1;
+  background: #0e639c;
+  color: #ffffff;
+  border: none;
+  border-radius: 3px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ide__git-stash-btn:hover:not(:disabled) {
+  background: #1177bb;
+}
+
+.ide__git-stash-btn:disabled {
+  background: #3e3e42;
+  color: #858585;
+  cursor: not-allowed;
+}
+
+.ide__git-stash-entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 3px;
+  background: #252526;
+}
+
+.ide__git-stash-entry:hover {
+  background: #37373d;
+}
+
+.ide__git-stash-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ide__git-stash-index {
+  font-size: 11px;
+  color: #4ec9b0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide__git-stash-message {
+  font-size: 12px;
+  color: #cccccc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide__git-stash-action-btn {
+  background: #0e639c;
+  color: #ffffff;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ide__git-stash-action-btn:hover:not(:disabled) {
+  background: #1177bb;
+}
+
+.ide__git-stash-action-btn:disabled {
+  background: #3e3e42;
+  color: #858585;
+  cursor: not-allowed;
+}
+
+.ide__git-stash-action-btn--danger {
+  background: #c75450;
+}
+
+.ide__git-stash-action-btn--danger:hover:not(:disabled) {
+  background: #e06c75;
+}
+
+/* 提交历史右键菜单 */
+.ide__git-context-menu {
+  position: fixed;
+  z-index: 10000;
+  min-width: 200px;
+  background: #252526;
+  border: 1px solid #454545;
+  border-radius: 4px;
+  padding: 4px 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  user-select: none;
+}
+
+.ide__git-context-item {
+  padding: 6px 14px;
+  font-size: 12px;
+  color: #cccccc;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ide__git-context-item:hover {
+  background: #0e639c;
+  color: #ffffff;
+}
+
 .ide__search-empty {
   color: #858585;
   font-size: 12px;
@@ -822,6 +1053,34 @@ html, body, .ide {
 
 .cm-editor {
   height: 100%;
+}
+
+.ide__large-file-banner {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  background: #2d2d30;
+  color: #cccccc;
+  font-size: 12px;
+  border-bottom: 1px solid #3e3e42;
+  flex-shrink: 0;
+}
+
+.ide__large-file-banner-btn {
+  background: #0e639c;
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ide__large-file-banner-btn:disabled {
+  background: #3e3e42;
+  cursor: not-allowed;
 }
 
 /* Status bar */
@@ -1939,4 +2198,178 @@ html, body, .ide {
 
 .cm-lintRange-hint {
   text-decoration: underline wavy #808080;
+}
+
+/* Inline ghost text completion */
+.ide__ghost-text {
+  color: #6e7681;
+  opacity: 0.85;
+  pointer-events: none;
+  white-space: pre;
+}
+
+.ide.ide--light .ide__ghost-text {
+  color: #9ba3af;
+}
+
+/* AI task plan */
+.ide__ai-plan-card {
+  margin: 10px;
+  padding: 10px;
+  background: #252526;
+  border: 1px solid #3e3e42;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #cccccc;
+}
+
+.ide__ai-plan-header {
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #ffffff;
+}
+
+.ide__ai-plan-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.ide__ai-plan-step {
+  padding: 4px 6px;
+  border-radius: 3px;
+  color: #cccccc;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ide__ai-plan-step.is-done {
+  color: #89d185;
+  background: rgba(35, 134, 54, 0.15);
+}
+
+.ide__ai-plan-step.is-running {
+  color: #9cdcfe;
+  background: rgba(14, 99, 156, 0.15);
+}
+
+.ide__ai-plan-step-input {
+  flex: 1;
+  background: #3c3c3c;
+  border: 1px solid #3e3e42;
+  color: #cccccc;
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+
+.ide__ai-plan-step-input:focus {
+  border-color: #007acc;
+}
+
+.ide.ide--light .ide__ai-plan-step-input {
+  background: #ffffff;
+  border-color: #e5e5e5;
+  color: #333333;
+}
+
+.ide.ide--light .ide__ai-plan-step-input:focus {
+  border-color: #007acc;
+}
+
+.ide__ai-plan-btns {
+  display: flex;
+  gap: 8px;
+}
+
+.ide__ai-plan-btn {
+  flex: 1;
+  padding: 5px 8px;
+  background: #3e3e42;
+  border: 1px solid #3e3e42;
+  color: #cccccc;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.ide__ai-plan-btn:hover {
+  background: #4e4e4e;
+}
+
+.ide__ai-plan-btn--confirm {
+  background: #0e639c;
+  border-color: #0e639c;
+  color: #ffffff;
+}
+
+.ide__ai-plan-btn--confirm:hover {
+  background: #1177bb;
+}
+
+.ide__ai-plan-mode {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #bbbbbb;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+
+.ide__ai-plan-mode-cb {
+  margin: 0;
+}
+
+/* AI task plan light theme */
+.ide.ide--light .ide__ai-plan-card {
+  background: #ffffff;
+  border-color: #e5e5e5;
+  color: #333333;
+}
+
+.ide.ide--light .ide__ai-plan-header {
+  color: #000000;
+}
+
+.ide.ide--light .ide__ai-plan-step {
+  color: #333333;
+}
+
+.ide.ide--light .ide__ai-plan-step.is-done {
+  color: #1f7a1f;
+  background: rgba(35, 134, 54, 0.1);
+}
+
+.ide.ide--light .ide__ai-plan-step.is-running {
+  color: #005a9e;
+  background: rgba(0, 122, 204, 0.1);
+}
+
+.ide.ide--light .ide__ai-plan-btn {
+  background: #f0f0f0;
+  border-color: #e5e5e5;
+  color: #333333;
+}
+
+.ide.ide--light .ide__ai-plan-btn:hover {
+  background: #e5e5e5;
+}
+
+.ide.ide--light .ide__ai-plan-btn--confirm {
+  background: #007acc;
+  border-color: #007acc;
+  color: #ffffff;
+}
+
+.ide.ide--light .ide__ai-plan-btn--confirm:hover {
+  background: #0062a3;
+}
+
+.ide.ide--light .ide__ai-plan-mode {
+  color: #666666;
 }

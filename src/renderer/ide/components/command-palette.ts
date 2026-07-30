@@ -6,17 +6,20 @@ import {
   openFile,
 } from "../services/file-service";
 import { saveCurrentTab } from "./editor-pane";
+import { showPromptDialog } from "./file-tree";
 import {
   goToDefinition,
   renameSymbol,
   findReferences,
   formatDocument,
 } from "./lsp-integration";
+import { runAgentPlan } from "../services/agent-bridge";
 import {
   toggleSearchPanel,
   toggleTerminalPanel,
   toggleIdeTheme,
   changeEditorFontSize,
+  toggleAiPanel,
 } from "../services/layout";
 import { saveWorkspace, openWorkspace } from "../services/workspace-service";
 
@@ -99,6 +102,17 @@ function getBaseCommands(): CommandItem[] {
       run: () => void formatDocument(),
     },
     {
+      id: "ai-task-plan",
+      label: "AI: 规划并执行任务",
+      icon: "🤖",
+      run: async () => {
+        const goal = await showPromptDialog("请输入要 Agent 规划并执行的任务:");
+        if (!goal || !goal.trim()) return;
+        toggleAiPanel();
+        await runAgentPlan(goal.trim(), "project");
+      },
+    },
+    {
       id: "toggle-search",
       label: "切换搜索面板",
       icon: "🔍",
@@ -136,15 +150,33 @@ function getBaseCommands(): CommandItem[] {
 }
 
 async function showQuickOpen() {
-  if (state.roots.length === 0) {
-    commandInputEl.value = "";
-    state.commandItems = [];
-    renderCommandList();
-    return;
-  }
+  state.commandPaletteVisible = true;
+  commandPanelEl.style.display = "flex";
   commandInputEl.placeholder = "输入文件名快速打开";
   commandInputEl.value = "";
   commandInputEl.focus();
+
+  if (state.roots.length === 0) {
+    state.fileCommandItems = [];
+    state.commandItems = [];
+    state.commandSelectedIndex = -1;
+    renderCommandList();
+    return;
+  }
+
+  // 先展示加载中的命令项，避免空白
+  state.fileCommandItems = [];
+  state.commandItems = [
+    {
+      id: "__quick-open-loading__",
+      label: "正在加载文件列表...",
+      icon: "⏳",
+      run: () => {},
+    },
+  ];
+  state.commandSelectedIndex = -1;
+  renderCommandList();
+
   const files: import("../services/state").IdeDirEntry[] = [];
   for (const root of state.roots) {
     files.push(...(await collectFilesForQuickOpen(root.path)));
@@ -167,17 +199,37 @@ async function showQuickOpen() {
   renderCommandList();
 }
 
+function getPluginCommands(): CommandItem[] {
+  return state.pluginCommands.map((cmd) => ({
+    id: `plugin:${cmd.id}`,
+    label: cmd.label,
+    icon: cmd.icon || "🔌",
+    run: async () => {
+      const { executePluginCommand } = await import("../plugins/host");
+      executePluginCommand(cmd.id);
+    },
+  }));
+}
+
 async function showCommandPalette() {
   state.commandPaletteVisible = true;
   commandPanelEl.style.display = "flex";
   commandInputEl.placeholder = "键入命令或搜索文件";
   commandInputEl.value = "";
   commandInputEl.focus();
-  const base = getBaseCommands();
-  const recent = await loadRecentWorkspaceCommands();
-  state.commandItems = [...base, ...recent];
-  state.commandSelectedIndex = state.commandItems.length > 0 ? 0 : -1;
   state.fileCommandItems = [];
+
+  const base = getBaseCommands();
+  const plugins = getPluginCommands();
+  state.commandItems = [...base, ...plugins];
+  state.commandSelectedIndex = state.commandItems.length > 0 ? 0 : -1;
+  renderCommandList();
+
+  // 异步追加最近工作区，避免阻塞首次渲染
+  const recent = await loadRecentWorkspaceCommands();
+  if (!state.commandPaletteVisible) return;
+  state.commandItems = [...base, ...plugins, ...recent];
+  state.commandSelectedIndex = state.commandItems.length > 0 ? 0 : -1;
   renderCommandList();
 }
 
@@ -270,7 +322,9 @@ function filterCommands(query: string) {
       .filter((item) => item.label.toLowerCase().includes(q))
       .slice(0, 50);
   } else {
-    state.commandItems = getBaseCommands().filter((item) => item.label.toLowerCase().includes(q));
+    const base = getBaseCommands();
+    const plugins = getPluginCommands();
+    state.commandItems = [...base, ...plugins].filter((item) => item.label.toLowerCase().includes(q));
   }
   state.commandSelectedIndex = state.commandItems.length > 0 ? 0 : -1;
   renderCommandList();
@@ -300,13 +354,12 @@ export function initCommandPalette(): void {
 
     if (isMod && e.shiftKey && e.key.toLowerCase() === "p") {
       e.preventDefault();
-      showCommandPalette();
+      void showCommandPalette();
       return;
     }
     if (isMod && e.key.toLowerCase() === "p") {
       e.preventDefault();
       void showQuickOpen();
-      showCommandPalette();
       return;
     }
   });

@@ -58,6 +58,10 @@ function renderStatusBar() {
   const ext = getFileExtension(tab.filePath).toUpperCase();
   const endingLabel = lineEndingLabel(tab.lineEnding);
   const parts = [`Ln ${line}, Col ${col}`, ext || "TXT"];
+  if (tab.largeFile && tab.fullSize !== undefined) {
+    const mb = (tab.fullSize / 1024 / 1024).toFixed(2);
+    parts.push(tab.loadedFull ? `大文件 (${mb} MB)` : `大文件未完整加载 (${mb} MB)`);
+  }
   if (endingLabel) parts.push(endingLabel);
 
   const diagnostics = getLspDiagnostics(tab.filePath);

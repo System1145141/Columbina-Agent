@@ -2,6 +2,7 @@ import type { EditorView } from "@codemirror/view";
 import type { Terminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 import type { LspDiagnostic } from "./lsp-client";
+import type { PluginToolParameter } from "../plugins/api";
 
 export interface IdeSearchResult {
   filePath: string;
@@ -25,6 +26,9 @@ export interface Tab {
   currentContent: string;
   modified: boolean;
   lineEnding: "crlf" | "lf" | "mixed" | "unknown";
+  largeFile?: boolean;
+  fullSize?: number;
+  loadedFull?: boolean;
 }
 
 export interface IdeSettings {
@@ -62,11 +66,13 @@ export interface AguiBaseEvent {
 
 export interface AgentAction {
   id: string;
-  type: "read_file" | "write_file" | "search_files" | "run_command";
+  type: "read_file" | "write_file" | "search_files" | "run_command" | "plugin";
   filePath?: string;
   content?: string;
   query?: string;
   command?: string;
+  pluginName?: string;
+  pluginParams?: Record<string, unknown>;
   confirmed?: boolean;
   rejected?: boolean;
 }
@@ -91,6 +97,30 @@ export interface InlineChatSuggestion {
   explanation: string;
 }
 
+export interface AiTaskPlanStep {
+  id: string;
+  description: string;
+  done: boolean;
+  running: boolean;
+}
+
+export interface AiTaskPlan {
+  id: string;
+  goal: string;
+  steps: AiTaskPlanStep[];
+  confirmed: boolean;
+  cancelled: boolean;
+}
+
+export interface InlineCompletion {
+  active: boolean;
+  text: string;
+  from: number;
+  to: number;
+  loading: boolean;
+  filePath: string;
+}
+
 export interface GitStatus {
   branch: string;
   ahead: number;
@@ -100,6 +130,24 @@ export interface GitStatus {
   untracked: string[];
   conflicted: string[];
   clean: boolean;
+}
+
+export interface GitBranchInfo {
+  name: string;
+  current: boolean;
+  remote: boolean;
+}
+
+export interface GitLogEntry {
+  hash: string;
+  message: string;
+  author: string;
+  date: string;
+}
+
+export interface GitStashEntry {
+  index: string;
+  message: string;
 }
 
 export interface InlineChatState {
@@ -162,7 +210,17 @@ export const state = {
   aiRunning: false,
   aiCurrentMessageId: "",
   aiEventUnsub: null as (() => void) | null,
+  aiCurrentPlan: null as AiTaskPlan | null,
+  aiTaskPlanRunning: false,
   fileSnapshots: new Map<string, FileSnapshot>(),
+  inlineCompletion: {
+    active: false,
+    text: "",
+    from: 0,
+    to: 0,
+    loading: false,
+    filePath: "",
+  } as InlineCompletion,
   pendingActionResolve: null as ((value: boolean) => void) | null,
   projectIndex: [] as ProjectIndexEntry[],
 
@@ -184,8 +242,17 @@ export const state = {
   gitSelectedFileByRoot: {} as Record<string, { path: string; staged: boolean }>,
   gitDiffByRoot: {} as Record<string, string>,
   gitLoading: false,
+  gitBranchesByRoot: {} as Record<string, GitBranchInfo[]>,
+  gitLogByRoot: {} as Record<string, GitLogEntry[]>,
+  gitLogVisible: false,
+  gitStashesByRoot: {} as Record<string, GitStashEntry[]>,
+  gitStashVisible: false,
 
   searchSelectedRootIds: [] as string[],
+
+  pluginHosts: [] as { name: string; version: string; ready: boolean; error?: string }[],
+  pluginCommands: [] as { id: string; label: string; icon?: string }[],
+  pluginTools: [] as { name: string; description: string; parameters: Record<string, PluginToolParameter> }[],
 };
 
 type Listener = () => void;
@@ -284,11 +351,20 @@ export function getRootForPath(filePath: string): WorkspaceRoot | undefined {
   return best;
 }
 
+function syncWorkspaceRootsToMain(): void {
+  try {
+    window.ide?.setWorkspaceRoots(state.roots.map((r) => r.path));
+  } catch {
+    // 主进程可能未就绪，忽略
+  }
+}
+
 export function setRoots(roots: WorkspaceRoot[]): void {
   state.roots = roots;
   if (!state.roots.some((r) => r.id === state.activeRootId)) {
     state.activeRootId = state.roots[0]?.id || "";
   }
+  syncWorkspaceRootsToMain();
 }
 
 export function addRoot(path: string): WorkspaceRoot {
@@ -301,6 +377,7 @@ export function addRoot(path: string): WorkspaceRoot {
   const root = createWorkspaceRoot(path);
   state.roots.push(root);
   setActiveRoot(root.id);
+  syncWorkspaceRootsToMain();
   return root;
 }
 
@@ -309,6 +386,7 @@ export function removeRoot(id: string): void {
   if (state.activeRootId === id) {
     state.activeRootId = state.roots[0]?.id || "";
   }
+  syncWorkspaceRootsToMain();
 }
 
 export function setActiveRoot(id: string): void {
@@ -352,6 +430,33 @@ export function removeGitRootData(rootId: string): void {
   delete state.gitStatusByRoot[rootId];
   delete state.gitSelectedFileByRoot[rootId];
   delete state.gitDiffByRoot[rootId];
+  delete state.gitBranchesByRoot[rootId];
+  delete state.gitLogByRoot[rootId];
+  delete state.gitStashesByRoot[rootId];
+}
+
+export function setGitBranchesForRoot(rootId: string, branches: GitBranchInfo[]): void {
+  state.gitBranchesByRoot[rootId] = branches;
+}
+
+export function getGitBranchesForRoot(rootId: string): GitBranchInfo[] {
+  return state.gitBranchesByRoot[rootId] || [];
+}
+
+export function setGitLogForRoot(rootId: string, log: GitLogEntry[]): void {
+  state.gitLogByRoot[rootId] = log;
+}
+
+export function getGitLogForRoot(rootId: string): GitLogEntry[] {
+  return state.gitLogByRoot[rootId] || [];
+}
+
+export function setGitStashesForRoot(rootId: string, stashes: GitStashEntry[]): void {
+  state.gitStashesByRoot[rootId] = stashes;
+}
+
+export function getGitStashesForRoot(rootId: string): GitStashEntry[] {
+  return state.gitStashesByRoot[rootId] || [];
 }
 
 export function setTreeRoot(entries: IdeDirEntry[]): void {
@@ -378,6 +483,29 @@ export function clearTabsAndEditor(): void {
   state.expandedDirs.clear();
 }
 
+export function setInlineCompletion(completion: InlineCompletion): void {
+  state.inlineCompletion = completion;
+}
+
+export function clearInlineCompletion(): void {
+  state.inlineCompletion = {
+    active: false,
+    text: "",
+    from: 0,
+    to: 0,
+    loading: false,
+    filePath: "",
+  };
+}
+
+export function setAiCurrentPlan(plan: AiTaskPlan | null): void {
+  state.aiCurrentPlan = plan;
+}
+
+export function setAiTaskPlanRunning(running: boolean): void {
+  state.aiTaskPlanRunning = running;
+}
+
 declare global {
   interface Window {
     ide?: {
@@ -388,6 +516,7 @@ declare global {
       pickFolder: () => Promise<string | null>;
       readDir: (dirPath: string) => Promise<IdeDirEntry[]>;
       readFile: (filePath: string) => Promise<string>;
+      readFileChunk: (filePath: string, offset: number, length: number) => Promise<{ content: string; totalSize: number; isEnd: boolean }>;
       writeFile: (filePath: string, content: string) => Promise<{ ok: boolean; error?: string }>;
       getFileInfo: (filePath: string) => Promise<{ isDirectory: boolean; size: number }>;
       searchFiles: (
@@ -419,11 +548,25 @@ declare global {
       commitGit: (folderPath: string, message: string) => Promise<{ ok: boolean; error?: string }>;
       getGitBranch: (folderPath: string) => Promise<string>;
       getGitLog: (folderPath: string, maxCount?: number) => Promise<{ hash: string; message: string; author: string; date: string }[]>;
+      fetchGit: (folderPath: string) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      pullGit: (folderPath: string) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      pushGit: (folderPath: string) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      listGitBranches: (folderPath: string) => Promise<GitBranchInfo[]>;
+      checkoutGitBranch: (folderPath: string, branchName: string) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      createGitBranch: (folderPath: string, branchName: string, checkout?: boolean) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      deleteGitBranch: (folderPath: string, branchName: string, force?: boolean) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      listGitStashes: (folderPath: string) => Promise<GitStashEntry[]>;
+      stashGitSave: (folderPath: string, message?: string, includeUntracked?: boolean) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      stashGitPop: (folderPath: string, stashRef: string, applyOnly?: boolean) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      stashGitDrop: (folderPath: string, stashRef: string) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      cherryPickGit: (folderPath: string, commitHash: string, noCommit?: boolean) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      revertGit: (folderPath: string, commitHash: string, noCommit?: boolean) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
       saveWorkspace: (filePath: string | null, state: Record<string, unknown>) => Promise<{ ok: boolean; filePath?: string; error?: string }>;
       saveWorkspaceSync: (filePath: string | null, state: Record<string, unknown>) => { ok: boolean; filePath?: string; error?: string };
       openWorkspace: () => Promise<{ ok: boolean; workspace?: Record<string, unknown>; filePath?: string; error?: string }>;
       getWorkspaceState: () => Promise<{ workspace?: Record<string, unknown>; filePath?: string }>;
       relocateRoot: (oldPath: string) => Promise<string | null>;
+      setWorkspaceRoots: (roots: string[]) => void;
     };
     settings?: {
       getGeneral: () => Promise<Record<string, unknown>>;
