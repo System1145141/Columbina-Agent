@@ -2,6 +2,7 @@ import type { EditorView } from "@codemirror/view";
 import type { Terminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 import type { LspDiagnostic } from "./lsp-client";
+import type { PluginToolParameter } from "../plugins/api";
 
 export interface IdeSearchResult {
   filePath: string;
@@ -65,11 +66,13 @@ export interface AguiBaseEvent {
 
 export interface AgentAction {
   id: string;
-  type: "read_file" | "write_file" | "search_files" | "run_command";
+  type: "read_file" | "write_file" | "search_files" | "run_command" | "plugin";
   filePath?: string;
   content?: string;
   query?: string;
   command?: string;
+  pluginName?: string;
+  pluginParams?: Record<string, unknown>;
   confirmed?: boolean;
   rejected?: boolean;
 }
@@ -205,6 +208,10 @@ export const state = {
   gitLogVisible: false,
 
   searchSelectedRootIds: [] as string[],
+
+  pluginHosts: [] as { name: string; version: string; ready: boolean; error?: string }[],
+  pluginCommands: [] as { id: string; label: string; icon?: string }[],
+  pluginTools: [] as { name: string; description: string; parameters: Record<string, PluginToolParameter> }[],
 };
 
 type Listener = () => void;

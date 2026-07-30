@@ -1,0 +1,25 @@
+{
+  "name": "example-plugin",
+  "version": "1.0.0",
+  "description": "Columbina-IDE 示例插件，演示如何注册命令与 Agent 工具。",
+  "main": "index.js",
+  "permissions": ["agent"],
+  "contributes": {
+    "commands": [
+      { "id": "example-plugin.hello", "label": "示例插件：你好", "icon": "👋" }
+    ],
+    "tools": [
+      {
+        "name": "example-plugin.getCurrentTime",
+        "description": "获取当前时间，可指定时区。",
+        "parameters": {
+          "timezone": {
+            "type": "string",
+            "description": "时区名称，例如 Asia/Shanghai",
+            "required": false
+          }
+        }
+      }
+    ]
+  }
+}

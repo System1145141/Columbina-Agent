@@ -9,6 +9,7 @@ import { initCommandPalette } from "./components/command-palette";
 import { initAiPanel } from "./components/ai-panel";
 import { initTerminalPanel } from "./components/terminal-panel";
 import { initGitPanel } from "./components/git-panel";
+import { initializePlugins } from "./plugins/manager";
 
 function initWindowControls(): void {
   document.getElementById("min-btn")?.addEventListener("click", () => window.ide?.minimize());
@@ -61,6 +62,7 @@ function init(): void {
 
   void loadIdeSettings();
   void restoreWorkspace();
+  void initializePlugins();
 
   window.addEventListener("beforeunload", () => {
     if (state.roots.length > 0) {

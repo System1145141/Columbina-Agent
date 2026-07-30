@@ -185,6 +185,18 @@ async function showQuickOpen() {
   renderCommandList();
 }
 
+function getPluginCommands(): CommandItem[] {
+  return state.pluginCommands.map((cmd) => ({
+    id: `plugin:${cmd.id}`,
+    label: cmd.label,
+    icon: cmd.icon || "🔌",
+    run: async () => {
+      const { executePluginCommand } = await import("../plugins/host");
+      executePluginCommand(cmd.id);
+    },
+  }));
+}
+
 async function showCommandPalette() {
   state.commandPaletteVisible = true;
   commandPanelEl.style.display = "flex";
@@ -194,14 +206,15 @@ async function showCommandPalette() {
   state.fileCommandItems = [];
 
   const base = getBaseCommands();
-  state.commandItems = base;
+  const plugins = getPluginCommands();
+  state.commandItems = [...base, ...plugins];
   state.commandSelectedIndex = state.commandItems.length > 0 ? 0 : -1;
   renderCommandList();
 
   // 异步追加最近工作区，避免阻塞首次渲染
   const recent = await loadRecentWorkspaceCommands();
   if (!state.commandPaletteVisible) return;
-  state.commandItems = [...base, ...recent];
+  state.commandItems = [...base, ...plugins, ...recent];
   state.commandSelectedIndex = state.commandItems.length > 0 ? 0 : -1;
   renderCommandList();
 }
@@ -295,7 +308,9 @@ function filterCommands(query: string) {
       .filter((item) => item.label.toLowerCase().includes(q))
       .slice(0, 50);
   } else {
-    state.commandItems = getBaseCommands().filter((item) => item.label.toLowerCase().includes(q));
+    const base = getBaseCommands();
+    const plugins = getPluginCommands();
+    state.commandItems = [...base, ...plugins].filter((item) => item.label.toLowerCase().includes(q));
   }
   state.commandSelectedIndex = state.commandItems.length > 0 ? 0 : -1;
   renderCommandList();

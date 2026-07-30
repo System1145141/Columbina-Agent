@@ -40,7 +40,7 @@ export function parseActions(content: string): AgentAction[] {
     try {
       const raw = JSON.parse(match[1].trim()) as Record<string, unknown>;
       const type = String(raw.type || "");
-      if (!["read_file", "write_file", "search_files", "run_command"].includes(type)) continue;
+      if (!["read_file", "write_file", "search_files", "run_command", "plugin"].includes(type)) continue;
       actions.push({
         id: `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         type: type as AgentAction["type"],
@@ -48,6 +48,8 @@ export function parseActions(content: string): AgentAction[] {
         content: typeof raw.content === "string" ? raw.content : undefined,
         query: typeof raw.query === "string" ? raw.query : undefined,
         command: typeof raw.command === "string" ? raw.command : undefined,
+        pluginName: typeof raw.pluginName === "string" ? raw.pluginName : undefined,
+        pluginParams: typeof raw.pluginParams === "object" && raw.pluginParams !== null ? (raw.pluginParams as Record<string, unknown>) : undefined,
       });
     } catch {
       // ignore invalid action JSON
@@ -61,7 +63,15 @@ export function stripActions(content: string): string {
 }
 
 export function buildToolsPrompt(): string {
-  return `\n\n你可以使用以下工具来操作项目代码。当需要读取、修改、搜索文件或运行命令时，在回复末尾插入一个或多个 <action>{...}</action> JSON 标记。每个 action 都需要用户确认后才会执行，执行结果会再次发给你。\n\n可用工具：\n1. read_file: 读取文件内容\n   { "type": "read_file", "filePath": "相对或绝对路径" }\n2. write_file: 写入或覆盖文件（危险操作，会保存快照以便撤销）\n   { "type": "write_file", "filePath": "路径", "content": "完整文件内容" }\n3. search_files: 在项目文件夹中搜索文本\n   { "type": "search_files", "query": "搜索关键词" }\n4. run_command: 在集成终端中运行 shell 命令\n   { "type": "run_command", "command": "要执行的命令" }\n\n注意：\n- 不要一次输出过多内容；优先分析再行动。\n- 写文件前最好先读取目标文件。\n- 回复中除了 action 标记外，可以用自然语言向用户说明你的计划。`;
+  const pluginToolLines: string[] = [];
+  for (const tool of state.pluginTools) {
+    const paramsDesc = Object.entries(tool.parameters || {})
+      .map(([key, p]) => `${key}: ${p.type}`)
+      .join(", ");
+    pluginToolLines.push(`- ${tool.name}: ${tool.description}\n   { "type": "plugin", "pluginName": "${tool.name}", "pluginParams": { ${paramsDesc ? `${paramsDesc}` : ""} } }`);
+  }
+
+  return `\n\n你可以使用以下工具来操作项目代码。当需要读取、修改、搜索文件或运行命令时，在回复末尾插入一个或多个 <action>{...}</action> JSON 标记。每个 action 都需要用户确认后才会执行，执行结果会再次发给你。\n\n可用工具：\n1. read_file: 读取文件内容\n   { "type": "read_file", "filePath": "相对或绝对路径" }\n2. write_file: 写入或覆盖文件（危险操作，会保存快照以便撤销）\n   { "type": "write_file", "filePath": "路径", "content": "完整文件内容" }\n3. search_files: 在项目文件夹中搜索文本\n   { "type": "search_files", "query": "搜索关键词" }\n4. run_command: 在集成终端中运行 shell 命令\n   { "type": "run_command", "command": "要执行的命令" }${pluginToolLines.length > 0 ? "\n5. plugin: 调用插件提供的工具\n" + pluginToolLines.join("\n") : ""}\n\n注意：\n- 不要一次输出过多内容；优先分析再行动。\n- 写文件前最好先读取目标文件。\n- 回复中除了 action 标记外，可以用自然语言向用户说明你的计划。`;
 }
 
 export function formatActionLabel(action: AgentAction): string {
@@ -74,6 +84,8 @@ export function formatActionLabel(action: AgentAction): string {
       return `搜索文件: ${action.query || ""}`;
     case "run_command":
       return `运行命令: ${action.command || ""}`;
+    case "plugin":
+      return `插件工具: ${action.pluginName || ""}`;
     default:
       return "未知操作";
   }
@@ -159,6 +171,16 @@ export async function executeAction(action: AgentAction): Promise<AgentActionRes
         return { actionId: action.id, ok: true, output: `已在终端执行: ${action.command}` };
       } catch (err) {
         return { actionId: action.id, ok: false, error: `运行失败: ${String(err)}` };
+      }
+    }
+    case "plugin": {
+      if (!action.pluginName) return { actionId: action.id, ok: false, error: "缺少 pluginName" };
+      try {
+        const { invokePluginTool } = await import("../plugins/host");
+        const result = await invokePluginTool(action.pluginName, action.pluginParams || {});
+        return { actionId: action.id, ok: true, output: typeof result === "string" ? result : JSON.stringify(result, null, 2) };
+      } catch (err) {
+        return { actionId: action.id, ok: false, error: `插件调用失败: ${String(err)}` };
       }
     }
     default:

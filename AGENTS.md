@@ -125,11 +125,19 @@
 
 目标：让 Columbina-IDE 可维护、可扩展，并逐步从"能用"走向"好用"。
 
-#### 4.1 插件机制
+#### 4.1 插件机制 ✅ 已完成
 
 ##### 目标
-- 定义 IDE 插件 API，允许第三方扩展主题、语言支持、侧边栏面板、命令与工具。
+- 定义 IDE 插件 API，允许第三方扩展命令与 Agent 工具（主题、语言、面板能力可后续扩展）。
 - 插件与现有 `plugins` / `skills` 体系打通，Agent 也能调用插件提供的工具。
+
+##### 状态
+- 已定义插件清单 `columbina.plugin.json` 与 `PluginContext` API。
+- 插件在独立 Web Worker 中运行，通过 `postMessage` 与 IDE 宿主通信。
+- 插件可注册命令（自动出现在命令面板）和 Agent 工具（自动加入 tools prompt）。
+- 插件发现路径：`~/.columbina/plugins/` 和工作区本地 `.columbina/plugins/`。
+- 插件崩溃不影响 IDE 主进程。
+- 提供示例插件 `examples/plugin-example/`。
 
 ##### 插件能力分层
 
