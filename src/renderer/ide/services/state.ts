@@ -351,11 +351,20 @@ export function getRootForPath(filePath: string): WorkspaceRoot | undefined {
   return best;
 }
 
+function syncWorkspaceRootsToMain(): void {
+  try {
+    window.ide?.setWorkspaceRoots(state.roots.map((r) => r.path));
+  } catch {
+    // 主进程可能未就绪，忽略
+  }
+}
+
 export function setRoots(roots: WorkspaceRoot[]): void {
   state.roots = roots;
   if (!state.roots.some((r) => r.id === state.activeRootId)) {
     state.activeRootId = state.roots[0]?.id || "";
   }
+  syncWorkspaceRootsToMain();
 }
 
 export function addRoot(path: string): WorkspaceRoot {
@@ -368,6 +377,7 @@ export function addRoot(path: string): WorkspaceRoot {
   const root = createWorkspaceRoot(path);
   state.roots.push(root);
   setActiveRoot(root.id);
+  syncWorkspaceRootsToMain();
   return root;
 }
 
@@ -376,6 +386,7 @@ export function removeRoot(id: string): void {
   if (state.activeRootId === id) {
     state.activeRootId = state.roots[0]?.id || "";
   }
+  syncWorkspaceRootsToMain();
 }
 
 export function setActiveRoot(id: string): void {
@@ -555,6 +566,7 @@ declare global {
       openWorkspace: () => Promise<{ ok: boolean; workspace?: Record<string, unknown>; filePath?: string; error?: string }>;
       getWorkspaceState: () => Promise<{ workspace?: Record<string, unknown>; filePath?: string }>;
       relocateRoot: (oldPath: string) => Promise<string | null>;
+      setWorkspaceRoots: (roots: string[]) => void;
     };
     settings?: {
       getGeneral: () => Promise<Record<string, unknown>>;

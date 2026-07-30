@@ -235,7 +235,7 @@ async function startLanguageServer(languageId: string, workspacePath: string): P
       method: "initialize",
       params: {
         processId: process.pid,
-        rootUri: workspacePath ? `file://${workspacePath}` : null,
+        rootUri: workspacePath ? pathToFileUri(workspacePath) : null,
         capabilities: {
           textDocument: {
             synchronization: { dynamicRegistration: false, willSave: false, willSaveWaitUntil: false, didSave: true },
@@ -276,6 +276,20 @@ function stopLanguageServer(languageId: string, workspacePath: string): void {
     }
   }, 2000);
   sessions.delete(key);
+}
+
+export function stopAllLanguageServers(): void {
+  for (const [key, session] of sessions) {
+    session.closed = true;
+    sendJsonRpc(session, { jsonrpc: "2.0", method: "shutdown", id: ++session.requestId });
+    sendJsonRpc(session, { jsonrpc: "2.0", method: "exit" });
+    setTimeout(() => {
+      if (!session.process.killed) {
+        session.process.kill();
+      }
+    }, 2000);
+    sessions.delete(key);
+  }
 }
 
 function sendLspRequest(languageId: string, workspacePath: string, request: { id: number; method: string; params?: unknown }): void {

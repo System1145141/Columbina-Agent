@@ -96,8 +96,16 @@ export function formatActionLabel(action: AgentAction): string {
   }
 }
 
+const MAX_SNAPSHOTS = 50;
+
 export async function saveSnapshot(filePath: string): Promise<void> {
   if (state.fileSnapshots.has(filePath)) return;
+  // 限制快照数量，超过阈值时清理最旧的（Map 迭代顺序为插入顺序）
+  while (state.fileSnapshots.size >= MAX_SNAPSHOTS) {
+    const oldestKey = state.fileSnapshots.keys().next().value;
+    if (oldestKey === undefined) break;
+    state.fileSnapshots.delete(oldestKey);
+  }
   try {
     const raw = await readFile(filePath);
     state.fileSnapshots.set(filePath, {
@@ -326,7 +334,7 @@ export async function callAgentStream(prompt: string): Promise<{ content: string
   });
 }
 
-export async function runAgentTurn(userText: string, scope: AiContextScope, maxRounds = 5) {
+export async function runAgentTurn(userText: string, scope: AiContextScope, maxRounds = 5, isCancelled?: () => boolean) {
   const userMsgId = `u-${Date.now()}`;
   state.aiMessages.push({ id: userMsgId, role: "user", content: userText });
   notify();
@@ -340,6 +348,7 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
     let prompt = `你是一名资深的编程助手，正在帮助用户在 IDE 中工作。请根据以下上下文回答用户问题。${buildToolsPrompt()}\n\n${initialContext}\n\n用户问题:\n${userText}`;
 
     while (round < maxRounds) {
+      if (isCancelled?.()) break;
       round++;
       const modelMsgId = `m-${Date.now()}-${round}`;
       state.aiCurrentMessageId = modelMsgId;
@@ -347,6 +356,15 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
       notify();
 
       const { content: rawContent } = await callAgentStream(prompt);
+      if (isCancelled?.()) {
+        const modelMsg = state.aiMessages.find((m) => m.id === modelMsgId);
+        if (modelMsg) {
+          modelMsg.content = "(已取消)";
+          modelMsg.thinking = false;
+        }
+        notify();
+        break;
+      }
       const actions = parseActions(rawContent);
       const cleanContent = stripActions(rawContent);
 
@@ -359,6 +377,7 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
       notify();
 
       if (actions.length === 0) break;
+      if (isCancelled?.()) break;
 
       const confirmed = await requestActionConfirmation();
       if (!confirmed) {
@@ -375,6 +394,7 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
 
       const results: AgentActionResult[] = [];
       for (const action of actions) {
+        if (isCancelled?.()) break;
         const result = await executeAction(action);
         results.push(result);
       }
@@ -382,6 +402,8 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
         modelMsg.actionResults = results;
       }
       notify();
+
+      if (isCancelled?.()) break;
 
       const resultText = results
         .map((r) => {
@@ -540,7 +562,7 @@ export async function executeTaskPlan(plan: AiTaskPlan) {
     notify();
 
     try {
-      await runAgentTurn(stepGoal, "project", 3);
+      await runAgentTurn(stepGoal, "project", 3, () => cancelled || plan.cancelled);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       state.aiMessages.push({ id: `e-${Date.now()}-${i}`, role: "model", content: `步骤执行失败: ${errMsg}`, error: true });

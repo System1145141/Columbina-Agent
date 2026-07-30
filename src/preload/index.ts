@@ -234,6 +234,7 @@ const ideApi = {
     ipcRenderer.invoke(IPC.IDE_GET_WORKSPACE_STATE) as Promise<{ workspace?: Record<string, unknown>; filePath?: string }>,
   relocateRoot: (oldPath: string) =>
     ipcRenderer.invoke(IPC.IDE_RELOCATE_ROOT, oldPath) as Promise<string | null>,
+  setWorkspaceRoots: (roots: string[]) => ipcRenderer.send(IPC.IDE_SET_WORKSPACE_ROOTS, roots),
 };
 contextBridge.exposeInMainWorld("ide", ideApi);
 

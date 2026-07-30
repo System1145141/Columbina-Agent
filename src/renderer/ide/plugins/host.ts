@@ -46,6 +46,8 @@ export function getAllPluginTools(): PluginToolContribution[] {
 export function loadPlugin(plugin: LoadedPlugin): PluginHost {
   const existing = hosts.get(plugin.manifest.name);
   if (existing) {
+    // 终止旧 worker 前，先 reject 该插件对应的 pending invocations，避免 30s 超时等待
+    rejectPendingInvocationsForHost(existing);
     existing.worker.terminate();
     hosts.delete(plugin.manifest.name);
   }
@@ -129,6 +131,8 @@ export function loadPlugin(plugin: LoadedPlugin): PluginHost {
 export function unloadPlugin(name: string): void {
   const host = hosts.get(name);
   if (host) {
+    // 卸载前先 reject 该插件的 pending invocations
+    rejectPendingInvocationsForHost(host);
     host.worker.terminate();
     hosts.delete(name);
   }
@@ -139,7 +143,32 @@ export function unloadAllPlugins(): void {
     host.worker.terminate();
   }
   hosts.clear();
+  // 清理所有 pending invocations 并立即 reject
+  for (const { reject } of pendingToolInvocations.values()) {
+    try {
+      reject(new Error("Plugin host is being unloaded"));
+    } catch {
+      // ignore
+    }
+  }
   pendingToolInvocations.clear();
+}
+
+function rejectPendingInvocationsForHost(targetHost: PluginHost): void {
+  // pendingToolInvocations 是全局 Map，无法直接知道哪些属于该 host。
+  // 通过 host.tools 中的工具名匹配 pending ID（ID 格式为 `${toolName}-...`）。
+  const toolNames = new Set(targetHost.tools.map((t) => t.name));
+  for (const [id, entry] of pendingToolInvocations) {
+    const toolName = id.split("-")[0];
+    if (toolNames.has(toolName)) {
+      pendingToolInvocations.delete(id);
+      try {
+        entry.reject(new Error(`Plugin ${targetHost.manifest.name} is being unloaded/reloaded`));
+      } catch {
+        // ignore
+      }
+    }
+  }
 }
 
 export async function invokePluginTool(toolName: string, params: Record<string, unknown>): Promise<unknown> {
