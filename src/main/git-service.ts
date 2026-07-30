@@ -21,6 +21,18 @@ export interface GitLogEntry {
   date: string;
 }
 
+export interface GitBranchInfo {
+  name: string;
+  current: boolean;
+  remote: boolean;
+}
+
+export interface GitResult {
+  ok: boolean;
+  error?: string;
+  stdout?: string;
+}
+
 function toRelativePath(folderPath: string, filePath: string): string {
   if (!path.isAbsolute(filePath)) return filePath.replace(/\\/g, "/");
   return path.relative(folderPath, filePath).replace(/\\/g, "/");
@@ -189,6 +201,68 @@ export async function commit(folderPath: string, message: string): Promise<{ ok:
   return { ok: false, error: stderr.trim() || "提交失败" };
 }
 
+export async function fetch(folderPath: string): Promise<GitResult> {
+  const { exitCode, stderr, stdout } = await execGit(["fetch"], folderPath, { timeout: 60_000 });
+  if (exitCode === 0) return { ok: true, stdout: stdout.trim() };
+  return { ok: false, error: stderr.trim() || "fetch 失败" };
+}
+
+export async function pull(folderPath: string): Promise<GitResult> {
+  const { exitCode, stderr, stdout } = await execGit(["pull"], folderPath, { timeout: 120_000 });
+  if (exitCode === 0) return { ok: true, stdout: stdout.trim() };
+  return { ok: false, error: stderr.trim() || "pull 失败" };
+}
+
+export async function push(folderPath: string): Promise<GitResult> {
+  const { exitCode, stderr, stdout } = await execGit(["push"], folderPath, { timeout: 120_000 });
+  if (exitCode === 0) return { ok: true, stdout: stdout.trim() };
+  return { ok: false, error: stderr.trim() || "push 失败" };
+}
+
+export async function getBranches(folderPath: string): Promise<GitBranchInfo[]> {
+  const { stdout, exitCode } = await execGit(["branch", "-a", "--format=%(refname:short)%(HEAD)"], folderPath);
+  if (exitCode !== 0) return [];
+
+  const branches: GitBranchInfo[] = [];
+  const seen = new Set<string>();
+  for (const line of stdout.split("\n")) {
+    const raw = line.trim();
+    if (!raw) continue;
+    const current = raw.endsWith("*");
+    let name = current ? raw.slice(0, -1) : raw;
+    const remote = name.startsWith("remotes/");
+    if (remote) name = name.slice("remotes/".length);
+    if (seen.has(name)) continue;
+    seen.add(name);
+    branches.push({ name, current, remote });
+  }
+  return branches;
+}
+
+export async function checkoutBranch(folderPath: string, branchName: string): Promise<GitResult> {
+  const { exitCode, stderr, stdout } = await execGit(["checkout", branchName.trim()], folderPath);
+  if (exitCode === 0) return { ok: true, stdout: stdout.trim() };
+  return { ok: false, error: stderr.trim() || `切换到 ${branchName} 失败` };
+}
+
+export async function createBranch(folderPath: string, branchName: string, checkout = true): Promise<GitResult> {
+  const name = branchName.trim();
+  if (!name) return { ok: false, error: "分支名不能为空" };
+  const args = checkout ? ["checkout", "-b", name] : ["branch", name];
+  const { exitCode, stderr, stdout } = await execGit(args, folderPath);
+  if (exitCode === 0) return { ok: true, stdout: stdout.trim() };
+  return { ok: false, error: stderr.trim() || `创建分支 ${name} 失败` };
+}
+
+export async function deleteBranch(folderPath: string, branchName: string, force = false): Promise<GitResult> {
+  const name = branchName.trim();
+  if (!name) return { ok: false, error: "分支名不能为空" };
+  const args = force ? ["branch", "-D", name] : ["branch", "-d", name];
+  const { exitCode, stderr, stdout } = await execGit(args, folderPath);
+  if (exitCode === 0) return { ok: true, stdout: stdout.trim() };
+  return { ok: false, error: stderr.trim() || `删除分支 ${name} 失败` };
+}
+
 export async function getLog(folderPath: string, maxCount = 20): Promise<GitLogEntry[]> {
   const format = "%H%x00%s%x00%an%x00%ad";
   const { stdout, exitCode } = await execGit(
@@ -305,6 +379,82 @@ export function setupGitIpc(): void {
     } catch (err: any) {
       console.error("[Columbina IDE] git log failed:", err?.message || err);
       return [] as GitLogEntry[];
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_FETCH, async (_event, folderPath: unknown) => {
+    if (typeof folderPath !== "string") return { ok: false, error: "参数类型错误" };
+    try {
+      return await fetch(folderPath);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git fetch failed:", err?.message || err);
+      return { ok: false, error: err?.message || "fetch 失败" };
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_PULL, async (_event, folderPath: unknown) => {
+    if (typeof folderPath !== "string") return { ok: false, error: "参数类型错误" };
+    try {
+      return await pull(folderPath);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git pull failed:", err?.message || err);
+      return { ok: false, error: err?.message || "pull 失败" };
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_PUSH, async (_event, folderPath: unknown) => {
+    if (typeof folderPath !== "string") return { ok: false, error: "参数类型错误" };
+    try {
+      return await push(folderPath);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git push failed:", err?.message || err);
+      return { ok: false, error: err?.message || "push 失败" };
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_BRANCH_LIST, async (_event, folderPath: unknown) => {
+    if (typeof folderPath !== "string") return [] as GitBranchInfo[];
+    try {
+      return await getBranches(folderPath);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git branch list failed:", err?.message || err);
+      return [] as GitBranchInfo[];
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_CHECKOUT, async (_event, folderPath: unknown, branchName: unknown) => {
+    if (typeof folderPath !== "string" || typeof branchName !== "string") {
+      return { ok: false, error: "参数类型错误" };
+    }
+    try {
+      return await checkoutBranch(folderPath, branchName);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git checkout failed:", err?.message || err);
+      return { ok: false, error: err?.message || "切换分支失败" };
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_CREATE_BRANCH, async (_event, folderPath: unknown, branchName: unknown, checkout: unknown) => {
+    if (typeof folderPath !== "string" || typeof branchName !== "string") {
+      return { ok: false, error: "参数类型错误" };
+    }
+    try {
+      return await createBranch(folderPath, branchName, checkout !== false);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git create branch failed:", err?.message || err);
+      return { ok: false, error: err?.message || "创建分支失败" };
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_DELETE_BRANCH, async (_event, folderPath: unknown, branchName: unknown, force: unknown) => {
+    if (typeof folderPath !== "string" || typeof branchName !== "string") {
+      return { ok: false, error: "参数类型错误" };
+    }
+    try {
+      return await deleteBranch(folderPath, branchName, force === true);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git delete branch failed:", err?.message || err);
+      return { ok: false, error: err?.message || "删除分支失败" };
     }
   });
 }

@@ -2,17 +2,34 @@ import {
   state,
   subscribe,
   notify,
-  setGitStatusForRoot,
   getGitStatusForRoot,
-  setGitSelectedFileForRoot,
   getGitSelectedFileForRoot,
-  setGitDiffForRoot,
   getGitDiffForRoot,
   removeGitRootData,
+  getGitBranchesForRoot,
+  getGitLogForRoot,
+  setGitSelectedFileForRoot,
+  setGitDiffForRoot,
   type WorkspaceRoot,
 } from "../services/state";
 import { toggleGitPanel } from "../services/layout";
 import { openFile } from "../services/file-service";
+import { showPromptDialog } from "./file-tree";
+import {
+  refreshGitStatus,
+  refreshGitBranches,
+  refreshGitLog,
+  stageGitFile,
+  unstageGitFile,
+  commitGit,
+  getGitDiff,
+  fetchGit,
+  pullGit,
+  pushGit,
+  checkoutGitBranch,
+  createGitBranch,
+  deleteGitBranch,
+} from "../services/git-service";
 
 const gitToggleBtn = document.getElementById("git-toggle-btn") as HTMLButtonElement;
 const gitRefreshBtn = document.getElementById("git-refresh-btn") as HTMLButtonElement;
@@ -39,41 +56,13 @@ function relativeToAbsolute(filePath: string, rootPath: string): string {
   return normRoot + "/" + normFile;
 }
 
-export async function refreshGitStatus(): Promise<void> {
-  if (state.roots.length === 0) {
-    for (const root of state.roots) removeGitRootData(root.id);
-    notify();
-    return;
-  }
-  state.gitLoading = true;
-  notify();
-  try {
-    await Promise.all(
-      state.roots.map(async (root) => {
-        try {
-          const status = await window.ide!.getGitStatus(root.path);
-          setGitStatusForRoot(root.id, status);
-        } catch (err) {
-          console.error(`[IDE] refresh git status failed for ${root.path}:`, err);
-          setGitStatusForRoot(root.id, null);
-        }
-      })
-    );
-  } finally {
-    state.gitLoading = false;
-    notify();
-  }
-}
-
 async function toggleFileStage(rootId: string, filePath: string, staged: boolean): Promise<void> {
   const root = state.roots.find((r) => r.id === rootId);
   if (!root) return;
   state.gitLoading = true;
   notify();
   try {
-    const result = staged
-      ? await window.ide!.unstageGitFile(root.path, filePath)
-      : await window.ide!.stageGitFile(root.path, filePath);
+    const result = staged ? await unstageGitFile(root, filePath) : await stageGitFile(root, filePath);
     if (!result.ok) {
       state.statusMessage = `Git 操作失败: ${result.error || "未知错误"}`;
       notify();
@@ -97,7 +86,7 @@ export async function showDiff(rootId: string, filePath: string, staged: boolean
   state.gitLoading = true;
   notify();
   try {
-    const diff = await window.ide!.getGitDiff(root.path, filePath, staged);
+    const diff = await getGitDiff(root, filePath, staged);
     setGitDiffForRoot(rootId, diff);
   } catch (err) {
     console.error("[IDE] git diff failed:", err);
@@ -129,7 +118,7 @@ async function doCommit(rootId: string, message: string): Promise<void> {
   state.gitLoading = true;
   notify();
   try {
-    const result = await window.ide!.commitGit(root.path, message);
+    const result = await commitGit(root, message);
     if (result.ok) {
       state.statusMessage = `【${root.name}】提交成功`;
       if (selectedRootId === rootId) hideDiff();
@@ -141,6 +130,135 @@ async function doCommit(rootId: string, message: string): Promise<void> {
     state.statusMessage = `【${root.name}】提交失败: ${String(err)}`;
   } finally {
     state.gitLoading = false;
+    notify();
+  }
+}
+
+async function runRemoteAction(
+  rootId: string,
+  action: "fetch" | "pull" | "push"
+): Promise<void> {
+  const root = state.roots.find((r) => r.id === rootId);
+  if (!root) return;
+  const actionName = action === "fetch" ? "获取" : action === "pull" ? "拉取" : "推送";
+  if (action !== "fetch") {
+    const confirmed = confirm(`确定要对【${root.name}】执行 ${actionName} 吗？`);
+    if (!confirmed) return;
+  }
+  state.gitLoading = true;
+  notify();
+  try {
+    const result =
+      action === "fetch" ? await fetchGit(root) : action === "pull" ? await pullGit(root) : await pushGit(root);
+    if (result.ok) {
+      state.statusMessage = `【${root.name}】${actionName}成功`;
+      await refreshGitStatus();
+    } else {
+      state.statusMessage = `【${root.name}】${actionName}失败: ${result.error || "未知错误"}`;
+    }
+  } catch (err) {
+    state.statusMessage = `【${root.name}】${actionName}失败: ${String(err)}`;
+  } finally {
+    state.gitLoading = false;
+    notify();
+  }
+}
+
+async function doCheckoutBranch(rootId: string, branchName: string): Promise<void> {
+  const root = state.roots.find((r) => r.id === rootId);
+  if (!root || !branchName) return;
+  state.gitLoading = true;
+  notify();
+  try {
+    const result = await checkoutGitBranch(root, branchName);
+    if (result.ok) {
+      state.statusMessage = `【${root.name}】已切换到 ${branchName}`;
+      await refreshGitStatus();
+      await refreshGitBranches(root);
+    } else {
+      state.statusMessage = `【${root.name}】切换分支失败: ${result.error || "未知错误"}`;
+    }
+  } catch (err) {
+    state.statusMessage = `【${root.name}】切换分支失败: ${String(err)}`;
+  } finally {
+    state.gitLoading = false;
+    notify();
+  }
+}
+
+async function doCreateBranch(rootId: string): Promise<void> {
+  const root = state.roots.find((r) => r.id === rootId);
+  if (!root) return;
+  const name = await showPromptDialog("请输入新分支名:");
+  if (!name || !name.trim()) return;
+  state.gitLoading = true;
+  notify();
+  try {
+    const result = await createGitBranch(root, name.trim());
+    if (result.ok) {
+      state.statusMessage = `【${root.name}】已创建并切换到 ${name.trim()}`;
+      await refreshGitStatus();
+      await refreshGitBranches(root);
+    } else {
+      state.statusMessage = `【${root.name}】创建分支失败: ${result.error || "未知错误"}`;
+    }
+  } catch (err) {
+    state.statusMessage = `【${root.name}】创建分支失败: ${String(err)}`;
+  } finally {
+    state.gitLoading = false;
+    notify();
+  }
+}
+
+async function doDeleteBranch(rootId: string, branchName: string): Promise<void> {
+  const root = state.roots.find((r) => r.id === rootId);
+  if (!root || !branchName) return;
+  const status = getGitStatusForRoot(rootId);
+  if (status?.branch === branchName) {
+    state.statusMessage = `【${root.name}】不能删除当前所在分支`;
+    notify();
+    return;
+  }
+  const confirmed = confirm(`确定要删除分支 "${branchName}" 吗？`);
+  if (!confirmed) return;
+  state.gitLoading = true;
+  notify();
+  try {
+    const result = await deleteGitBranch(root, branchName);
+    if (result.ok) {
+      state.statusMessage = `【${root.name}】已删除 ${branchName}`;
+      await refreshGitBranches(root);
+    } else {
+      const force = confirm(`删除失败: ${result.error || "未知错误"}\n\n是否强制删除？`);
+      if (force) {
+        const forceResult = await deleteGitBranch(root, branchName, true);
+        state.statusMessage = forceResult.ok
+          ? `【${root.name}】已强制删除 ${branchName}`
+          : `【${root.name}】强制删除失败: ${forceResult.error || "未知错误"}`;
+        if (forceResult.ok) await refreshGitBranches(root);
+      } else {
+        state.statusMessage = `【${root.name}】删除分支失败: ${result.error || "未知错误"}`;
+      }
+    }
+  } catch (err) {
+    state.statusMessage = `【${root.name}】删除分支失败: ${String(err)}`;
+  } finally {
+    state.gitLoading = false;
+    notify();
+  }
+}
+
+async function toggleLogVisibility(rootId: string): Promise<void> {
+  const root = state.roots.find((r) => r.id === rootId);
+  if (!root) return;
+  state.gitLogVisible = !state.gitLogVisible;
+  if (state.gitLogVisible) {
+    state.gitLoading = true;
+    notify();
+    await refreshGitLog(root, 30);
+    state.gitLoading = false;
+    notify();
+  } else {
     notify();
   }
 }
@@ -239,6 +357,119 @@ function renderDiff(): void {
   gitDiffContentEl.scrollTop = 0;
 }
 
+function renderBranchControls(root: WorkspaceRoot, container: HTMLElement): void {
+  const branches = getGitBranchesForRoot(root.id);
+  const status = getGitStatusForRoot(root.id);
+  const currentBranch = status?.branch || "";
+
+  const row = document.createElement("div");
+  row.className = "ide__git-branch-row";
+
+  const select = document.createElement("select");
+  select.className = "ide__git-branch-select";
+  select.disabled = state.gitLoading;
+  if (branches.length === 0) {
+    const opt = document.createElement("option");
+    opt.textContent = currentBranch || "分支";
+    select.appendChild(opt);
+  } else {
+    for (const b of branches) {
+      if (b.remote) continue;
+      const opt = document.createElement("option");
+      opt.value = b.name;
+      opt.textContent = (b.current ? "● " : "") + b.name;
+      opt.selected = b.current;
+      select.appendChild(opt);
+    }
+  }
+  select.addEventListener("change", () => {
+    if (select.value && select.value !== currentBranch) {
+      void doCheckoutBranch(root.id, select.value);
+    }
+  });
+
+  const newBtn = document.createElement("button");
+  newBtn.type = "button";
+  newBtn.className = "ide__git-branch-btn";
+  newBtn.textContent = "+";
+  newBtn.title = "新建分支";
+  newBtn.disabled = state.gitLoading;
+  newBtn.addEventListener("click", () => void doCreateBranch(root.id));
+
+  const delBtn = document.createElement("button");
+  delBtn.type = "button";
+  delBtn.className = "ide__git-branch-btn ide__git-branch-btn--danger";
+  delBtn.textContent = "−";
+  delBtn.title = "删除分支";
+  delBtn.disabled = state.gitLoading || !currentBranch;
+  delBtn.addEventListener("click", () => {
+    const target = select.value;
+    if (target) void doDeleteBranch(root.id, target);
+  });
+
+  row.appendChild(select);
+  row.appendChild(newBtn);
+  row.appendChild(delBtn);
+  container.appendChild(row);
+}
+
+function renderRemoteControls(root: WorkspaceRoot, container: HTMLElement): void {
+  const row = document.createElement("div");
+  row.className = "ide__git-remote-row";
+
+  const fetchBtn = document.createElement("button");
+  fetchBtn.type = "button";
+  fetchBtn.className = "ide__git-remote-btn";
+  fetchBtn.textContent = "获取";
+  fetchBtn.disabled = state.gitLoading;
+  fetchBtn.addEventListener("click", () => void runRemoteAction(root.id, "fetch"));
+
+  const pullBtn = document.createElement("button");
+  pullBtn.type = "button";
+  pullBtn.className = "ide__git-remote-btn";
+  pullBtn.textContent = "拉取";
+  pullBtn.disabled = state.gitLoading;
+  pullBtn.addEventListener("click", () => void runRemoteAction(root.id, "pull"));
+
+  const pushBtn = document.createElement("button");
+  pushBtn.type = "button";
+  pushBtn.className = "ide__git-remote-btn";
+  pushBtn.textContent = "推送";
+  pushBtn.disabled = state.gitLoading;
+  pushBtn.addEventListener("click", () => void runRemoteAction(root.id, "push"));
+
+  row.appendChild(fetchBtn);
+  row.appendChild(pullBtn);
+  row.appendChild(pushBtn);
+  container.appendChild(row);
+}
+
+function renderLog(root: WorkspaceRoot, container: HTMLElement): void {
+  const log = getGitLogForRoot(root.id);
+  container.innerHTML = "";
+  if (log.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "ide__git-empty";
+    empty.textContent = "暂无提交历史";
+    container.appendChild(empty);
+    return;
+  }
+  for (const entry of log) {
+    const row = document.createElement("div");
+    row.className = "ide__git-log-entry";
+    const msg = document.createElement("div");
+    msg.className = "ide__git-log-message";
+    msg.textContent = entry.message;
+    msg.title = entry.hash;
+    const meta = document.createElement("div");
+    meta.className = "ide__git-log-meta";
+    meta.textContent = `${entry.author} · ${entry.date}`;
+    row.appendChild(msg);
+    row.appendChild(meta);
+    container.appendChild(row);
+  }
+}
+
 function renderGitRoot(root: WorkspaceRoot): HTMLElement {
   const rootEl = document.createElement("div");
   rootEl.className = "ide__git-root";
@@ -270,6 +501,27 @@ function renderGitRoot(root: WorkspaceRoot): HTMLElement {
   rootEl.appendChild(header);
 
   if (!status) return rootEl;
+
+  renderBranchControls(root, rootEl);
+  renderRemoteControls(root, rootEl);
+
+  const logToggleRow = document.createElement("div");
+  logToggleRow.className = "ide__git-log-toggle";
+  const logToggleBtn = document.createElement("button");
+  logToggleBtn.type = "button";
+  logToggleBtn.className = "ide__git-log-toggle-btn";
+  logToggleBtn.textContent = state.gitLogVisible ? "隐藏提交历史" : "显示提交历史";
+  logToggleBtn.disabled = state.gitLoading;
+  logToggleBtn.addEventListener("click", () => void toggleLogVisibility(root.id));
+  logToggleRow.appendChild(logToggleBtn);
+  rootEl.appendChild(logToggleRow);
+
+  if (state.gitLogVisible) {
+    const logList = document.createElement("div");
+    logList.className = "ide__git-log-list";
+    renderLog(root, logList);
+    rootEl.appendChild(logList);
+  }
 
   const stagedList = document.createElement("div");
   stagedList.className = "ide__git-list";
@@ -333,7 +585,6 @@ function renderGitPanel() {
   const rootsKey = state.roots.map((r) => r.id).join("|");
   if (lastRootsKey !== rootsKey) {
     lastRootsKey = rootsKey;
-    // Clean up data for roots that are no longer present
     for (const id of Object.keys(state.gitStatusByRoot)) {
       if (!state.roots.some((r) => r.id === id)) removeGitRootData(id);
     }
@@ -341,6 +592,9 @@ function renderGitPanel() {
       selectedRootId = "";
     }
     void refreshGitStatus();
+    for (const root of state.roots) {
+      void refreshGitBranches(root);
+    }
   }
 
   gitRootsEl.innerHTML = "";
@@ -358,7 +612,10 @@ function renderGitPanel() {
 
 export function initGitPanel(): void {
   gitToggleBtn.addEventListener("click", () => toggleGitPanel());
-  gitRefreshBtn.addEventListener("click", () => void refreshGitStatus());
+  gitRefreshBtn.addEventListener("click", () => {
+    for (const root of state.roots) void refreshGitBranches(root);
+    void refreshGitStatus();
+  });
   gitDiffCloseBtn.addEventListener("click", hideDiff);
   gitOpenDiffBtn.addEventListener("click", () => {
     const selected = selectedRootId ? getGitSelectedFileForRoot(selectedRootId) : null;
@@ -372,9 +629,9 @@ export function initGitPanel(): void {
     renderGitPanel();
   });
 
-  // Refresh when window regains focus
   window.addEventListener("focus", () => {
     if (state.gitPanelVisible && state.roots.length > 0) {
+      for (const root of state.roots) void refreshGitBranches(root);
       void refreshGitStatus();
     }
   });

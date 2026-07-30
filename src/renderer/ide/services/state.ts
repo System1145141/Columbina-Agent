@@ -105,6 +105,19 @@ export interface GitStatus {
   clean: boolean;
 }
 
+export interface GitBranchInfo {
+  name: string;
+  current: boolean;
+  remote: boolean;
+}
+
+export interface GitLogEntry {
+  hash: string;
+  message: string;
+  author: string;
+  date: string;
+}
+
 export interface InlineChatState {
   open: boolean;
   from: number;
@@ -187,6 +200,9 @@ export const state = {
   gitSelectedFileByRoot: {} as Record<string, { path: string; staged: boolean }>,
   gitDiffByRoot: {} as Record<string, string>,
   gitLoading: false,
+  gitBranchesByRoot: {} as Record<string, GitBranchInfo[]>,
+  gitLogByRoot: {} as Record<string, GitLogEntry[]>,
+  gitLogVisible: false,
 
   searchSelectedRootIds: [] as string[],
 };
@@ -355,6 +371,24 @@ export function removeGitRootData(rootId: string): void {
   delete state.gitStatusByRoot[rootId];
   delete state.gitSelectedFileByRoot[rootId];
   delete state.gitDiffByRoot[rootId];
+  delete state.gitBranchesByRoot[rootId];
+  delete state.gitLogByRoot[rootId];
+}
+
+export function setGitBranchesForRoot(rootId: string, branches: GitBranchInfo[]): void {
+  state.gitBranchesByRoot[rootId] = branches;
+}
+
+export function getGitBranchesForRoot(rootId: string): GitBranchInfo[] {
+  return state.gitBranchesByRoot[rootId] || [];
+}
+
+export function setGitLogForRoot(rootId: string, log: GitLogEntry[]): void {
+  state.gitLogByRoot[rootId] = log;
+}
+
+export function getGitLogForRoot(rootId: string): GitLogEntry[] {
+  return state.gitLogByRoot[rootId] || [];
 }
 
 export function setTreeRoot(entries: IdeDirEntry[]): void {
@@ -423,6 +457,13 @@ declare global {
       commitGit: (folderPath: string, message: string) => Promise<{ ok: boolean; error?: string }>;
       getGitBranch: (folderPath: string) => Promise<string>;
       getGitLog: (folderPath: string, maxCount?: number) => Promise<{ hash: string; message: string; author: string; date: string }[]>;
+      fetchGit: (folderPath: string) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      pullGit: (folderPath: string) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      pushGit: (folderPath: string) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      listGitBranches: (folderPath: string) => Promise<GitBranchInfo[]>;
+      checkoutGitBranch: (folderPath: string, branchName: string) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      createGitBranch: (folderPath: string, branchName: string, checkout?: boolean) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      deleteGitBranch: (folderPath: string, branchName: string, force?: boolean) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
       saveWorkspace: (filePath: string | null, state: Record<string, unknown>) => Promise<{ ok: boolean; filePath?: string; error?: string }>;
       saveWorkspaceSync: (filePath: string | null, state: Record<string, unknown>) => { ok: boolean; filePath?: string; error?: string };
       openWorkspace: () => Promise<{ ok: boolean; workspace?: Record<string, unknown>; filePath?: string; error?: string }>;

@@ -594,6 +594,105 @@ html, body, .ide {
   text-align: center;
 }
 
+.ide__git-branch-row,
+.ide__git-remote-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.ide__git-branch-select {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  background: #3c3c3c;
+  border: 1px solid #3e3e42;
+  color: #cccccc;
+  border-radius: 3px;
+  font-size: 12px;
+  outline: none;
+}
+
+.ide__git-branch-select:focus {
+  border-color: #007acc;
+}
+
+.ide__git-branch-btn,
+.ide__git-remote-btn,
+.ide__git-log-toggle-btn {
+  background: #0e639c;
+  color: #ffffff;
+  border: none;
+  border-radius: 3px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ide__git-branch-btn:hover:not(:disabled),
+.ide__git-remote-btn:hover:not(:disabled),
+.ide__git-log-toggle-btn:hover:not(:disabled) {
+  background: #1177bb;
+}
+
+.ide__git-branch-btn:disabled,
+.ide__git-remote-btn:disabled,
+.ide__git-log-toggle-btn:disabled {
+  background: #3e3e42;
+  color: #858585;
+  cursor: not-allowed;
+}
+
+.ide__git-branch-btn--danger {
+  background: #c75450;
+}
+
+.ide__git-branch-btn--danger:hover:not(:disabled) {
+  background: #e06c75;
+}
+
+.ide__git-log-toggle {
+  display: flex;
+}
+
+.ide__git-log-list {
+  max-height: 160px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  padding: 4px;
+  background: #1e1e1e;
+}
+
+.ide__git-log-entry {
+  padding: 4px 6px;
+  border-radius: 3px;
+  cursor: default;
+}
+
+.ide__git-log-entry:hover {
+  background: #37373d;
+}
+
+.ide__git-log-message {
+  font-size: 12px;
+  color: #cccccc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide__git-log-meta {
+  font-size: 10px;
+  color: #858585;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ide__search-empty {
   color: #858585;
   font-size: 12px;

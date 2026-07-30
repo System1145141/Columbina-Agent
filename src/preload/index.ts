@@ -202,6 +202,16 @@ const ideApi = {
     ipcRenderer.invoke(IPC.IDE_GIT_COMMIT, folderPath, message),
   getGitBranch: (folderPath: string) => ipcRenderer.invoke(IPC.IDE_GIT_BRANCH, folderPath),
   getGitLog: (folderPath: string, maxCount?: number) => ipcRenderer.invoke(IPC.IDE_GIT_LOG, folderPath, maxCount),
+  fetchGit: (folderPath: string) => ipcRenderer.invoke(IPC.IDE_GIT_FETCH, folderPath),
+  pullGit: (folderPath: string) => ipcRenderer.invoke(IPC.IDE_GIT_PULL, folderPath),
+  pushGit: (folderPath: string) => ipcRenderer.invoke(IPC.IDE_GIT_PUSH, folderPath),
+  listGitBranches: (folderPath: string) =>
+    ipcRenderer.invoke(IPC.IDE_GIT_BRANCH_LIST, folderPath) as Promise<{ name: string; current: boolean; remote: boolean }[]>,
+  checkoutGitBranch: (folderPath: string, branchName: string) => ipcRenderer.invoke(IPC.IDE_GIT_CHECKOUT, folderPath, branchName),
+  createGitBranch: (folderPath: string, branchName: string, checkout?: boolean) =>
+    ipcRenderer.invoke(IPC.IDE_GIT_CREATE_BRANCH, folderPath, branchName, checkout),
+  deleteGitBranch: (folderPath: string, branchName: string, force?: boolean) =>
+    ipcRenderer.invoke(IPC.IDE_GIT_DELETE_BRANCH, folderPath, branchName, force),
   saveWorkspace: (filePath: string | null, state: Record<string, unknown>) =>
     ipcRenderer.invoke(IPC.IDE_SAVE_WORKSPACE, filePath, state) as Promise<{ ok: boolean; filePath?: string; error?: string }>,
   saveWorkspaceSync: (filePath: string | null, state: Record<string, unknown>) =>

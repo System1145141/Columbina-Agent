@@ -251,6 +251,13 @@ export const IPC = {
   IDE_GIT_COMMIT: "ide:git-commit",           // 提交
   IDE_GIT_BRANCH: "ide:git-branch",           // 获取当前分支
   IDE_GIT_LOG: "ide:git-log",                 // 获取提交日志
+  IDE_GIT_FETCH: "ide:git-fetch",             // 获取远程更新
+  IDE_GIT_PULL: "ide:git-pull",               // 拉取并合并
+  IDE_GIT_PUSH: "ide:git-push",               // 推送到远程
+  IDE_GIT_BRANCH_LIST: "ide:git-branch-list", // 获取本地与远程分支列表
+  IDE_GIT_CHECKOUT: "ide:git-checkout",       // 切换分支
+  IDE_GIT_CREATE_BRANCH: "ide:git-create-branch", // 创建并切换分支
+  IDE_GIT_DELETE_BRANCH: "ide:git-delete-branch", // 删除本地分支
 
   IDE_SAVE_WORKSPACE: "ide:save-workspace",           // 保存工作区文件
   IDE_SAVE_WORKSPACE_SYNC: "ide:save-workspace-sync", // 同步保存工作区（beforeunload 用）
