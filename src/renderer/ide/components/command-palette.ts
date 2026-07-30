@@ -136,15 +136,33 @@ function getBaseCommands(): CommandItem[] {
 }
 
 async function showQuickOpen() {
-  if (state.roots.length === 0) {
-    commandInputEl.value = "";
-    state.commandItems = [];
-    renderCommandList();
-    return;
-  }
+  state.commandPaletteVisible = true;
+  commandPanelEl.style.display = "flex";
   commandInputEl.placeholder = "输入文件名快速打开";
   commandInputEl.value = "";
   commandInputEl.focus();
+
+  if (state.roots.length === 0) {
+    state.fileCommandItems = [];
+    state.commandItems = [];
+    state.commandSelectedIndex = -1;
+    renderCommandList();
+    return;
+  }
+
+  // 先展示加载中的命令项，避免空白
+  state.fileCommandItems = [];
+  state.commandItems = [
+    {
+      id: "__quick-open-loading__",
+      label: "正在加载文件列表...",
+      icon: "⏳",
+      run: () => {},
+    },
+  ];
+  state.commandSelectedIndex = -1;
+  renderCommandList();
+
   const files: import("../services/state").IdeDirEntry[] = [];
   for (const root of state.roots) {
     files.push(...(await collectFilesForQuickOpen(root.path)));
@@ -173,11 +191,18 @@ async function showCommandPalette() {
   commandInputEl.placeholder = "键入命令或搜索文件";
   commandInputEl.value = "";
   commandInputEl.focus();
+  state.fileCommandItems = [];
+
   const base = getBaseCommands();
+  state.commandItems = base;
+  state.commandSelectedIndex = state.commandItems.length > 0 ? 0 : -1;
+  renderCommandList();
+
+  // 异步追加最近工作区，避免阻塞首次渲染
   const recent = await loadRecentWorkspaceCommands();
+  if (!state.commandPaletteVisible) return;
   state.commandItems = [...base, ...recent];
   state.commandSelectedIndex = state.commandItems.length > 0 ? 0 : -1;
-  state.fileCommandItems = [];
   renderCommandList();
 }
 
@@ -300,13 +325,12 @@ export function initCommandPalette(): void {
 
     if (isMod && e.shiftKey && e.key.toLowerCase() === "p") {
       e.preventDefault();
-      showCommandPalette();
+      void showCommandPalette();
       return;
     }
     if (isMod && e.key.toLowerCase() === "p") {
       e.preventDefault();
       void showQuickOpen();
-      showCommandPalette();
       return;
     }
   });
