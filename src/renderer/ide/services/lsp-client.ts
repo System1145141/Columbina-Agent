@@ -178,8 +178,12 @@ class LspClient {
 
 const clients = new Map<string, LspClient>();
 
+function normalizeWorkspacePath(p: string): string {
+  return p.replace(/\\/g, "/");
+}
+
 function getClientKey(languageId: string, workspacePath: string): string {
-  return `${languageId}|${workspacePath}`;
+  return `${languageId}|${normalizeWorkspacePath(workspacePath)}`;
 }
 
 export function getLspClient(languageId: string, workspacePath: string): LspClient {

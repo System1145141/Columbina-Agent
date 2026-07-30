@@ -88,6 +88,11 @@ function buildSessionKey(languageId: string, workspacePath: string): string {
   return `${languageId}|${workspacePath}`;
 }
 
+function pathToFileUri(p: string): string {
+  const normalized = p.replace(/\\/g, "/");
+  return normalized.startsWith("/") ? `file://${normalized}` : `file:///${normalized}`;
+}
+
 function parseHeaderLength(header: string): number | null {
   const match = header.match(/Content-Length:\s*(\d+)/i);
   return match ? parseInt(match[1], 10) : null;
@@ -243,7 +248,7 @@ async function startLanguageServer(languageId: string, workspacePath: string): P
           },
           workspace: { applyEdit: true, workspaceEdit: { documentChanges: false } },
         },
-        workspaceFolders: workspacePath ? [{ uri: `file://${workspacePath}`, name: path.basename(workspacePath) }] : null,
+        workspaceFolders: workspacePath ? [{ uri: pathToFileUri(workspacePath), name: path.basename(workspacePath) }] : null,
       },
     });
 

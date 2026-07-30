@@ -57,9 +57,11 @@ export function normalizeLineEndings(content: string): string {
 }
 
 export function encodeLineEndings(content: string, lineEnding: Tab["lineEnding"]): string {
-  if (lineEnding === "crlf" || lineEnding === "mixed") {
+  if (lineEnding === "crlf") {
     return content.replace(/\n/g, "\r\n").replace(/\r\r\n/g, "\r\n");
   }
+  // "mixed"/"lf"/"unknown" 保持 LF（内容已由 normalizeLineEndings 统一为 LF，
+  // 避免强制把所有行尾转成 CRLF 而丢失 mixed 语义）
   return content;
 }
 

@@ -145,7 +145,8 @@ export async function getStatus(folderPath: string): Promise<GitStatusResult> {
     const workTree = line[1] ?? " ";
     const rest = line.slice(3);
 
-    const arrowIdx = rest.indexOf(" -> ");
+    const isRenameOrCopy = index === "R" || index === "C";
+    const arrowIdx = isRenameOrCopy ? rest.indexOf(" -> ") : -1;
     const filePath = arrowIdx > 0 ? rest.slice(arrowIdx + 4) : rest;
     if (!filePath) continue;
 

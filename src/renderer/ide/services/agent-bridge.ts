@@ -213,28 +213,30 @@ export function updateUndoButton(): void {
 
 export async function undoLastWrite(): Promise<void> {
   if (state.fileSnapshots.size === 0) return;
-  const [first] = state.fileSnapshots.values();
-  if (!first) return;
-  if (!confirm(`确定撤销对 "${basename(first.filePath)}" 的修改吗？`)) return;
+  // Map 迭代顺序为插入顺序，取最后一个即最近一次写入的快照
+  const snapshots = Array.from(state.fileSnapshots.values());
+  const last = snapshots.pop();
+  if (!last) return;
+  if (!confirm(`确定撤销对 "${basename(last.filePath)}" 的修改吗？`)) return;
   try {
-    const output = encodeLineEndings(first.content, first.lineEnding);
-    const result = await writeFile(first.filePath, output);
+    const output = encodeLineEndings(last.content, last.lineEnding);
+    const result = await writeFile(last.filePath, output);
     if (result.ok) {
-      const tab = state.tabs.get(first.filePath);
+      const tab = state.tabs.get(last.filePath);
       if (tab) {
-        tab.initialContent = first.content;
-        tab.currentContent = first.content;
+        tab.initialContent = last.content;
+        tab.currentContent = last.content;
         tab.modified = false;
-        tab.lineEnding = first.lineEnding;
-        if (state.activeTabId === first.filePath && state.editorView) {
+        tab.lineEnding = last.lineEnding;
+        if (state.activeTabId === last.filePath && state.editorView) {
           state.editorView.dispatch({
             changes: { from: 0, to: state.editorView.state.doc.length, insert: tab.currentContent },
           });
         }
       }
-      state.fileSnapshots.delete(first.filePath);
+      state.fileSnapshots.delete(last.filePath);
       notify();
-      state.aiMessages.push({ id: `s-${Date.now()}`, role: "model", content: `已撤销对 ${first.filePath} 的修改` });
+      state.aiMessages.push({ id: `s-${Date.now()}`, role: "model", content: `已撤销对 ${last.filePath} 的修改` });
       notify();
     } else {
       alert(`撤销失败: ${result.error || "未知错误"}`);

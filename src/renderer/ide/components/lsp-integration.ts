@@ -4,7 +4,7 @@ import { hoverTooltip, keymap, ViewPlugin, EditorView, type ViewUpdate } from "@
 import { StateEffect, StateField, EditorState, type Extension, type Text } from "@codemirror/state";
 import { getLspClient, removeLspClient, type LspClient, type LspDiagnostic, type LspRange } from "../services/lsp-client";
 import { state, subscribe, notify, setLspDiagnostics, getLspDiagnostics, getRootForPath, type IdeSearchResult } from "../services/state";
-import { getFileExtension, openFileAt, readFile, writeFile } from "../services/file-service";
+import { getFileExtension, openFileAt, readFile, writeFile, encodeLineEndings } from "../services/file-service";
 import { showReferencesResults } from "./file-tree";
 
 let lastLspRootsKey = "";
@@ -172,7 +172,7 @@ function ensureDiagnosticsHandler(client: LspClient): void {
 
 function getLspContext(filePath: string): { client: LspClient; languageId: string; workspacePath: string } | null {
   const languageId = getLanguageId(filePath);
-  const root = getRootForPath(filePath) || state.roots[0];
+  const root = getRootForPath(filePath);
   const workspacePath = root?.path;
   if (!languageId || !workspacePath) return null;
   const client = getLspClient(languageId, workspacePath);
@@ -457,28 +457,36 @@ export async function renameSymbol(view: EditorView, newName: string): Promise<v
     }
 
     for (const [targetPath, edits] of changes) {
-      if (targetPath === state.activeTabId && state.editorView) {
+      const tab = state.tabs.get(targetPath);
+      if (tab && targetPath === state.activeTabId && state.editorView) {
         applyTextEditsToView(state.editorView, edits);
+        tab.currentContent = state.editorView.state.doc.toString();
+      } else if (tab) {
+        tab.currentContent = applyTextEditsToText(tab.currentContent, edits);
+        notifyLspChange(targetPath, tab.currentContent);
       } else {
-        const tab = state.tabs.get(targetPath);
-        if (tab) {
-          tab.currentContent = applyTextEditsToText(tab.currentContent, edits);
-          tab.modified = tab.currentContent !== tab.initialContent;
-          notifyLspChange(targetPath, tab.currentContent);
-          notify();
-        } else {
-          try {
-            const content = await readFile(targetPath);
-            const updated = applyTextEditsToRawText(content, edits);
-            const writeResult = await writeFile(targetPath, updated);
-            if (!writeResult.ok) {
-              console.error(`[LSP] rename write failed for ${targetPath}:`, writeResult.error);
-            }
-          } catch (err) {
-            console.error(`[LSP] rename failed for ${targetPath}:`, err);
+        try {
+          const content = await readFile(targetPath);
+          const updated = applyTextEditsToRawText(content, edits);
+          const writeResult = await writeFile(targetPath, updated);
+          if (!writeResult.ok) {
+            console.error(`[LSP] rename write failed for ${targetPath}:`, writeResult.error);
           }
+        } catch (err) {
+          console.error(`[LSP] rename failed for ${targetPath}:`, err);
         }
+        continue;
       }
+      // 已打开文件统一写盘，保持与未打开文件行为一致
+      const output = encodeLineEndings(tab.currentContent, tab.lineEnding);
+      const writeResult = await writeFile(targetPath, output);
+      if (writeResult.ok) {
+        tab.initialContent = tab.currentContent;
+        tab.modified = false;
+      } else {
+        console.error(`[LSP] rename write failed for ${targetPath}:`, writeResult.error);
+      }
+      notify();
     }
 
     showStatusMessage(`已重命名为 ${newName}`);
