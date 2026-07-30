@@ -6,17 +6,20 @@ import {
   openFile,
 } from "../services/file-service";
 import { saveCurrentTab } from "./editor-pane";
+import { showPromptDialog } from "./file-tree";
 import {
   goToDefinition,
   renameSymbol,
   findReferences,
   formatDocument,
 } from "./lsp-integration";
+import { runAgentPlan } from "../services/agent-bridge";
 import {
   toggleSearchPanel,
   toggleTerminalPanel,
   toggleIdeTheme,
   changeEditorFontSize,
+  toggleAiPanel,
 } from "../services/layout";
 import { saveWorkspace, openWorkspace } from "../services/workspace-service";
 
@@ -97,6 +100,17 @@ function getBaseCommands(): CommandItem[] {
       icon: "🧹",
       shortcut: "Shift+Alt+F",
       run: () => void formatDocument(),
+    },
+    {
+      id: "ai-task-plan",
+      label: "AI: 规划并执行任务",
+      icon: "🤖",
+      run: async () => {
+        const goal = await showPromptDialog("请输入要 Agent 规划并执行的任务:");
+        if (!goal || !goal.trim()) return;
+        toggleAiPanel();
+        await runAgentPlan(goal.trim(), "project");
+      },
     },
     {
       id: "toggle-search",

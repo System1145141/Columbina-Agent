@@ -21,6 +21,7 @@ import {
   findReferences,
   formatDocument,
 } from "./lsp-integration";
+import { inlineCompletionExtension } from "./inline-completion";
 import { showPromptDialog } from "./file-tree";
 
 const editorEl = document.getElementById("editor") as HTMLElement;
@@ -311,6 +312,7 @@ function doCreateEditor(initialContent = "", filePath = ""): EditorView | null {
     lspExtension(filePath),
     inlineChatField,
     inlineChatPlugin,
+    inlineCompletionExtension,
     EditorView.domEventHandlers({
       contextmenu: (event) => {
         event.preventDefault();

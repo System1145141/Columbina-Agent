@@ -1,6 +1,9 @@
 import { state, subscribe } from "../services/state";
 import {
   runAgentTurn,
+  runAgentPlan,
+  confirmTaskPlan,
+  cancelTaskPlan,
   undoLastWrite,
   resolveActionConfirmation,
   formatActionLabel,
@@ -15,6 +18,8 @@ const aiInputEl = document.getElementById("ai-input") as HTMLTextAreaElement;
 const aiSendBtn = document.getElementById("ai-send-btn") as HTMLButtonElement;
 const aiContextSelectEl = document.getElementById("ai-context-select") as HTMLSelectElement;
 const aiUndoBtn = document.getElementById("ai-undo-btn") as HTMLButtonElement;
+const aiInputAreaEl = document.querySelector(".ide__ai-input-area") as HTMLElement;
+let aiPlanModeCb: HTMLInputElement | null = null;
 
 function renderAiMessages() {
   aiMessagesEl.innerHTML = "";
@@ -110,11 +115,92 @@ function renderAiMessages() {
   aiMessagesEl.scrollTop = aiMessagesEl.scrollHeight;
 }
 
+function renderAiPlan() {
+  const existing = document.getElementById("ai-plan-card");
+  if (existing) existing.remove();
+  const plan = state.aiCurrentPlan;
+  if (!plan) return;
+
+  const card = document.createElement("div");
+  card.id = "ai-plan-card";
+  card.className = "ide__ai-plan-card";
+
+  const header = document.createElement("div");
+  header.className = "ide__ai-plan-header";
+  header.textContent = `任务计划: ${plan.goal}`;
+  card.appendChild(header);
+
+  const list = document.createElement("div");
+  list.className = "ide__ai-plan-steps";
+  const stepInputs: { stepId: string; input: HTMLInputElement }[] = [];
+  for (const step of plan.steps) {
+    const item = document.createElement("div");
+    item.className = "ide__ai-plan-step" + (step.done ? " is-done" : step.running ? " is-running" : "");
+    const status = step.done ? "✓" : step.running ? "⟳" : "○";
+
+    if (!plan.confirmed && !plan.cancelled) {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "ide__ai-plan-step-input";
+      input.value = step.description;
+      stepInputs.push({ stepId: step.id, input });
+      item.textContent = `${status} `;
+      item.appendChild(input);
+    } else {
+      item.textContent = `${status} ${step.description}`;
+    }
+    list.appendChild(item);
+  }
+  card.appendChild(list);
+
+  const btns = document.createElement("div");
+  btns.className = "ide__ai-plan-btns";
+
+  if (!plan.confirmed && !plan.cancelled) {
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "ide__ai-plan-btn";
+    saveBtn.textContent = "保存修改";
+    saveBtn.addEventListener("click", () => {
+      for (const { stepId, input } of stepInputs) {
+        editTaskPlanStep(stepId, input.value);
+      }
+    });
+    const confirmBtn = document.createElement("button");
+    confirmBtn.type = "button";
+    confirmBtn.className = "ide__ai-plan-btn ide__ai-plan-btn--confirm";
+    confirmBtn.textContent = "确认执行";
+    confirmBtn.addEventListener("click", () => confirmTaskPlan(true));
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "ide__ai-plan-btn";
+    cancelBtn.textContent = "取消";
+    cancelBtn.addEventListener("click", () => confirmTaskPlan(false));
+    btns.appendChild(saveBtn);
+    btns.appendChild(confirmBtn);
+    btns.appendChild(cancelBtn);
+  } else if (state.aiTaskPlanRunning) {
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "ide__ai-plan-btn";
+    cancelBtn.textContent = "中止任务";
+    cancelBtn.addEventListener("click", () => cancelTaskPlan());
+    btns.appendChild(cancelBtn);
+  }
+
+  if (btns.children.length > 0) {
+    card.appendChild(btns);
+  }
+
+  aiMessagesEl.parentElement?.insertBefore(card, aiMessagesEl);
+}
+
 function updateAiPanel() {
   aiPanelEl.style.display = state.aiPanelVisible ? "flex" : "none";
   aiSendBtn.disabled = state.aiRunning;
   aiUndoBtn.disabled = state.fileSnapshots.size === 0;
   renderAiMessages();
+  renderAiPlan();
 }
 
 async function sendAiMessage() {
@@ -124,7 +210,11 @@ async function sendAiMessage() {
   const scope = aiContextSelectEl.value as import("../services/state").AiContextScope;
   aiInputEl.value = "";
 
-  await runAgentTurn(text, scope);
+  if (aiPlanModeCb?.checked) {
+    await runAgentPlan(text, scope);
+  } else {
+    await runAgentTurn(text, scope);
+  }
 }
 
 export function initAiPanel(): void {
@@ -140,6 +230,17 @@ export function initAiPanel(): void {
     }
   });
   aiUndoBtn.addEventListener("click", () => void undoLastWrite());
+
+  if (aiInputAreaEl && !aiPlanModeCb) {
+    const label = document.createElement("label");
+    label.className = "ide__ai-plan-mode";
+    aiPlanModeCb = document.createElement("input");
+    aiPlanModeCb.type = "checkbox";
+    aiPlanModeCb.className = "ide__ai-plan-mode-cb";
+    label.appendChild(aiPlanModeCb);
+    label.appendChild(document.createTextNode(" 任务规划"));
+    aiInputAreaEl.insertBefore(label, aiInputAreaEl.firstChild);
+  }
 
   updateAiPanel();
 }

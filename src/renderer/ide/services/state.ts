@@ -97,6 +97,30 @@ export interface InlineChatSuggestion {
   explanation: string;
 }
 
+export interface AiTaskPlanStep {
+  id: string;
+  description: string;
+  done: boolean;
+  running: boolean;
+}
+
+export interface AiTaskPlan {
+  id: string;
+  goal: string;
+  steps: AiTaskPlanStep[];
+  confirmed: boolean;
+  cancelled: boolean;
+}
+
+export interface InlineCompletion {
+  active: boolean;
+  text: string;
+  from: number;
+  to: number;
+  loading: boolean;
+  filePath: string;
+}
+
 export interface GitStatus {
   branch: string;
   ahead: number;
@@ -181,7 +205,17 @@ export const state = {
   aiRunning: false,
   aiCurrentMessageId: "",
   aiEventUnsub: null as (() => void) | null,
+  aiCurrentPlan: null as AiTaskPlan | null,
+  aiTaskPlanRunning: false,
   fileSnapshots: new Map<string, FileSnapshot>(),
+  inlineCompletion: {
+    active: false,
+    text: "",
+    from: 0,
+    to: 0,
+    loading: false,
+    filePath: "",
+  } as InlineCompletion,
   pendingActionResolve: null as ((value: boolean) => void) | null,
   projectIndex: [] as ProjectIndexEntry[],
 
@@ -420,6 +454,29 @@ export function clearTabsAndEditor(): void {
   state.editorView?.destroy();
   state.editorView = null;
   state.expandedDirs.clear();
+}
+
+export function setInlineCompletion(completion: InlineCompletion): void {
+  state.inlineCompletion = completion;
+}
+
+export function clearInlineCompletion(): void {
+  state.inlineCompletion = {
+    active: false,
+    text: "",
+    from: 0,
+    to: 0,
+    loading: false,
+    filePath: "",
+  };
+}
+
+export function setAiCurrentPlan(plan: AiTaskPlan | null): void {
+  state.aiCurrentPlan = plan;
+}
+
+export function setAiTaskPlanRunning(running: boolean): void {
+  state.aiTaskPlanRunning = running;
 }
 
 declare global {

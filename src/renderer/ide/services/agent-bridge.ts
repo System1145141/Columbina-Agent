@@ -7,6 +7,11 @@ import {
   type AiMessage,
   type AguiBaseEvent,
   type FileSnapshot,
+  type AiTaskPlan,
+  type AiTaskPlanStep,
+  setAiCurrentPlan,
+  setAiTaskPlanRunning,
+  clearInlineCompletion,
 } from "./state";
 import {
   basename,
@@ -394,4 +399,292 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
     state.pendingActionResolve = null;
     notify();
   }
+}
+
+// Task planning
+
+let currentPlanCancellation: (() => boolean) | null = null;
+
+export function isPlanRunning(): boolean {
+  return state.aiTaskPlanRunning;
+}
+
+export function parseTaskPlan(content: string): { goal: string; steps: string[] } | null {
+  const match = content.match(/<plan>([\s\S]*?)<\/plan>/);
+  if (!match) return null;
+  try {
+    const raw = JSON.parse(match[1].trim()) as Record<string, unknown>;
+    const goal = typeof raw.goal === "string" ? raw.goal : "";
+    const steps: string[] = Array.isArray(raw.steps)
+      ? raw.steps.filter((s): s is string => typeof s === "string")
+      : [];
+    return { goal, steps };
+  } catch {
+    return null;
+  }
+}
+
+function buildTaskPlanPrompt(goal: string, scope: AiContextScope): string {
+  return `你是一名资深编程助手，正在帮助用户在 IDE 中完成一项复杂任务。请根据用户目标和当前项目上下文，制定一个清晰可执行的任务计划。
+
+要求：
+- 将任务拆分为 3-8 个具体步骤。
+- 每个步骤应简洁明了，只描述要做什么。
+- 不要包含详细实现，后续会逐个步骤让 Agent 执行。
+- 用 <plan>{...}</plan> JSON 标记返回计划，格式如下：
+
+<plan>
+{
+  "goal": "简短重述用户目标",
+  "steps": [
+    "步骤 1 描述",
+    "步骤 2 描述",
+    "..."
+  ]
+}
+<\/plan>
+
+${buildToolsPrompt()}
+
+${scope === "project" ? "当前项目上下文将单独提供。" : ""}
+
+用户目标：${goal}`;
+}
+
+export async function generateTaskPlan(goal: string, scope: AiContextScope): Promise<AiTaskPlan | null> {
+  const context = scope === "project" ? await buildAiContext("project", goal) : await buildAiContext("file", goal);
+  const prompt = `${buildTaskPlanPrompt(goal, scope)}\n\n${context}`;
+  const { content } = await callAgentStream(prompt);
+  const parsed = parseTaskPlan(content);
+  if (!parsed || !parsed.steps || parsed.steps.length === 0) return null;
+
+  const steps: AiTaskPlanStep[] = parsed.steps.map((description, index) => ({
+    id: `step-${Date.now()}-${index}`,
+    description,
+    done: false,
+    running: false,
+  }));
+
+  return {
+    id: `plan-${Date.now()}`,
+    goal: parsed.goal || goal,
+    steps,
+    confirmed: false,
+    cancelled: false,
+  };
+}
+
+export async function runAgentPlan(goal: string, scope: AiContextScope) {
+  const userMsgId = `u-${Date.now()}`;
+  state.aiMessages.push({ id: userMsgId, role: "user", content: `[任务规划] ${goal}` });
+  notify();
+
+  setAiTaskPlanRunning(true);
+  notify();
+
+  try {
+    const plan = await generateTaskPlan(goal, scope);
+    if (!plan) {
+      state.aiMessages.push({ id: `e-${Date.now()}`, role: "model", content: "无法生成任务计划，将按普通对话处理。" });
+      notify();
+      await runAgentTurn(goal, scope, 3);
+      return;
+    }
+
+    setAiCurrentPlan(plan);
+    notify();
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    state.aiMessages.push({ id: `e-${Date.now()}`, role: "model", content: `生成计划失败: ${errMsg}`, error: true });
+    notify();
+  } finally {
+    setAiTaskPlanRunning(false);
+    notify();
+  }
+}
+
+export function confirmTaskPlan(confirmed: boolean): void {
+  const plan = state.aiCurrentPlan;
+  if (!plan || plan.confirmed || plan.cancelled) return;
+  if (confirmed) {
+    plan.confirmed = true;
+    void executeTaskPlan(plan);
+  } else {
+    plan.cancelled = true;
+    state.aiMessages.push({ id: `s-${Date.now()}`, role: "model", content: "任务计划已取消。" });
+    notify();
+  }
+}
+
+export async function executeTaskPlan(plan: AiTaskPlan) {
+  let cancelled = false;
+  currentPlanCancellation = () => cancelled;
+
+  setAiTaskPlanRunning(true);
+  notify();
+
+  state.aiMessages.push({ id: `s-${Date.now()}`, role: "model", content: `开始执行任务：${plan.goal}` });
+  notify();
+
+  for (let i = 0; i < plan.steps.length; i++) {
+    if (cancelled || plan.cancelled) break;
+    const step = plan.steps[i];
+    for (const s of plan.steps) s.running = false;
+    step.running = true;
+    notify();
+
+    const stepGoal = `步骤 ${i + 1}/${plan.steps.length}：${step.description}`;
+    state.aiMessages.push({ id: `s-${Date.now()}-${i}`, role: "model", content: stepGoal });
+    notify();
+
+    try {
+      await runAgentTurn(stepGoal, "project", 3);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      state.aiMessages.push({ id: `e-${Date.now()}-${i}`, role: "model", content: `步骤执行失败: ${errMsg}`, error: true });
+      notify();
+      break;
+    }
+
+    step.done = true;
+    step.running = false;
+    notify();
+  }
+
+  if (!cancelled && !plan.cancelled) {
+    state.aiMessages.push({ id: `s-${Date.now()}-done`, role: "model", content: `任务 "${plan.goal}" 已执行完毕。` });
+  }
+
+  setAiCurrentPlan(null);
+  currentPlanCancellation = null;
+  setAiTaskPlanRunning(false);
+  notify();
+}
+
+export function cancelTaskPlan(): void {
+  if (currentPlanCancellation) {
+    currentPlanCancellation();
+  }
+  const plan = state.aiCurrentPlan;
+  if (plan) {
+    plan.cancelled = true;
+    for (const s of plan.steps) s.running = false;
+  }
+  setAiTaskPlanRunning(false);
+  state.aiMessages.push({ id: `s-${Date.now()}`, role: "model", content: "任务计划已中止。" });
+  notify();
+}
+
+export function editTaskPlanStep(stepId: string, newDescription: string): void {
+  const plan = state.aiCurrentPlan;
+  if (!plan || plan.confirmed) return;
+  const step = plan.steps.find((s) => s.id === stepId);
+  if (step) {
+    step.description = newDescription;
+    notify();
+  }
+}
+
+// Inline completion
+
+const COMPLETION_DEBOUNCE_MS = 300;
+let completionTimeout = 0;
+
+export function scheduleInlineCompletion(view: EditorView): void {
+  if (!state.ideSettings || state.aiRunning) return;
+  const tab = state.activeTabId ? state.tabs.get(state.activeTabId) : null;
+  if (!tab || tab.largeFile) return;
+
+  window.clearTimeout(completionTimeout);
+  completionTimeout = window.setTimeout(() => {
+    void triggerInlineCompletion(view);
+  }, COMPLETION_DEBOUNCE_MS);
+}
+
+export function cancelScheduledCompletion(): void {
+  window.clearTimeout(completionTimeout);
+}
+
+export async function triggerInlineCompletion(view: EditorView): Promise<void> {
+  const cursor = view.state.selection.main.head;
+  const doc = view.state.doc;
+  const line = doc.lineAt(cursor);
+  const prefix = doc.sliceString(Math.max(0, cursor - 2000), cursor);
+  const suffix = doc.sliceString(cursor, Math.min(doc.length, cursor + 200));
+  const filePath = state.activeTabId || "";
+
+  setInlineCompletion({ active: true, text: "", from: cursor, to: cursor, loading: true, filePath });
+  notify();
+
+  try {
+    const prompt = `你是一名资深编程助手，正在 IDE 中为当前文件提供代码补全。请根据光标前的代码上下文，预测光标处最可能的一行或多行代码（幽灵文本）。只返回要插入的代码文本，不要包含解释、markdown 代码块或任何额外说明。
+
+当前文件: ${filePath || "未命名"}
+
+光标前代码:
+\`\`\`
+${prefix}
+\`\`\`
+
+光标后代码:
+\`\`\`
+${suffix}
+\`\`\`
+
+请只输出要插入的代码:`;
+
+    const { content } = await callAgentStream(prompt);
+    const text = content.trim();
+    if (!text) {
+      clearInlineCompletion();
+      notify();
+      return;
+    }
+
+    const updatedCursor = view.state.selection.main.head;
+    const updatedLine = view.state.doc.lineAt(updatedCursor);
+    const currentLinePrefix = updatedLine.text.slice(0, updatedCursor - updatedLine.from);
+
+    // If the completion starts with the same text the user already typed on this line, skip it
+    let suggestion = text;
+    if (suggestion.startsWith(currentLinePrefix) && currentLinePrefix.length > 0) {
+      suggestion = suggestion.slice(currentLinePrefix.length);
+    }
+
+    if (!suggestion) {
+      clearInlineCompletion();
+      notify();
+      return;
+    }
+
+    setInlineCompletion({ active: true, text: suggestion, from: updatedCursor, to: updatedCursor, loading: false, filePath });
+    notify();
+  } catch (err) {
+    clearInlineCompletion();
+    notify();
+  }
+}
+
+export function acceptInlineCompletion(view: EditorView): boolean {
+  const completion = state.inlineCompletion;
+  if (!completion.active || completion.loading || !completion.text) return false;
+  const cursor = view.state.selection.main.head;
+  if (completion.from !== cursor) {
+    clearInlineCompletion();
+    notify();
+    return false;
+  }
+  const text = completion.text;
+  clearInlineCompletion();
+  notify();
+  view.dispatch({
+    changes: { from: cursor, to: cursor, insert: text },
+    selection: { anchor: cursor + text.length },
+  });
+  return true;
+}
+
+export function rejectInlineCompletion(): void {
+  clearInlineCompletion();
+  notify();
 }

@@ -2067,3 +2067,177 @@ html, body, .ide {
 .cm-lintRange-hint {
   text-decoration: underline wavy #808080;
 }
+
+/* Inline ghost text completion */
+.ide__ghost-text {
+  color: #6e7681;
+  opacity: 0.85;
+  pointer-events: none;
+  white-space: pre;
+}
+
+.ide.ide--light .ide__ghost-text {
+  color: #9ba3af;
+}
+
+/* AI task plan */
+.ide__ai-plan-card {
+  margin: 10px;
+  padding: 10px;
+  background: #252526;
+  border: 1px solid #3e3e42;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #cccccc;
+}
+
+.ide__ai-plan-header {
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #ffffff;
+}
+
+.ide__ai-plan-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.ide__ai-plan-step {
+  padding: 4px 6px;
+  border-radius: 3px;
+  color: #cccccc;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ide__ai-plan-step.is-done {
+  color: #89d185;
+  background: rgba(35, 134, 54, 0.15);
+}
+
+.ide__ai-plan-step.is-running {
+  color: #9cdcfe;
+  background: rgba(14, 99, 156, 0.15);
+}
+
+.ide__ai-plan-step-input {
+  flex: 1;
+  background: #3c3c3c;
+  border: 1px solid #3e3e42;
+  color: #cccccc;
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+
+.ide__ai-plan-step-input:focus {
+  border-color: #007acc;
+}
+
+.ide.ide--light .ide__ai-plan-step-input {
+  background: #ffffff;
+  border-color: #e5e5e5;
+  color: #333333;
+}
+
+.ide.ide--light .ide__ai-plan-step-input:focus {
+  border-color: #007acc;
+}
+
+.ide__ai-plan-btns {
+  display: flex;
+  gap: 8px;
+}
+
+.ide__ai-plan-btn {
+  flex: 1;
+  padding: 5px 8px;
+  background: #3e3e42;
+  border: 1px solid #3e3e42;
+  color: #cccccc;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.ide__ai-plan-btn:hover {
+  background: #4e4e4e;
+}
+
+.ide__ai-plan-btn--confirm {
+  background: #0e639c;
+  border-color: #0e639c;
+  color: #ffffff;
+}
+
+.ide__ai-plan-btn--confirm:hover {
+  background: #1177bb;
+}
+
+.ide__ai-plan-mode {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #bbbbbb;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+
+.ide__ai-plan-mode-cb {
+  margin: 0;
+}
+
+/* AI task plan light theme */
+.ide.ide--light .ide__ai-plan-card {
+  background: #ffffff;
+  border-color: #e5e5e5;
+  color: #333333;
+}
+
+.ide.ide--light .ide__ai-plan-header {
+  color: #000000;
+}
+
+.ide.ide--light .ide__ai-plan-step {
+  color: #333333;
+}
+
+.ide.ide--light .ide__ai-plan-step.is-done {
+  color: #1f7a1f;
+  background: rgba(35, 134, 54, 0.1);
+}
+
+.ide.ide--light .ide__ai-plan-step.is-running {
+  color: #005a9e;
+  background: rgba(0, 122, 204, 0.1);
+}
+
+.ide.ide--light .ide__ai-plan-btn {
+  background: #f0f0f0;
+  border-color: #e5e5e5;
+  color: #333333;
+}
+
+.ide.ide--light .ide__ai-plan-btn:hover {
+  background: #e5e5e5;
+}
+
+.ide.ide--light .ide__ai-plan-btn--confirm {
+  background: #007acc;
+  border-color: #007acc;
+  color: #ffffff;
+}
+
+.ide.ide--light .ide__ai-plan-btn--confirm:hover {
+  background: #0062a3;
+}
+
+.ide.ide--light .ide__ai-plan-mode {
+  color: #666666;
+}
