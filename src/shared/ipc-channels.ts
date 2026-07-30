@@ -258,6 +258,12 @@ export const IPC = {
   IDE_GIT_CHECKOUT: "ide:git-checkout",       // 切换分支
   IDE_GIT_CREATE_BRANCH: "ide:git-create-branch", // 创建并切换分支
   IDE_GIT_DELETE_BRANCH: "ide:git-delete-branch", // 删除本地分支
+  IDE_GIT_STASH_LIST: "ide:git-stash-list",       // 获取 stash 列表
+  IDE_GIT_STASH_SAVE: "ide:git-stash-save",       // stash save
+  IDE_GIT_STASH_POP: "ide:git-stash-pop",         // stash pop / apply
+  IDE_GIT_STASH_DROP: "ide:git-stash-drop",       // stash drop
+  IDE_GIT_CHERRY_PICK: "ide:git-cherry-pick",     // cherry-pick
+  IDE_GIT_REVERT: "ide:git-revert",               // revert
 
   IDE_SAVE_WORKSPACE: "ide:save-workspace",           // 保存工作区文件
   IDE_SAVE_WORKSPACE_SYNC: "ide:save-workspace-sync", // 同步保存工作区（beforeunload 用）

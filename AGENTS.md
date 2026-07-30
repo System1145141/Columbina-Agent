@@ -299,6 +299,8 @@
 - 支持获取（fetch）、拉取（pull）、推送（push），pull/push 前用户确认。
 - 支持分支切换、新建分支、删除分支（失败时可选强制删除）。
 - 支持显示最近提交历史（作者、时间、message、hash）。
+- 支持 stash save / pop / apply / drop。
+- 支持在提交历史上右键执行 cherry-pick / revert / 复制 hash。
 - 所有 Git 命令统一使用 `spawn` + `shell: false` + 数组参数，防止命令注入。
 
 ##### 第一阶段：状态展示（1 周）
@@ -348,14 +350,17 @@
 9. **提交历史**
    - 展示当前分支提交日志（作者、时间、message、hash）。
    - 点击提交查看该提交变更的文件列表与 diff。
+   - 提交条目右键可触发 cherry-pick / revert / 复制 hash 操作。
 
-10. **Stash**
+10. **Stash** ✅ 已完成
     - 支持 stash save / pop / drop。
     - 在 Git 面板中列出 stash 列表。
+    - 实现：新增 `IDE_GIT_STASH_LIST/SAVE/POP/DROP` IPC 通道，主进程 `listStashes/stashSave/stashPop/stashDrop` 使用 `spawn` + `shell: false`；Git 面板新增 Stash 折叠区，提供 Pop / Apply / Drop 三种操作及保存按钮。
 
-11. **Cherry-pick / Revert（可选）**
+11. **Cherry-pick / Revert（可选）** ✅ 已完成
     - 在提交历史中右键选择 cherry-pick 或 revert。
     - 冲突时标记冲突文件。
+    - 实现：新增 `IDE_GIT_CHERRY_PICK/REVERT` IPC 通道与主进程 `cherryPick/revertCommit`；提交历史条目右键弹出菜单（Cherry-pick / Revert / 复制 hash），失败时刷新 `git status` 以显示冲突文件。
 
 ##### 数据流
 

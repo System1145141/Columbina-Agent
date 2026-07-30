@@ -8,9 +8,11 @@ import {
   removeGitRootData,
   getGitBranchesForRoot,
   getGitLogForRoot,
+  getGitStashesForRoot,
   setGitSelectedFileForRoot,
   setGitDiffForRoot,
   type WorkspaceRoot,
+  type GitLogEntry,
 } from "../services/state";
 import { toggleGitPanel } from "../services/layout";
 import { openFile } from "../services/file-service";
@@ -19,6 +21,7 @@ import {
   refreshGitStatus,
   refreshGitBranches,
   refreshGitLog,
+  refreshGitStashes,
   stageGitFile,
   unstageGitFile,
   commitGit,
@@ -29,6 +32,11 @@ import {
   checkoutGitBranch,
   createGitBranch,
   deleteGitBranch,
+  stashGitSave,
+  stashGitPop,
+  stashGitDrop,
+  cherryPickGit,
+  revertGit,
 } from "../services/git-service";
 
 const gitToggleBtn = document.getElementById("git-toggle-btn") as HTMLButtonElement;
@@ -248,6 +256,228 @@ async function doDeleteBranch(rootId: string, branchName: string): Promise<void>
   }
 }
 
+async function doStashSave(rootId: string): Promise<void> {
+  const root = state.roots.find((r) => r.id === rootId);
+  if (!root) return;
+  const status = getGitStatusForRoot(rootId);
+  if (!status || status.clean) {
+    state.statusMessage = `【${root.name}】没有可 stash 的本地更改`;
+    notify();
+    return;
+  }
+  const message = await showPromptDialog("请输入 stash 描述（可留空）:");
+  if (message === null) return;
+  state.gitLoading = true;
+  notify();
+  try {
+    const result = await stashGitSave(root, message || undefined, true);
+    if (result.ok) {
+      state.statusMessage = `【${root.name}】stash 已保存`;
+      await refreshGitStatus();
+      await refreshGitStashes(root);
+    } else {
+      state.statusMessage = `【${root.name}】stash 失败: ${result.error || "未知错误"}`;
+    }
+  } catch (err) {
+    state.statusMessage = `【${root.name}】stash 失败: ${String(err)}`;
+  } finally {
+    state.gitLoading = false;
+    notify();
+  }
+}
+
+async function doStashPop(rootId: string, stashRef: string, applyOnly = false): Promise<void> {
+  const root = state.roots.find((r) => r.id === rootId);
+  if (!root || !stashRef) return;
+  const action = applyOnly ? "apply" : "pop";
+  const confirmed = confirm(`确定要对 ${stashRef} 执行 ${action} 吗？`);
+  if (!confirmed) return;
+  state.gitLoading = true;
+  notify();
+  try {
+    const result = await stashGitPop(root, stashRef, applyOnly);
+    if (result.ok) {
+      state.statusMessage = `【${root.name}】stash ${action} 成功`;
+      await refreshGitStatus();
+      if (!applyOnly) await refreshGitStashes(root);
+    } else {
+      state.statusMessage = `【${root.name}】stash ${action} 失败: ${result.error || "未知错误"}`;
+      if (!applyOnly) await refreshGitStashes(root);
+    }
+  } catch (err) {
+    state.statusMessage = `【${root.name}】stash ${action} 失败: ${String(err)}`;
+  } finally {
+    state.gitLoading = false;
+    notify();
+  }
+}
+
+async function doStashDrop(rootId: string, stashRef: string): Promise<void> {
+  const root = state.roots.find((r) => r.id === rootId);
+  if (!root || !stashRef) return;
+  const confirmed = confirm(`确定要删除 ${stashRef} 吗？此操作不可恢复。`);
+  if (!confirmed) return;
+  state.gitLoading = true;
+  notify();
+  try {
+    const result = await stashGitDrop(root, stashRef);
+    if (result.ok) {
+      state.statusMessage = `【${root.name}】已删除 ${stashRef}`;
+      await refreshGitStashes(root);
+    } else {
+      state.statusMessage = `【${root.name}】stash drop 失败: ${result.error || "未知错误"}`;
+    }
+  } catch (err) {
+    state.statusMessage = `【${root.name}】stash drop 失败: ${String(err)}`;
+  } finally {
+    state.gitLoading = false;
+    notify();
+  }
+}
+
+async function doCherryPick(rootId: string, commitHash: string): Promise<void> {
+  const root = state.roots.find((r) => r.id === rootId);
+  if (!root || !commitHash) return;
+  const confirmed = confirm(
+    `确定要 cherry-pick 提交 ${commitHash.slice(0, 7)} 吗？\n\n如果发生冲突，将在变更列表中标记冲突文件。`
+  );
+  if (!confirmed) return;
+  state.gitLoading = true;
+  notify();
+  try {
+    const result = await cherryPickGit(root, commitHash, false);
+    if (result.ok) {
+      state.statusMessage = `【${root.name}】cherry-pick 成功`;
+      await refreshGitStatus();
+      await refreshGitLog(root, 30);
+    } else {
+      state.statusMessage = `【${root.name}】cherry-pick 失败: ${result.error || "未知错误"}`;
+      // 冲突时刷新状态以标记冲突文件
+      await refreshGitStatus();
+    }
+  } catch (err) {
+    state.statusMessage = `【${root.name}】cherry-pick 失败: ${String(err)}`;
+  } finally {
+    state.gitLoading = false;
+    notify();
+  }
+}
+
+async function doRevert(rootId: string, commitHash: string): Promise<void> {
+  const root = state.roots.find((r) => r.id === rootId);
+  if (!root || !commitHash) return;
+  const confirmed = confirm(
+    `确定要 revert 提交 ${commitHash.slice(0, 7)} 吗？\n\n这会创建一个新提交以撤销原提交的更改。`
+  );
+  if (!confirmed) return;
+  state.gitLoading = true;
+  notify();
+  try {
+    const result = await revertGit(root, commitHash, false);
+    if (result.ok) {
+      state.statusMessage = `【${root.name}】revert 成功`;
+      await refreshGitStatus();
+      await refreshGitLog(root, 30);
+    } else {
+      state.statusMessage = `【${root.name}】revert 失败: ${result.error || "未知错误"}`;
+      // 冲突时刷新状态以标记冲突文件
+      await refreshGitStatus();
+    }
+  } catch (err) {
+    state.statusMessage = `【${root.name}】revert 失败: ${String(err)}`;
+  } finally {
+    state.gitLoading = false;
+    notify();
+  }
+}
+
+let gitContextMenu: HTMLElement | null = null;
+
+function hideGitContextMenu(): void {
+  if (gitContextMenu) {
+    gitContextMenu.remove();
+    gitContextMenu = null;
+  }
+}
+
+function showGitLogContextMenu(rootId: string, entry: GitLogEntry, x: number, y: number): void {
+  hideGitContextMenu();
+  const menu = document.createElement("div");
+  menu.className = "ide__git-context-menu";
+
+  const pickItem = document.createElement("div");
+  pickItem.className = "ide__git-context-item";
+  pickItem.textContent = "Cherry-pick 此提交";
+  pickItem.title = "将该提交的更改应用到当前分支";
+  pickItem.addEventListener("click", () => {
+    hideGitContextMenu();
+    void doCherryPick(rootId, entry.hash);
+  });
+
+  const revertItem = document.createElement("div");
+  revertItem.className = "ide__git-context-item";
+  revertItem.textContent = "Revert 此提交";
+  revertItem.title = "创建一个新提交以撤销此提交的更改";
+  revertItem.addEventListener("click", () => {
+    hideGitContextMenu();
+    void doRevert(rootId, entry.hash);
+  });
+
+  const copyItem = document.createElement("div");
+  copyItem.className = "ide__git-context-item";
+  copyItem.textContent = "复制提交哈希";
+  copyItem.title = "复制完整 hash 到剪贴板";
+  copyItem.addEventListener("click", () => {
+    hideGitContextMenu();
+    void navigator.clipboard.writeText(entry.hash).then(
+      () => {
+        state.statusMessage = `已复制 ${entry.hash.slice(0, 7)}`;
+        notify();
+      },
+      () => {
+        state.statusMessage = "复制失败";
+        notify();
+      }
+    );
+  });
+
+  menu.appendChild(pickItem);
+  menu.appendChild(revertItem);
+  menu.appendChild(copyItem);
+
+  // 边界检测，避免溢出窗口
+  const rect = document.body.getBoundingClientRect();
+  const menuWidth = 200;
+  const menuHeight = 100;
+  const left = Math.min(x, rect.width - menuWidth - 4);
+  const top = Math.min(y, rect.height - menuHeight - 4);
+  menu.style.left = `${Math.max(0, left)}px`;
+  menu.style.top = `${Math.max(0, top)}px`;
+
+  document.body.appendChild(menu);
+  gitContextMenu = menu;
+
+  // 点击其他区域或按 Esc 关闭
+  const onOutsideClick = (e: MouseEvent) => {
+    if (gitContextMenu && !gitContextMenu.contains(e.target as Node)) {
+      hideGitContextMenu();
+      document.removeEventListener("mousedown", onOutsideClick);
+      document.removeEventListener("keydown", onEscKey);
+    }
+  };
+  const onEscKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      hideGitContextMenu();
+      document.removeEventListener("mousedown", onOutsideClick);
+      document.removeEventListener("keydown", onEscKey);
+    }
+  };
+  setTimeout(() => {
+    document.addEventListener("mousedown", onOutsideClick);
+    document.addEventListener("keydown", onEscKey);
+  }, 0);
+}
+
 async function toggleLogVisibility(rootId: string): Promise<void> {
   const root = state.roots.find((r) => r.id === rootId);
   if (!root) return;
@@ -256,6 +486,21 @@ async function toggleLogVisibility(rootId: string): Promise<void> {
     state.gitLoading = true;
     notify();
     await refreshGitLog(root, 30);
+    state.gitLoading = false;
+    notify();
+  } else {
+    notify();
+  }
+}
+
+async function toggleStashVisibility(rootId: string): Promise<void> {
+  const root = state.roots.find((r) => r.id === rootId);
+  if (!root) return;
+  state.gitStashVisible = !state.gitStashVisible;
+  if (state.gitStashVisible) {
+    state.gitLoading = true;
+    notify();
+    await refreshGitStashes(root);
     state.gitLoading = false;
     notify();
   } else {
@@ -457,15 +702,92 @@ function renderLog(root: WorkspaceRoot, container: HTMLElement): void {
   for (const entry of log) {
     const row = document.createElement("div");
     row.className = "ide__git-log-entry";
+    row.title = `${entry.hash}\n右键显示更多操作（cherry-pick / revert）`;
     const msg = document.createElement("div");
     msg.className = "ide__git-log-message";
     msg.textContent = entry.message;
-    msg.title = entry.hash;
     const meta = document.createElement("div");
     meta.className = "ide__git-log-meta";
     meta.textContent = `${entry.author} · ${entry.date}`;
     row.appendChild(msg);
     row.appendChild(meta);
+    row.addEventListener("contextmenu", (e: MouseEvent) => {
+      e.preventDefault();
+      showGitLogContextMenu(root.id, entry, e.clientX, e.clientY);
+    });
+    container.appendChild(row);
+  }
+}
+
+function renderStash(root: WorkspaceRoot, container: HTMLElement): void {
+  const stashes = getGitStashesForRoot(root.id);
+  container.innerHTML = "";
+
+  const actionRow = document.createElement("div");
+  actionRow.className = "ide__git-stash-actions";
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
+  saveBtn.className = "ide__git-stash-btn";
+  saveBtn.textContent = "保存当前更改到 Stash";
+  saveBtn.title = "git stash push -u";
+  saveBtn.disabled = state.gitLoading;
+  saveBtn.addEventListener("click", () => void doStashSave(root.id));
+  actionRow.appendChild(saveBtn);
+  container.appendChild(actionRow);
+
+  if (stashes.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "ide__git-empty";
+    empty.textContent = "暂无 stash 记录";
+    container.appendChild(empty);
+    return;
+  }
+
+  for (const entry of stashes) {
+    const row = document.createElement("div");
+    row.className = "ide__git-stash-entry";
+
+    const info = document.createElement("div");
+    info.className = "ide__git-stash-info";
+    const idx = document.createElement("div");
+    idx.className = "ide__git-stash-index";
+    idx.textContent = entry.index;
+    idx.title = entry.index;
+    const msg = document.createElement("div");
+    msg.className = "ide__git-stash-message";
+    msg.textContent = entry.message || "(无描述)";
+    msg.title = entry.message;
+    info.appendChild(idx);
+    info.appendChild(msg);
+    row.appendChild(info);
+
+    const popBtn = document.createElement("button");
+    popBtn.type = "button";
+    popBtn.className = "ide__git-stash-action-btn";
+    popBtn.textContent = "Pop";
+    popBtn.title = "应用并从 stash 列表移除";
+    popBtn.disabled = state.gitLoading;
+    popBtn.addEventListener("click", () => void doStashPop(root.id, entry.index, false));
+
+    const applyBtn = document.createElement("button");
+    applyBtn.type = "button";
+    applyBtn.className = "ide__git-stash-action-btn";
+    applyBtn.textContent = "Apply";
+    applyBtn.title = "应用但保留在 stash 列表";
+    applyBtn.disabled = state.gitLoading;
+    applyBtn.addEventListener("click", () => void doStashPop(root.id, entry.index, true));
+
+    const dropBtn = document.createElement("button");
+    dropBtn.type = "button";
+    dropBtn.className = "ide__git-stash-action-btn ide__git-stash-action-btn--danger";
+    dropBtn.textContent = "Drop";
+    dropBtn.title = "从 stash 列表删除（不可恢复）";
+    dropBtn.disabled = state.gitLoading;
+    dropBtn.addEventListener("click", () => void doStashDrop(root.id, entry.index));
+
+    row.appendChild(popBtn);
+    row.appendChild(applyBtn);
+    row.appendChild(dropBtn);
     container.appendChild(row);
   }
 }
@@ -521,6 +843,24 @@ function renderGitRoot(root: WorkspaceRoot): HTMLElement {
     logList.className = "ide__git-log-list";
     renderLog(root, logList);
     rootEl.appendChild(logList);
+  }
+
+  const stashToggleRow = document.createElement("div");
+  stashToggleRow.className = "ide__git-log-toggle";
+  const stashToggleBtn = document.createElement("button");
+  stashToggleBtn.type = "button";
+  stashToggleBtn.className = "ide__git-log-toggle-btn";
+  stashToggleBtn.textContent = state.gitStashVisible ? "隐藏 Stash 列表" : "显示 Stash 列表";
+  stashToggleBtn.disabled = state.gitLoading;
+  stashToggleBtn.addEventListener("click", () => void toggleStashVisibility(root.id));
+  stashToggleRow.appendChild(stashToggleBtn);
+  rootEl.appendChild(stashToggleRow);
+
+  if (state.gitStashVisible) {
+    const stashList = document.createElement("div");
+    stashList.className = "ide__git-stash-list";
+    renderStash(root, stashList);
+    rootEl.appendChild(stashList);
   }
 
   const stagedList = document.createElement("div");
@@ -613,7 +953,11 @@ function renderGitPanel() {
 export function initGitPanel(): void {
   gitToggleBtn.addEventListener("click", () => toggleGitPanel());
   gitRefreshBtn.addEventListener("click", () => {
-    for (const root of state.roots) void refreshGitBranches(root);
+    for (const root of state.roots) {
+      void refreshGitBranches(root);
+      if (state.gitStashVisible) void refreshGitStashes(root);
+      if (state.gitLogVisible) void refreshGitLog(root, 30);
+    }
     void refreshGitStatus();
   });
   gitDiffCloseBtn.addEventListener("click", hideDiff);
@@ -631,7 +975,10 @@ export function initGitPanel(): void {
 
   window.addEventListener("focus", () => {
     if (state.gitPanelVisible && state.roots.length > 0) {
-      for (const root of state.roots) void refreshGitBranches(root);
+      for (const root of state.roots) {
+        void refreshGitBranches(root);
+        if (state.gitStashVisible) void refreshGitStashes(root);
+      }
       void refreshGitStatus();
     }
   });

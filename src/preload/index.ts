@@ -212,6 +212,18 @@ const ideApi = {
     ipcRenderer.invoke(IPC.IDE_GIT_CREATE_BRANCH, folderPath, branchName, checkout),
   deleteGitBranch: (folderPath: string, branchName: string, force?: boolean) =>
     ipcRenderer.invoke(IPC.IDE_GIT_DELETE_BRANCH, folderPath, branchName, force),
+  listGitStashes: (folderPath: string) =>
+    ipcRenderer.invoke(IPC.IDE_GIT_STASH_LIST, folderPath) as Promise<{ index: string; message: string }[]>,
+  stashGitSave: (folderPath: string, message?: string, includeUntracked?: boolean) =>
+    ipcRenderer.invoke(IPC.IDE_GIT_STASH_SAVE, folderPath, message, includeUntracked) as Promise<{ ok: boolean; error?: string; stdout?: string }>,
+  stashGitPop: (folderPath: string, stashRef: string, applyOnly?: boolean) =>
+    ipcRenderer.invoke(IPC.IDE_GIT_STASH_POP, folderPath, stashRef, applyOnly) as Promise<{ ok: boolean; error?: string; stdout?: string }>,
+  stashGitDrop: (folderPath: string, stashRef: string) =>
+    ipcRenderer.invoke(IPC.IDE_GIT_STASH_DROP, folderPath, stashRef) as Promise<{ ok: boolean; error?: string; stdout?: string }>,
+  cherryPickGit: (folderPath: string, commitHash: string, noCommit?: boolean) =>
+    ipcRenderer.invoke(IPC.IDE_GIT_CHERRY_PICK, folderPath, commitHash, noCommit) as Promise<{ ok: boolean; error?: string; stdout?: string }>,
+  revertGit: (folderPath: string, commitHash: string, noCommit?: boolean) =>
+    ipcRenderer.invoke(IPC.IDE_GIT_REVERT, folderPath, commitHash, noCommit) as Promise<{ ok: boolean; error?: string; stdout?: string }>,
   saveWorkspace: (filePath: string | null, state: Record<string, unknown>) =>
     ipcRenderer.invoke(IPC.IDE_SAVE_WORKSPACE, filePath, state) as Promise<{ ok: boolean; filePath?: string; error?: string }>,
   saveWorkspaceSync: (filePath: string | null, state: Record<string, unknown>) =>

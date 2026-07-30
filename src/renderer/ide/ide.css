@@ -693,6 +693,138 @@ html, body, .ide {
   white-space: nowrap;
 }
 
+/* Stash 列表 */
+.ide__git-stash-list {
+  max-height: 200px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  padding: 6px;
+  background: #1e1e1e;
+}
+
+.ide__git-stash-actions {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.ide__git-stash-btn {
+  flex: 1;
+  background: #0e639c;
+  color: #ffffff;
+  border: none;
+  border-radius: 3px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ide__git-stash-btn:hover:not(:disabled) {
+  background: #1177bb;
+}
+
+.ide__git-stash-btn:disabled {
+  background: #3e3e42;
+  color: #858585;
+  cursor: not-allowed;
+}
+
+.ide__git-stash-entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 3px;
+  background: #252526;
+}
+
+.ide__git-stash-entry:hover {
+  background: #37373d;
+}
+
+.ide__git-stash-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ide__git-stash-index {
+  font-size: 11px;
+  color: #4ec9b0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide__git-stash-message {
+  font-size: 12px;
+  color: #cccccc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide__git-stash-action-btn {
+  background: #0e639c;
+  color: #ffffff;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ide__git-stash-action-btn:hover:not(:disabled) {
+  background: #1177bb;
+}
+
+.ide__git-stash-action-btn:disabled {
+  background: #3e3e42;
+  color: #858585;
+  cursor: not-allowed;
+}
+
+.ide__git-stash-action-btn--danger {
+  background: #c75450;
+}
+
+.ide__git-stash-action-btn--danger:hover:not(:disabled) {
+  background: #e06c75;
+}
+
+/* 提交历史右键菜单 */
+.ide__git-context-menu {
+  position: fixed;
+  z-index: 10000;
+  min-width: 200px;
+  background: #252526;
+  border: 1px solid #454545;
+  border-radius: 4px;
+  padding: 4px 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  user-select: none;
+}
+
+.ide__git-context-item {
+  padding: 6px 14px;
+  font-size: 12px;
+  color: #cccccc;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ide__git-context-item:hover {
+  background: #0e639c;
+  color: #ffffff;
+}
+
 .ide__search-empty {
   color: #858585;
   font-size: 12px;

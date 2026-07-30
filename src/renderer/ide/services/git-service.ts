@@ -4,10 +4,12 @@ import {
   setGitStatusForRoot,
   setGitBranchesForRoot,
   setGitLogForRoot,
+  setGitStashesForRoot,
   type WorkspaceRoot,
   type GitStatus,
   type GitBranchInfo,
   type GitLogEntry,
+  type GitStashEntry,
 } from "./state";
 
 export async function refreshGitStatus(): Promise<void> {
@@ -53,6 +55,16 @@ export async function refreshGitLog(root: WorkspaceRoot, maxCount = 20): Promise
     notify();
   } catch (err) {
     console.error(`[IDE] refresh git log failed for ${root.path}:`, err);
+  }
+}
+
+export async function refreshGitStashes(root: WorkspaceRoot): Promise<void> {
+  try {
+    const stashes = await window.ide!.listGitStashes(root.path);
+    setGitStashesForRoot(root.id, stashes);
+    notify();
+  } catch (err) {
+    console.error(`[IDE] refresh git stashes failed for ${root.path}:`, err);
   }
 }
 
@@ -102,6 +114,45 @@ export async function deleteGitBranch(
   force = false
 ): Promise<{ ok: boolean; error?: string; stdout?: string }> {
   return window.ide!.deleteGitBranch(root.path, branchName, force);
+}
+
+export async function stashGitSave(
+  root: WorkspaceRoot,
+  message?: string,
+  includeUntracked = true
+): Promise<{ ok: boolean; error?: string; stdout?: string }> {
+  return window.ide!.stashGitSave(root.path, message, includeUntracked);
+}
+
+export async function stashGitPop(
+  root: WorkspaceRoot,
+  stashRef: string,
+  applyOnly = false
+): Promise<{ ok: boolean; error?: string; stdout?: string }> {
+  return window.ide!.stashGitPop(root.path, stashRef, applyOnly);
+}
+
+export async function stashGitDrop(
+  root: WorkspaceRoot,
+  stashRef: string
+): Promise<{ ok: boolean; error?: string; stdout?: string }> {
+  return window.ide!.stashGitDrop(root.path, stashRef);
+}
+
+export async function cherryPickGit(
+  root: WorkspaceRoot,
+  commitHash: string,
+  noCommit = false
+): Promise<{ ok: boolean; error?: string; stdout?: string }> {
+  return window.ide!.cherryPickGit(root.path, commitHash, noCommit);
+}
+
+export async function revertGit(
+  root: WorkspaceRoot,
+  commitHash: string,
+  noCommit = false
+): Promise<{ ok: boolean; error?: string; stdout?: string }> {
+  return window.ide!.revertGit(root.path, commitHash, noCommit);
 }
 
 export function isFileStaged(rootId: string, filePath: string): boolean {

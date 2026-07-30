@@ -145,6 +145,11 @@ export interface GitLogEntry {
   date: string;
 }
 
+export interface GitStashEntry {
+  index: string;
+  message: string;
+}
+
 export interface InlineChatState {
   open: boolean;
   from: number;
@@ -240,6 +245,8 @@ export const state = {
   gitBranchesByRoot: {} as Record<string, GitBranchInfo[]>,
   gitLogByRoot: {} as Record<string, GitLogEntry[]>,
   gitLogVisible: false,
+  gitStashesByRoot: {} as Record<string, GitStashEntry[]>,
+  gitStashVisible: false,
 
   searchSelectedRootIds: [] as string[],
 
@@ -414,6 +421,7 @@ export function removeGitRootData(rootId: string): void {
   delete state.gitDiffByRoot[rootId];
   delete state.gitBranchesByRoot[rootId];
   delete state.gitLogByRoot[rootId];
+  delete state.gitStashesByRoot[rootId];
 }
 
 export function setGitBranchesForRoot(rootId: string, branches: GitBranchInfo[]): void {
@@ -430,6 +438,14 @@ export function setGitLogForRoot(rootId: string, log: GitLogEntry[]): void {
 
 export function getGitLogForRoot(rootId: string): GitLogEntry[] {
   return state.gitLogByRoot[rootId] || [];
+}
+
+export function setGitStashesForRoot(rootId: string, stashes: GitStashEntry[]): void {
+  state.gitStashesByRoot[rootId] = stashes;
+}
+
+export function getGitStashesForRoot(rootId: string): GitStashEntry[] {
+  return state.gitStashesByRoot[rootId] || [];
 }
 
 export function setTreeRoot(entries: IdeDirEntry[]): void {
@@ -528,6 +544,12 @@ declare global {
       checkoutGitBranch: (folderPath: string, branchName: string) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
       createGitBranch: (folderPath: string, branchName: string, checkout?: boolean) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
       deleteGitBranch: (folderPath: string, branchName: string, force?: boolean) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      listGitStashes: (folderPath: string) => Promise<GitStashEntry[]>;
+      stashGitSave: (folderPath: string, message?: string, includeUntracked?: boolean) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      stashGitPop: (folderPath: string, stashRef: string, applyOnly?: boolean) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      stashGitDrop: (folderPath: string, stashRef: string) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      cherryPickGit: (folderPath: string, commitHash: string, noCommit?: boolean) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      revertGit: (folderPath: string, commitHash: string, noCommit?: boolean) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
       saveWorkspace: (filePath: string | null, state: Record<string, unknown>) => Promise<{ ok: boolean; filePath?: string; error?: string }>;
       saveWorkspaceSync: (filePath: string | null, state: Record<string, unknown>) => { ok: boolean; filePath?: string; error?: string };
       openWorkspace: () => Promise<{ ok: boolean; workspace?: Record<string, unknown>; filePath?: string; error?: string }>;
