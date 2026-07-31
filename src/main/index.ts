@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, shell, dialog, protocol, net } from "electron";
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, shell, dialog, protocol, net, clipboard } from "electron";
 import * as nodeNet from "net";
 import * as path from "path";
 import * as fs from "fs";
@@ -3044,6 +3044,14 @@ ipcMain.handle(IPC.IDE_PICK_FOLDER, async () => {
   if (!ideWindow) return null;
   const result = await dialog.showOpenDialog(ideWindow, { properties: ["openDirectory"] });
   return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
+});
+
+ipcMain.handle(IPC.IDE_COPY_TEXT, (_event, text: unknown) => {
+  if (typeof text === "string" && text.length > 0) {
+    clipboard.writeText(text);
+    return true;
+  }
+  return false;
 });
 
 // 渲染进程同步工作区 roots 到主进程，用于文件操作 IPC 的路径校验

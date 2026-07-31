@@ -134,6 +134,10 @@ export async function pickFolder(): Promise<string | null> {
   return window.ide?.pickFolder() || null;
 }
 
+export async function copyText(text: string): Promise<boolean> {
+  return window.ide?.copyText(text) || false;
+}
+
 export async function loadDirectory(dirPath: string): Promise<void> {
   const root = createWorkspaceRoot(dirPath);
   setRoots([root]);

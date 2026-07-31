@@ -219,6 +219,7 @@ export const IPC = {
   IDE_MINIMIZE: "ide:minimize",           // 最小化 IDE 窗口
   IDE_TOGGLE_MAXIMIZE: "ide:toggle-maximize",
   IDE_PICK_FOLDER: "ide:pick-folder",     // 选择文件夹
+  IDE_COPY_TEXT: "ide:copy-text",         // 复制文本到剪贴板
   IDE_READ_DIR: "ide:read-dir",           // 读取目录
   IDE_READ_FILE: "ide:read-file",         // 读取文件内容
   IDE_READ_FILE_CHUNK: "ide:read-file-chunk", // 分块读取文件内容

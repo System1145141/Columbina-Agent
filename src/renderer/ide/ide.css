@@ -1412,6 +1412,39 @@ html, body, .ide {
   background: rgba(234, 92, 0, 0.55) !important;
 }
 
+/* 代码折叠 */
+.cm-foldGutter span {
+  cursor: pointer;
+  color: #858585;
+}
+
+.cm-foldGutter span:hover {
+  color: #ffffff;
+}
+
+.cm-foldPlaceholder {
+  background: #2d2d30;
+  border: 1px solid #3e3e42;
+  border-radius: 3px;
+  padding: 0 4px;
+  margin: 0 2px;
+  color: #cccccc;
+}
+
+.ide.ide--light .cm-foldGutter span {
+  color: #8b949e;
+}
+
+.ide.ide--light .cm-foldGutter span:hover {
+  color: #333333;
+}
+
+.ide.ide--light .cm-foldPlaceholder {
+  background: #f6f8fa;
+  border-color: #d0d7de;
+  color: #57606a;
+}
+
 /* 查找面板浅色主题 */
 .ide.ide--light .cm-panel.cm-search {
   background: #f3f3f3;

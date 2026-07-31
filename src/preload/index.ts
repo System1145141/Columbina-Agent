@@ -151,6 +151,7 @@ const ideApi = {
   minimize: () => ipcRenderer.send(IPC.IDE_MINIMIZE),
   toggleMaximize: () => ipcRenderer.send(IPC.IDE_TOGGLE_MAXIMIZE),
   pickFolder: () => ipcRenderer.invoke(IPC.IDE_PICK_FOLDER),
+  copyText: (text: string) => ipcRenderer.invoke(IPC.IDE_COPY_TEXT, text) as Promise<boolean>,
   readDir: (dirPath: string) => ipcRenderer.invoke(IPC.IDE_READ_DIR, dirPath),
   readFile: (filePath: string) => ipcRenderer.invoke(IPC.IDE_READ_FILE, filePath),
   readFileChunk: (filePath: string, offset: number, length: number) =>

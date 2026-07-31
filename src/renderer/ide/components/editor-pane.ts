@@ -1,6 +1,7 @@
 import { EditorView, keymap, lineNumbers, WidgetType, Decoration, ViewPlugin, ViewUpdate } from "@codemirror/view";
 import { EditorState, StateEffect, StateField, EditorSelection, type SelectionRange } from "@codemirror/state";
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
+import { foldGutter, foldKeymap } from "@codemirror/language";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
@@ -341,6 +342,7 @@ function doCreateEditor(initialContent = "", filePath = ""): EditorView | null {
     editorTheme,
     keymap.of([
       ...searchKeymap,
+      ...foldKeymap,
       ...defaultKeymap,
       indentWithTab,
       {
@@ -381,6 +383,7 @@ function doCreateEditor(initialContent = "", filePath = ""): EditorView | null {
       },
     ]),
     detectLanguage(filePath),
+    foldGutter(),
     highlightSelectionMatches(),
     lspExtension(filePath),
     inlineChatField,

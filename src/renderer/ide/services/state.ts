@@ -522,6 +522,7 @@ declare global {
       minimize: () => void;
       toggleMaximize: () => void;
       pickFolder: () => Promise<string | null>;
+      copyText: (text: string) => Promise<boolean>;
       readDir: (dirPath: string) => Promise<IdeDirEntry[]>;
       readFile: (filePath: string) => Promise<string>;
       readFileChunk: (filePath: string, offset: number, length: number) => Promise<{ content: string; totalSize: number; isEnd: boolean }>;
