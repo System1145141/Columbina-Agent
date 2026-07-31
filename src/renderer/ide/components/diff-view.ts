@@ -13,6 +13,41 @@ export interface DiffLine {
 /** 行级 diff 的规模上限：超过则退化为"前后公共行 + 中间全量替换" */
 const LCS_CELL_LIMIT = 2_500_000;
 
+/** 每侧行号列宽度（与 CSS .ide__diff-line-no 保持一致） */
+const LINE_NO_WIDTH = 44;
+
+/** 自动换行开关（会话内有效） */
+let wrapEnabled = true;
+
+/**
+ * 测量单侧文本每行可容纳的字符数：
+ * 用探针 span 实测等宽字符宽度，按容器实际宽度动态计算，避免固定宽度导致溢出。
+ */
+function measureWrapWidth(body: HTMLElement): number {
+  try {
+    const probe = document.createElement("span");
+    probe.textContent = "0";
+    body.appendChild(probe);
+    const charWidth = probe.offsetWidth;
+    probe.remove();
+    if (charWidth <= 0) return 100;
+    const availPerSide = Math.floor(body.clientWidth / 2) - LINE_NO_WIDTH;
+    return Math.max(40, Math.floor(availPerSide / charWidth));
+  } catch {
+    return 100;
+  }
+}
+
+/** 将文本按指定字符宽度拆分为多个片段；未开启换行时原样返回 */
+function wrapSegments(text: string, wrapWidth: number): string[] {
+  if (!wrapEnabled || text.length <= wrapWidth) return [text];
+  const parts: string[] = [];
+  for (let i = 0; i < text.length; i += wrapWidth) {
+    parts.push(text.slice(i, i + wrapWidth));
+  }
+  return parts;
+}
+
 function splitLines(content: string): string[] {
   if (content.length === 0) return [];
   return content.replace(/\r\n/g, "\n").split("\n");
@@ -130,8 +165,12 @@ function createCell(text: string, lineNo: number | null, type: "same" | "add" | 
 /**
  * 将 diff 标签渲染到指定容器：左右并排、逐行对齐、滚动同步（单滚动容器）。
  * diff 视图作为容器的子元素渲染，不修改容器自身的 className。
+ * 开启自动换行时，超长行按固定字符宽度拆分为多个显示行，左右仍保持对齐。
  */
 export function renderDiffTab(tab: Tab, container: HTMLElement): void {
+  const oldBody = container.querySelector(".ide__diff-body");
+  const savedScrollTop = oldBody ? oldBody.scrollTop : 0;
+
   container.innerHTML = "";
 
   const view = document.createElement("div");
@@ -147,19 +186,44 @@ export function renderDiffTab(tab: Tab, container: HTMLElement): void {
   sub.textContent = tab.diffBaseContent === undefined || tab.diffBaseContent.length === 0 ? "新文件" : "变更前 HEAD ← → 工作区";
   header.appendChild(title);
   header.appendChild(sub);
+
+  const wrapBtn = document.createElement("button");
+  wrapBtn.type = "button";
+  wrapBtn.className = "ide__diff-wrap-btn" + (wrapEnabled ? " is-active" : "");
+  wrapBtn.textContent = "自动换行";
+  wrapBtn.title = wrapEnabled ? "关闭自动换行" : "开启自动换行";
+  wrapBtn.addEventListener("click", () => {
+    wrapEnabled = !wrapEnabled;
+    renderDiffTab(tab, container);
+  });
+  header.appendChild(wrapBtn);
   view.appendChild(header);
 
   const body = document.createElement("div");
   body.className = "ide__diff-body";
+  view.appendChild(body);
+  container.appendChild(view);
+
+  // body 挂载后测量容器宽度，动态计算每行字符数，避免固定宽度溢出
+  const wrapWidth = measureWrapWidth(body);
 
   const lines = computeLineDiff(tab.diffBaseContent || "", tab.currentContent);
   for (const line of lines) {
-    const row = document.createElement("div");
-    row.className = `ide__diff-row ide__diff-row--${line.type}`;
-    row.appendChild(createCell(line.leftText, line.leftLineNo, line.type, "left"));
-    row.appendChild(createCell(line.rightText, line.rightLineNo, line.type, "right"));
-    body.appendChild(row);
+    const leftParts = wrapSegments(line.leftText, wrapWidth);
+    const rightParts = wrapSegments(line.rightText, wrapWidth);
+    const displayRows = Math.max(leftParts.length, rightParts.length);
+    for (let k = 0; k < displayRows; k++) {
+      const row = document.createElement("div");
+      row.className = `ide__diff-row ide__diff-row--${line.type}`;
+      const leftNo = k === 0 ? line.leftLineNo : null;
+      const rightNo = k === 0 ? line.rightLineNo : null;
+      row.appendChild(createCell(leftParts[k] ?? "", leftNo, line.type, "left"));
+      row.appendChild(createCell(rightParts[k] ?? "", rightNo, line.type, "right"));
+      body.appendChild(row);
+    }
   }
-  view.appendChild(body);
-  container.appendChild(view);
+
+  if (savedScrollTop > 0) {
+    body.scrollTop = savedScrollTop;
+  }
 }

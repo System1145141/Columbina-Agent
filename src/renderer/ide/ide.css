@@ -954,6 +954,28 @@ html, body, .ide {
   color: #79b8ff;
 }
 
+.ide__diff-wrap-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid #3e3e42;
+  color: #858585;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.ide__diff-wrap-btn:hover {
+  color: #ffffff;
+  border-color: #6b6b6b;
+}
+
+.ide__diff-wrap-btn.is-active {
+  color: #79b8ff;
+  border-color: #79b8ff;
+}
+
 .ide__search-empty {
   color: #858585;
   font-size: 12px;
@@ -2414,6 +2436,21 @@ html, body, .ide {
 
 .ide.ide--light .ide__tab--diff .ide__tab-name {
   color: #0366d6;
+}
+
+.ide.ide--light .ide__diff-wrap-btn {
+  border-color: #d0d7de;
+  color: #57606a;
+}
+
+.ide.ide--light .ide__diff-wrap-btn:hover {
+  color: #333333;
+  border-color: #a0a8b0;
+}
+
+.ide.ide--light .ide__diff-wrap-btn.is-active {
+  color: #0366d6;
+  border-color: #0366d6;
 }
 
 .ide.ide--light .ide__git-section-title {
