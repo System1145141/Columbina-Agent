@@ -8,6 +8,7 @@ import {
   setTreeRoot,
   createWorkspaceRoot,
   type WorkspaceRoot,
+  type AiMessage,
 } from "./state";
 import { openFile, basename } from "./file-service";
 import { showAiPanel, hideAiPanel, showSearchPanel, hideSearchPanel, showGitPanel, hideGitPanel } from "./layout";
@@ -28,7 +29,11 @@ interface WorkspaceData {
   expandedDirs?: string[];
   panels?: WorkspacePanelState;
   bounds?: { x: number; y: number; width: number; height: number };
+  aiMessages?: AiMessage[];
 }
+
+/** 每个工作区最多持久化的 Agent 会话消息条数 */
+const MAX_PERSISTED_AI_MESSAGES = 200;
 
 function normalizePath(p: string): string {
   return p.replace(/\\/g, "/");
@@ -57,6 +62,7 @@ function collectWorkspaceState(): Record<string, unknown> {
       searchVisible: state.searchVisible,
       gitVisible: state.gitPanelVisible,
     },
+    aiMessages: state.aiMessages.slice(-MAX_PERSISTED_AI_MESSAGES),
   };
 }
 
@@ -114,6 +120,11 @@ async function applyWorkspace(data: WorkspaceData, filePath?: string): Promise<v
   } else if (state.tabs.size > 0) {
     state.activeTabId = state.tabs.values().next().value?.id || "";
   }
+
+  // 恢复该工作区的 Agent 会话历史；任务规划为执行期状态，切换工作区时重置
+  state.aiMessages = Array.isArray(data.aiMessages) ? (data.aiMessages as AiMessage[]) : [];
+  state.aiCurrentPlan = null;
+  state.aiTaskPlanRunning = false;
 
   applyPanels(data.panels);
   notify();

@@ -526,10 +526,10 @@ src/main/git-service.ts  (主进程，spawn git)
    - 每完成一步，Agent 自动进入下一步，直到任务完成或需要用户确认。
    - 实现：新增 `runAgentPlan` / `generateTaskPlan` / `executeTaskPlan` / `confirmTaskPlan` / `cancelTaskPlan`，AI 面板支持"任务规划"模式，命令面板新增"AI: 规划并执行任务"。
 
-2. **持久化 Agent 会话**
-   - 将 AI 面板会话与 `chat` 模块的会话打通，支持跨窗口恢复。
-   - 每个工作区保留独立的 Agent 会话历史。
-   - *状态：待实现，可与 chat 模块会话打通时一并补充。*
+2. **持久化 Agent 会话** ✅ 已完成（独立实现，不与 chat 模块打通）
+   - AI 面板会话历史随工作区文件（`.columbina-workspace.json`）一起持久化，重开 IDE 或打开工作区后自动恢复。
+   - 每个工作区保留独立的 Agent 会话历史，切换工作区时互不干扰。
+   - 保存上限 200 条消息；任务规划状态为执行期状态，切换工作区时重置。
 
 3. **自动错误修复**
    - 当 LSP 诊断到错误时，AI 面板显示"一键修复"建议。

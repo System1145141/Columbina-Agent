@@ -719,6 +719,17 @@ interface IdeWorkspaceFile {
     gitVisible: boolean;
   };
   bounds?: { x: number; y: number; width: number; height: number };
+  /** 持久化的 Agent 会话历史（不与 chat 模块打通，随工作区保存） */
+  aiMessages?: unknown[];
+}
+
+function sanitizeAiMessages(input: unknown): unknown[] | undefined {
+  if (!Array.isArray(input) || input.length === 0) return undefined;
+  const valid = input.filter(
+    (m): m is Record<string, unknown> =>
+      typeof m === "object" && m !== null && typeof (m as Record<string, unknown>).id === "string" && typeof (m as Record<string, unknown>).role === "string",
+  );
+  return valid.length > 0 ? valid : undefined;
 }
 
 function sanitizeWorkspaceRoots(input: unknown): IdeWorkspaceRootEntry[] {
@@ -761,6 +772,7 @@ function sanitizeWorkspaceFile(data: unknown): IdeWorkspaceFile | null {
             height: typeof (input.bounds as Record<string, unknown>).height === "number" ? Number((input.bounds as Record<string, unknown>).height) : 900,
           }
         : undefined,
+    aiMessages: sanitizeAiMessages(input.aiMessages),
   };
 }
 
@@ -3270,6 +3282,7 @@ function buildWorkspaceFileFromRenderer(payload: unknown): IdeWorkspaceFile | nu
       gitVisible: panels.gitVisible === true,
     },
     bounds,
+    aiMessages: sanitizeAiMessages(input.aiMessages),
   };
 }
 
