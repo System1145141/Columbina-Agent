@@ -1142,7 +1142,7 @@ html, body, .ide {
   display: inline-flex;
   align-items: center;
   height: 22px;
-  padding: 0 10px;
+  padding: 0 6px 0 10px;
   background: transparent;
   border: none;
   color: #bbbbbb;
@@ -1150,10 +1150,8 @@ html, body, .ide {
   font-weight: 500;
   cursor: pointer;
   border-radius: 3px 3px 0 0;
-  white-space: nowrap;
   max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  user-select: none;
 }
 
 .ide__terminal-tab:hover {
@@ -1163,6 +1161,35 @@ html, body, .ide {
 
 .ide__terminal-tab.is-active {
   background: #1e1e1e;
+  color: #ffffff;
+}
+
+.ide__terminal-tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide__terminal-tab-close {
+  width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: #bbbbbb;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 14px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ide__terminal-tab-close:hover {
+  background: #555555;
   color: #ffffff;
 }
 
@@ -1405,6 +1432,11 @@ html, body, .ide {
 .ide.ide--light .ide__terminal-add:hover,
 .ide.ide--light .ide__terminal-close:hover {
   background: #e5e5e5;
+  color: #000000;
+}
+
+.ide.ide--light .ide__terminal-tab-close:hover {
+  background: #c8c8c8;
   color: #000000;
 }
 

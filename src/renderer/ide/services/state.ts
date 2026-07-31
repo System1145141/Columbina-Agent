@@ -535,7 +535,7 @@ declare global {
       sendLspRequest: (languageId: string, workspacePath: string, request: { id: number; method: string; params?: unknown }) => void;
       sendLspNotification: (languageId: string, workspacePath: string, notification: { method: string; params?: unknown }) => void;
       onLspData: (callback: (payload: { languageId: string; workspacePath: string; message: unknown }) => void) => () => void;
-      createTerminal: (cwd?: string) => Promise<string>;
+      createTerminal: (cwd?: string) => Promise<{ id: string; pid: number }>;
       terminalInput: (id: string, data: string) => void;
       terminalResize: (id: string, cols: number, rows: number) => void;
       killTerminal: (id: string) => void;

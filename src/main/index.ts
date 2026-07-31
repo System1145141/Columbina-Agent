@@ -3537,7 +3537,7 @@ ipcMain.handle(IPC.IDE_TERMINAL_CREATE, async (_event, cwd: unknown) => {
       ideTerminals.delete(id);
     });
     ideTerminals.set(id, term);
-    return id;
+    return { id, pid: term.pid };
   } catch (err: any) {
     console.error("[Columbina IDE] create terminal failed:", err?.message || err);
     throw new Error(err?.message || "创建终端失败");

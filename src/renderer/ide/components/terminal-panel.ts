@@ -14,10 +14,11 @@ const terminalCloseBtn = document.getElementById("terminal-close-btn") as HTMLBu
 
 interface TerminalTab {
   id: string;
+  pid: number;
   term: Terminal;
   fitAddon: FitAddon;
   container: HTMLElement;
-  tabEl: HTMLButtonElement;
+  tabEl: HTMLElement;
 }
 
 const terminalTabs = new Map<string, TerminalTab>();
@@ -83,7 +84,7 @@ async function createTerminalTab(cwd?: string): Promise<TerminalTab | null> {
   term.loadAddon(fit);
   term.open(container);
 
-  const tab: TerminalTab = { id: "", term, fitAddon: fit, container, tabEl: document.createElement("button") };
+  const tab: TerminalTab = { id: "", pid: 0, term, fitAddon: fit, container, tabEl: document.createElement("div") };
 
   term.onData((data) => {
     if (tab.id) window.ide?.terminalInput(tab.id, data);
@@ -92,30 +93,46 @@ async function createTerminalTab(cwd?: string): Promise<TerminalTab | null> {
     if (tab.id) window.ide?.terminalResize(tab.id, cols, rows);
   });
 
-  let id: string | null = null;
+  let created: { id: string; pid: number } | null = null;
   try {
-    id = (await window.ide?.createTerminal(cwd)) ?? null;
+    created = (await window.ide?.createTerminal(cwd)) ?? null;
   } catch (err) {
     term.writeln(`\r\n[创建终端失败: ${String(err)}]`);
     container.remove();
     return null;
   }
-  if (!id) {
+  if (!created) {
     term.writeln("\r\n[创建终端失败]");
     container.remove();
     return null;
   }
-  tab.id = id;
+  tab.id = created.id;
+  tab.pid = created.pid;
 
-  const tabEl = document.createElement("button");
-  tabEl.type = "button";
+  const tabEl = document.createElement("div");
   tabEl.className = "ide__terminal-tab";
-  tabEl.textContent = terminalTitleFor(cwd);
-  tabEl.title = cwd || "";
+  tabEl.title = cwd ? `${cwd} · PID ${created.pid}` : `PID ${created.pid}`;
   tabEl.addEventListener("click", () => switchTerminalTab(tab.id));
   tabEl.addEventListener("auxclick", (e) => {
     if (e.button === 1) closeTerminalTab(tab.id);
   });
+
+  const titleEl = document.createElement("span");
+  titleEl.className = "ide__terminal-tab-title";
+  titleEl.textContent = terminalTitleFor(cwd);
+  tabEl.appendChild(titleEl);
+
+  const closeEl = document.createElement("button");
+  closeEl.type = "button";
+  closeEl.className = "ide__terminal-tab-close";
+  closeEl.textContent = "×";
+  closeEl.title = "关闭终端";
+  closeEl.addEventListener("click", (e) => {
+    e.stopPropagation();
+    closeTerminalTab(tab.id);
+  });
+  tabEl.appendChild(closeEl);
+
   tab.tabEl = tabEl;
   terminalTabsEl.appendChild(tabEl);
 

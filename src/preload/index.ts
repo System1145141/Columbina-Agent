@@ -177,7 +177,7 @@ const ideApi = {
     ipcRenderer.on(IPC.IDE_LSP_DATA, listener);
     return () => ipcRenderer.off(IPC.IDE_LSP_DATA, listener);
   },
-  createTerminal: (cwd?: string) => ipcRenderer.invoke(IPC.IDE_TERMINAL_CREATE, cwd) as Promise<string>,
+  createTerminal: (cwd?: string) => ipcRenderer.invoke(IPC.IDE_TERMINAL_CREATE, cwd) as Promise<{ id: string; pid: number }>,
   terminalInput: (id: string, data: string) => ipcRenderer.send(IPC.IDE_TERMINAL_INPUT, id, data),
   terminalResize: (id: string, cols: number, rows: number) => ipcRenderer.send(IPC.IDE_TERMINAL_RESIZE, id, cols, rows),
   killTerminal: (id: string) => ipcRenderer.send(IPC.IDE_TERMINAL_KILL, id),
