@@ -247,6 +247,8 @@ function doCreateEditor(initialContent = "", filePath = ""): EditorView | null {
   currentLspFile = filePath;
 
   state.editorView?.destroy();
+  state.editorView = null;
+  editorEl.innerHTML = ""; // 清理残留视图（如并排 diff），再挂载 CodeMirror
 
   const isLight = state.ideSettings.theme === "light";
   const editorTheme = EditorView.theme({

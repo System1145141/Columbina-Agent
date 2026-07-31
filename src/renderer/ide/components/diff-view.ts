@@ -129,10 +129,13 @@ function createCell(text: string, lineNo: number | null, type: "same" | "add" | 
 
 /**
  * 将 diff 标签渲染到指定容器：左右并排、逐行对齐、滚动同步（单滚动容器）。
+ * diff 视图作为容器的子元素渲染，不修改容器自身的 className。
  */
 export function renderDiffTab(tab: Tab, container: HTMLElement): void {
   container.innerHTML = "";
-  container.className = "ide__diff-view";
+
+  const view = document.createElement("div");
+  view.className = "ide__diff-view";
 
   const header = document.createElement("div");
   header.className = "ide__diff-header";
@@ -144,7 +147,7 @@ export function renderDiffTab(tab: Tab, container: HTMLElement): void {
   sub.textContent = tab.diffBaseContent === undefined || tab.diffBaseContent.length === 0 ? "新文件" : "变更前 HEAD ← → 工作区";
   header.appendChild(title);
   header.appendChild(sub);
-  container.appendChild(header);
+  view.appendChild(header);
 
   const body = document.createElement("div");
   body.className = "ide__diff-body";
@@ -157,5 +160,6 @@ export function renderDiffTab(tab: Tab, container: HTMLElement): void {
     row.appendChild(createCell(line.rightText, line.rightLineNo, line.type, "right"));
     body.appendChild(row);
   }
-  container.appendChild(body);
+  view.appendChild(body);
+  container.appendChild(view);
 }
