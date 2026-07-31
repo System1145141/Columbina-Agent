@@ -16,6 +16,7 @@ import {
 import { runAgentPlan } from "../services/agent-bridge";
 import {
   toggleSearchPanel,
+  toggleProblemsPanel,
   toggleTerminalPanel,
   toggleIdeTheme,
   changeEditorFontSize,
@@ -118,6 +119,13 @@ function getBaseCommands(): CommandItem[] {
       icon: "🔍",
       shortcut: "Ctrl+Shift+F",
       run: () => toggleSearchPanel(),
+    },
+    {
+      id: "toggle-problems",
+      label: "切换问题面板",
+      icon: "⚠",
+      shortcut: "Ctrl+Shift+M",
+      run: () => toggleProblemsPanel(),
     },
     {
       id: "toggle-terminal",

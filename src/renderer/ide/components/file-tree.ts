@@ -1,4 +1,4 @@
-import { state, subscribe, notify, getActiveRootPath, getRootForPath, removeRoot, type IdeDirEntry, type WorkspaceRoot } from "../services/state";
+import { state, subscribe, notify, getActiveRootPath, getRootForPath, removeRoot, updateTabPath, type IdeDirEntry, type WorkspaceRoot } from "../services/state";
 import {
   openFile,
   readDir,
@@ -16,9 +16,11 @@ import {
   searchFiles,
   basename,
   pickFolder,
+  copyText,
 } from "../services/file-service";
 import { showSearchPanel, toggleSearchPanel, hideSearchPanel } from "../services/layout";
 import { relocateRoot, closeTabsForRoot } from "../services/workspace-service";
+import { openTerminalInDir } from "./terminal-panel";
 
 const treeRootEl = document.getElementById("tree-root") as HTMLElement;
 const folderPathEl = document.getElementById("folder-path") as HTMLSpanElement;
@@ -96,6 +98,10 @@ function showTreeContextMenu(x: number, y: number, entry: IdeDirEntry) {
   const root = entry.isDirectory ? state.roots.find((r) => r.path === entry.path) : undefined;
 
   if (root) {
+    items.push({ label: "新建文件", action: () => void promptCreate(entry.path, "file") });
+    items.push({ label: "新建文件夹", action: () => void promptCreate(entry.path, "dir") });
+    items.push({ label: "在集成终端中打开", action: () => void openTerminalInDir(entry.path) });
+    items.push({ label: "复制路径", action: () => void copyPath(entry) });
     items.push({ label: "重新定位文件夹", action: () => void relocateRoot(root.id) });
     items.push({ label: "从工作区移除", action: () => void removeRootFromTree(root), danger: true });
     items.push({ label: "刷新", action: () => void refreshTreeItem(entry.path) });
@@ -103,8 +109,11 @@ function showTreeContextMenu(x: number, y: number, entry: IdeDirEntry) {
     if (entry.isDirectory) {
       items.push({ label: "新建文件", action: () => void promptCreate(entry.path, "file") });
       items.push({ label: "新建文件夹", action: () => void promptCreate(entry.path, "dir") });
+      items.push({ label: "在集成终端中打开", action: () => void openTerminalInDir(entry.path) });
     }
     items.push({ label: "重命名", action: () => void promptRename(entry) });
+    items.push({ label: "移动到…", action: () => void promptMove(entry) });
+    items.push({ label: "复制路径", action: () => void copyPath(entry) });
     items.push({ label: "删除", action: () => void confirmDelete(entry), danger: true });
     items.push({ label: "刷新", action: () => void refreshTreeItem(entry.isDirectory ? entry.path : parentDir(entry.path)) });
   }
@@ -223,6 +232,55 @@ async function promptRename(entry: IdeDirEntry) {
   const parentDirPath = parentDir(entry.path);
   await refreshAfterRename(entry.path, result.path, entry.isDirectory);
   await refreshTreeItem(parentDirPath || getActiveRootPath());
+}
+
+/** 将文件/文件夹移动到用户选择的目录，并同步已打开的编辑器标签路径 */
+async function promptMove(entry: IdeDirEntry) {
+  const targetDir = await pickFolder();
+  if (!targetDir) return;
+  const normalizedTarget = targetDir.replace(/\\/g, "/").replace(/\/+$/, "");
+  const srcParent = parentDir(entry.path);
+
+  if (normalizedTarget === srcParent) {
+    state.statusMessage = "目标目录与当前所在目录相同";
+    notify();
+    return;
+  }
+  if (entry.isDirectory && (normalizedTarget === entry.path || normalizedTarget.startsWith(entry.path + "/"))) {
+    state.statusMessage = "不能将文件夹移动到自身或其子目录";
+    notify();
+    return;
+  }
+
+  const result = await move(entry.path, normalizedTarget);
+  if (!result.ok) {
+    state.statusMessage = `移动失败: ${result.error || "未知错误"}`;
+    notify();
+    return;
+  }
+
+  // 同步已打开标签的路径
+  const newPath = `${normalizedTarget}/${basename(entry.path)}`;
+  if (entry.isDirectory) {
+    for (const tab of [...state.tabs.values()]) {
+      if (tab.id.startsWith(entry.path + "/")) {
+        const movedPath = newPath + tab.id.slice(entry.path.length);
+        updateTabPath(tab.id, movedPath, basename(movedPath));
+      }
+    }
+  } else if (state.tabs.has(entry.path)) {
+    updateTabPath(entry.path, newPath, basename(newPath));
+  }
+  notify();
+
+  await refreshTreeItem(srcParent || getActiveRootPath());
+  await refreshTreeItem(normalizedTarget);
+}
+
+async function copyPath(entry: IdeDirEntry) {
+  const ok = await copyText(entry.path);
+  state.statusMessage = ok ? `已复制路径: ${entry.path}` : "复制失败";
+  notify();
 }
 
 async function confirmDelete(entry: IdeDirEntry) {

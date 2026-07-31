@@ -1,5 +1,6 @@
 import { ipcMain } from "electron";
 import { spawn } from "child_process";
+import * as fs from "fs";
 import * as path from "path";
 import { IPC } from "../shared/ipc-channels";
 
@@ -355,6 +356,63 @@ export async function abortRevert(folderPath: string): Promise<GitResult> {
   return { ok: false, error: stderr.trim() || "取消 revert 失败" };
 }
 
+/**
+ * 放弃文件的本地更改：
+ * - 已暂存的文件：先取消暂存，再丢弃工作区修改
+ * - 未跟踪的文件：直接从磁盘删除
+ */
+export async function discardFile(folderPath: string, filePath: string): Promise<GitResult> {
+  const rel = toRelativePath(folderPath, filePath);
+  // 已暂存时先重置暂存区（对未跟踪文件该命令会失败，忽略即可）
+  await execGit(["reset", "-q", "HEAD", "--", rel], folderPath);
+  const result = await execGit(["checkout", "-q", "--", rel], folderPath);
+  if (result.exitCode === 0) return { ok: true };
+  // checkout 失败说明文件未被跟踪，直接删除
+  const ls = await execGit(["ls-files", "--error-unmatch", "--", rel], folderPath);
+  if (ls.exitCode !== 0) {
+    try {
+      fs.unlinkSync(filePath);
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: err?.message || "删除未跟踪文件失败" };
+    }
+  }
+  return { ok: false, error: result.stderr.trim() || "放弃更改失败" };
+}
+
+/** 将相对路径以根相对形式（/path）追加到仓库根目录的 .gitignore，已存在则不重复添加 */
+export async function addToGitignore(folderPath: string, filePath: string): Promise<GitResult> {
+  const rel = toRelativePath(folderPath, filePath);
+  const line = "/" + rel;
+  const gitignorePath = path.join(folderPath, ".gitignore");
+  try {
+    let content = "";
+    if (fs.existsSync(gitignorePath)) {
+      content = fs.readFileSync(gitignorePath, "utf8");
+    }
+    const existing = new Set(
+      content
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0 && !l.startsWith("#"))
+    );
+    if (existing.has(line) || existing.has(rel)) return { ok: true };
+    const addition = (content.length > 0 && !content.endsWith("\n") ? "\n" : "") + line + "\n";
+    fs.appendFileSync(gitignorePath, addition, "utf8");
+    return { ok: true };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || "写入 .gitignore 失败" };
+  }
+}
+
+/** 获取文件在 HEAD 提交中的内容；文件未被跟踪时返回 ok: false */
+export async function showHeadContent(folderPath: string, filePath: string): Promise<{ ok: boolean; content: string }> {
+  const rel = toRelativePath(folderPath, filePath);
+  const { stdout, exitCode } = await execGit(["show", `HEAD:${rel}`], folderPath, { timeout: 15_000 });
+  if (exitCode !== 0) return { ok: false, content: "" };
+  return { ok: true, content: stdout };
+}
+
 export async function getLog(folderPath: string, maxCount = 20): Promise<GitLogEntry[]> {
   const format = "%H%x00%s%x00%an%x00%ad";
   const { stdout, exitCode } = await execGit(
@@ -615,6 +673,42 @@ export function setupGitIpc(): void {
     } catch (err: any) {
       console.error("[Columbina IDE] git revert failed:", err?.message || err);
       return { ok: false, error: err?.message || "revert 失败" };
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_DISCARD, async (_event, folderPath: unknown, filePath: unknown) => {
+    if (typeof folderPath !== "string" || typeof filePath !== "string") {
+      return { ok: false, error: "参数类型错误" };
+    }
+    try {
+      return await discardFile(folderPath, filePath);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git discard failed:", err?.message || err);
+      return { ok: false, error: err?.message || "放弃更改失败" };
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_ADD_GITIGNORE, async (_event, folderPath: unknown, filePath: unknown) => {
+    if (typeof folderPath !== "string" || typeof filePath !== "string") {
+      return { ok: false, error: "参数类型错误" };
+    }
+    try {
+      return await addToGitignore(folderPath, filePath);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git add to gitignore failed:", err?.message || err);
+      return { ok: false, error: err?.message || "写入 .gitignore 失败" };
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_SHOW_HEAD, async (_event, folderPath: unknown, filePath: unknown) => {
+    if (typeof folderPath !== "string" || typeof filePath !== "string") {
+      return { ok: false, content: "" };
+    }
+    try {
+      return await showHeadContent(folderPath, filePath);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git show head failed:", err?.message || err);
+      return { ok: false, content: "" };
     }
   });
 }

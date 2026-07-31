@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, shell, dialog, protocol, net } from "electron";
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, shell, dialog, protocol, net, clipboard } from "electron";
+import * as nodeNet from "net";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
@@ -97,6 +98,51 @@ let schedulerEngine: SchedulerEngine | null = null;
 let activeChatSessionId: string | null = null;
 
 const isDev = process.env.VITE_DEV === "1";
+
+// ── dev 模式 Vite 端口动态解析 ──
+// 优先读取环境变量 VITE_PORT；否则探测常见 Vite 端口，命中即用，不再硬编码 5173。
+const DEV_PORT_CANDIDATES = [5173, 5174, 5175, 5176, 5177, 5178, 5179, 5180];
+let devServerBaseUrl: string | null = null;
+
+function probePortListening(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = new nodeNet.Socket();
+    socket.setTimeout(300);
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once("timeout", () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.once("error", () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.connect(port, "127.0.0.1");
+  });
+}
+
+async function resolveDevServerBaseUrl(): Promise<string | null> {
+  if (devServerBaseUrl) return devServerBaseUrl;
+  const envPort = Number(process.env.VITE_PORT);
+  if (Number.isInteger(envPort) && envPort > 0 && envPort < 65536) {
+    devServerBaseUrl = `http://localhost:${envPort}`;
+    return devServerBaseUrl;
+  }
+  const results = await Promise.all(
+    DEV_PORT_CANDIDATES.map(async (port) => ({ port, ok: await probePortListening(port) })),
+  );
+  const hit = results.find((r) => r.ok);
+  if (hit) devServerBaseUrl = `http://localhost:${hit.port}`;
+  return devServerBaseUrl;
+}
+
+function devServerUrl(pathname = ""): string {
+  const base = devServerBaseUrl ?? `http://localhost:${process.env.VITE_PORT || 5173}`;
+  return base + pathname;
+}
 
 function appendMinimaxTtsLog(entry: Record<string, unknown>): void {
   try {
@@ -673,6 +719,17 @@ interface IdeWorkspaceFile {
     gitVisible: boolean;
   };
   bounds?: { x: number; y: number; width: number; height: number };
+  /** 持久化的 Agent 会话历史（不与 chat 模块打通，随工作区保存） */
+  aiMessages?: unknown[];
+}
+
+function sanitizeAiMessages(input: unknown): unknown[] | undefined {
+  if (!Array.isArray(input) || input.length === 0) return undefined;
+  const valid = input.filter(
+    (m): m is Record<string, unknown> =>
+      typeof m === "object" && m !== null && typeof (m as Record<string, unknown>).id === "string" && typeof (m as Record<string, unknown>).role === "string",
+  );
+  return valid.length > 0 ? valid : undefined;
 }
 
 function sanitizeWorkspaceRoots(input: unknown): IdeWorkspaceRootEntry[] {
@@ -715,6 +772,7 @@ function sanitizeWorkspaceFile(data: unknown): IdeWorkspaceFile | null {
             height: typeof (input.bounds as Record<string, unknown>).height === "number" ? Number((input.bounds as Record<string, unknown>).height) : 900,
           }
         : undefined,
+    aiMessages: sanitizeAiMessages(input.aiMessages),
   };
 }
 
@@ -2152,7 +2210,7 @@ export function sendToLive2DWindow(channel: string, payload?: unknown): void {
 
 function openExternalUrl(url: string): boolean {
   if (!url.startsWith("http://") && !url.startsWith("https://")) return false;
-  if (isDev && url.startsWith("http://localhost:5173")) return false;
+  if (isDev && url.startsWith(devServerUrl())) return false;
   void shell.openExternal(url);
   return true;
 }
@@ -2225,7 +2283,7 @@ function createWindow(): void {
   });
 
   if (isDev) {
-    mainWindow.loadURL("http://localhost:5173");
+    mainWindow.loadURL(devServerUrl());
   } else {
     mainWindow.loadFile(path.join(__dirname, "..", "..", "renderer", "index.html"));
   }
@@ -2452,7 +2510,7 @@ function createChatWindow(sessionId?: string): void {
   // 后续切换走 CHATS_SWITCH_SESSION 事件，避免重新加载页面。
   const queryString = sessionId ? "?sessionId=" + encodeURIComponent(sessionId) : "";
   if (isDev) {
-    chatWindow.loadURL("http://localhost:5173/chat/" + queryString);
+    chatWindow.loadURL(devServerUrl("/chat/" + queryString));
   } else {
     chatWindow.loadFile(
       path.join(__dirname, "..", "..", "renderer", "chat", "index.html"),
@@ -2507,7 +2565,7 @@ function createIdeWindow(): void {
   });
 
   if (isDev) {
-    ideWindow.loadURL("http://localhost:5173/ide/");
+    ideWindow.loadURL(devServerUrl("/ide/"));
   } else {
     ideWindow.loadFile(
       path.join(__dirname, "..", "..", "renderer", "ide", "index.html")
@@ -2557,7 +2615,7 @@ function createSidebarWindow(): void {
   });
 
   if (isDev) {
-    sidebarWindow.loadURL("http://localhost:5173/sidebar/");
+    sidebarWindow.loadURL(devServerUrl("/sidebar/"));
   } else {
     sidebarWindow.loadFile(
       path.join(__dirname, "..", "..", "renderer", "sidebar", "index.html")
@@ -2605,7 +2663,7 @@ function createTasksWindow(): void {
   });
 
   if (isDev) {
-    tasksWindow.loadURL("http://localhost:5173/tasks/");
+    tasksWindow.loadURL(devServerUrl("/tasks/"));
   } else {
     tasksWindow.loadFile(
       path.join(__dirname, "..", "..", "renderer", "tasks", "index.html")
@@ -2664,7 +2722,7 @@ function createSettingsWindow(section?: string): void {
 
   const hash = section ? `#${section}` : "";
   if (isDev) {
-    settingsWindow.loadURL("http://localhost:5173/settings/" + hash);
+    settingsWindow.loadURL(devServerUrl("/settings/" + hash));
   } else {
     settingsWindow.loadFile(
       path.join(__dirname, "..", "..", "renderer", "settings", "index.html"),
@@ -2723,7 +2781,7 @@ async function createStickerManagerWindow(): Promise<{ ok: boolean; error?: stri
 
   try {
     if (isDev) {
-      await stickerManagerWindow.loadURL("http://localhost:5173/sticker-manager/");
+      await stickerManagerWindow.loadURL(devServerUrl("/sticker-manager/"));
     } else {
       await stickerManagerWindow.loadFile(
         path.join(__dirname, "..", "..", "renderer", "sticker-manager", "index.html")
@@ -2789,7 +2847,7 @@ function createCallWindow(): void {
   });
 
   if (isDev) {
-    callWindow.loadURL("http://localhost:5173/call/");
+    callWindow.loadURL(devServerUrl("/call/"));
   } else {
     callWindow.loadFile(path.join(__dirname, "..", "..", "renderer", "call", "index.html"));
   }
@@ -2986,6 +3044,14 @@ ipcMain.handle(IPC.IDE_PICK_FOLDER, async () => {
   if (!ideWindow) return null;
   const result = await dialog.showOpenDialog(ideWindow, { properties: ["openDirectory"] });
   return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
+});
+
+ipcMain.handle(IPC.IDE_COPY_TEXT, (_event, text: unknown) => {
+  if (typeof text === "string" && text.length > 0) {
+    clipboard.writeText(text);
+    return true;
+  }
+  return false;
 });
 
 // 渲染进程同步工作区 roots 到主进程，用于文件操作 IPC 的路径校验
@@ -3224,6 +3290,7 @@ function buildWorkspaceFileFromRenderer(payload: unknown): IdeWorkspaceFile | nu
       gitVisible: panels.gitVisible === true,
     },
     bounds,
+    aiMessages: sanitizeAiMessages(input.aiMessages),
   };
 }
 
@@ -3491,7 +3558,7 @@ ipcMain.handle(IPC.IDE_TERMINAL_CREATE, async (_event, cwd: unknown) => {
       ideTerminals.delete(id);
     });
     ideTerminals.set(id, term);
-    return id;
+    return { id, pid: term.pid };
   } catch (err: any) {
     console.error("[Columbina IDE] create terminal failed:", err?.message || err);
     throw new Error(err?.message || "创建终端失败");
@@ -4002,6 +4069,11 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 app.whenReady().then(async () => {
+  // dev 模式：创建窗口前解析 Vite 端口（环境变量 VITE_PORT 或端口探测），供 loadURL 使用
+  if (isDev) {
+    await resolveDevServerBaseUrl();
+    console.log("[Columbina] dev server:", devServerBaseUrl);
+  }
   // 注册 local-sticker:// 协议处理器：将请求映射到 userData/stickers/ 下的文件
   protocol.handle("local-sticker", (request) => {
     const file = parseLocalStickerFileFromUrl(request.url);

@@ -1,6 +1,4 @@
 import type { EditorView } from "@codemirror/view";
-import type { Terminal } from "@xterm/xterm";
-import type { FitAddon } from "@xterm/addon-fit";
 import type { LspDiagnostic } from "./lsp-client";
 import type { PluginToolParameter } from "../plugins/api";
 
@@ -18,8 +16,12 @@ export interface IdeDirEntry {
   children?: IdeDirEntry[];
 }
 
+export type TabKind = "file" | "diff";
+
 export interface Tab {
   id: string;
+  /** "file" 为普通文件编辑标签，缺省即文件；"diff" 为并排变更对比标签 */
+  kind?: TabKind;
   filePath: string;
   fileName: string;
   initialContent: string;
@@ -29,12 +31,21 @@ export interface Tab {
   largeFile?: boolean;
   fullSize?: number;
   loadedFull?: boolean;
+  /** diff 标签专用：变更前（HEAD）内容 */
+  diffBaseContent?: string;
+}
+
+export interface LanguageServerConfig {
+  command: string;
+  args?: string[];
 }
 
 export interface IdeSettings {
   theme: "dark" | "light";
   fontSize: number;
   tabSize: number;
+  /** 自定义语言服务器配置，key 为语言 ID（如 typescript / python）；未配置的语言使用内置映射 */
+  languageServers?: Record<string, LanguageServerConfig>;
 }
 
 export interface WorkspaceRoot {
@@ -190,12 +201,7 @@ export const state = {
   expandedDirs: new Set<string>(),
   isClosing: false,
 
-  terminal: null as Terminal | null,
-  fitAddon: null as FitAddon | null,
-  terminalId: null as string | null,
   terminalVisible: false,
-  terminalDataUnsub: null as (() => void) | null,
-  terminalExitUnsub: null as (() => void) | null,
 
   ideSettings: {
     theme: "dark" as "dark" | "light",
@@ -225,6 +231,7 @@ export const state = {
   projectIndex: [] as ProjectIndexEntry[],
 
   searchVisible: false,
+  problemsVisible: false,
   commandPaletteVisible: false,
   commandItems: [] as CommandItem[],
   commandSelectedIndex: -1,
@@ -247,6 +254,7 @@ export const state = {
   gitLogVisible: false,
   gitStashesByRoot: {} as Record<string, GitStashEntry[]>,
   gitStashVisible: false,
+  gitCollapsedRoots: {} as Record<string, boolean>,
 
   searchSelectedRootIds: [] as string[],
 
@@ -514,6 +522,7 @@ declare global {
       minimize: () => void;
       toggleMaximize: () => void;
       pickFolder: () => Promise<string | null>;
+      copyText: (text: string) => Promise<boolean>;
       readDir: (dirPath: string) => Promise<IdeDirEntry[]>;
       readFile: (filePath: string) => Promise<string>;
       readFileChunk: (filePath: string, offset: number, length: number) => Promise<{ content: string; totalSize: number; isEnd: boolean }>;
@@ -530,12 +539,12 @@ declare global {
       createDir: (dirPath: string, dirName: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
       delete: (targetPath: string) => Promise<{ ok: boolean; error?: string }>;
       rename: (targetPath: string, newName: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
-      startLanguageServer: (languageId: string, workspacePath: string) => Promise<{ ok: boolean; error?: string }>;
+      startLanguageServer: (languageId: string, workspacePath: string, config?: LanguageServerConfig) => Promise<{ ok: boolean; error?: string }>;
       stopLanguageServer: (languageId: string, workspacePath: string) => void;
       sendLspRequest: (languageId: string, workspacePath: string, request: { id: number; method: string; params?: unknown }) => void;
       sendLspNotification: (languageId: string, workspacePath: string, notification: { method: string; params?: unknown }) => void;
       onLspData: (callback: (payload: { languageId: string; workspacePath: string; message: unknown }) => void) => () => void;
-      createTerminal: (cwd?: string) => Promise<string>;
+      createTerminal: (cwd?: string) => Promise<{ id: string; pid: number }>;
       terminalInput: (id: string, data: string) => void;
       terminalResize: (id: string, cols: number, rows: number) => void;
       killTerminal: (id: string) => void;
@@ -561,6 +570,9 @@ declare global {
       stashGitDrop: (folderPath: string, stashRef: string) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
       cherryPickGit: (folderPath: string, commitHash: string, noCommit?: boolean) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
       revertGit: (folderPath: string, commitHash: string, noCommit?: boolean) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      discardGitFile: (folderPath: string, filePath: string) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      addToGitignore: (folderPath: string, filePath: string) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      showGitHeadContent: (folderPath: string, filePath: string) => Promise<{ ok: boolean; content: string }>;
       saveWorkspace: (filePath: string | null, state: Record<string, unknown>) => Promise<{ ok: boolean; filePath?: string; error?: string }>;
       saveWorkspaceSync: (filePath: string | null, state: Record<string, unknown>) => { ok: boolean; filePath?: string; error?: string };
       openWorkspace: () => Promise<{ ok: boolean; workspace?: Record<string, unknown>; filePath?: string; error?: string }>;

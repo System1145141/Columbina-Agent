@@ -11,11 +11,14 @@ import {
   getGitStashesForRoot,
   setGitSelectedFileForRoot,
   setGitDiffForRoot,
+  addTab,
+  setActiveTab,
   type WorkspaceRoot,
   type GitLogEntry,
+  type Tab,
 } from "../services/state";
 import { toggleGitPanel } from "../services/layout";
-import { openFile } from "../services/file-service";
+import { openFile, readFile, basename } from "../services/file-service";
 import { showPromptDialog } from "./file-tree";
 import {
   refreshGitStatus,
@@ -37,6 +40,9 @@ import {
   stashGitDrop,
   cherryPickGit,
   revertGit,
+  discardGitFile,
+  addToGitignore,
+  getGitHeadContent,
 } from "../services/git-service";
 
 const gitToggleBtn = document.getElementById("git-toggle-btn") as HTMLButtonElement;
@@ -47,6 +53,7 @@ const gitDiffPathEl = document.getElementById("git-diff-path") as HTMLElement;
 const gitDiffContentEl = document.getElementById("git-diff-content") as HTMLElement;
 const gitDiffCloseBtn = document.getElementById("git-diff-close") as HTMLButtonElement;
 const gitOpenDiffBtn = document.getElementById("git-open-diff") as HTMLButtonElement;
+const gitOpenDiffTabBtn = document.getElementById("git-open-diff-tab") as HTMLButtonElement;
 const gitLoadingEl = document.getElementById("git-loading") as HTMLElement;
 
 let lastRootsKey = "";
@@ -111,6 +118,55 @@ function hideDiff(): void {
     setGitDiffForRoot(selectedRootId, "");
   }
   selectedRootId = "";
+  notify();
+}
+
+/**
+ * 在新标签页中打开并排变更对比：
+ * 左侧为变更前（HEAD）内容，右侧为当前工作区内容（若已在编辑器打开则取其当前内容）。
+ */
+async function openChangesTab(rootId: string, filePath: string): Promise<void> {
+  const root = state.roots.find((r) => r.id === rootId);
+  if (!root) return;
+  const absPath = relativeToAbsolute(filePath, root.path);
+  const diffId = `diff:${absPath}`;
+
+  let current = "";
+  const opened = state.tabs.get(absPath);
+  if (opened && opened.kind !== "diff") {
+    current = opened.currentContent;
+  } else {
+    try {
+      current = await readFile(absPath);
+    } catch {
+      current = "";
+    }
+  }
+
+  const head = await getGitHeadContent(root, absPath);
+
+  const existing = state.tabs.get(diffId);
+  if (existing && existing.kind === "diff") {
+    existing.currentContent = current;
+    existing.diffBaseContent = head.ok ? head.content : "";
+    setActiveTab(diffId);
+    notify();
+    return;
+  }
+
+  const tab: Tab = {
+    id: diffId,
+    kind: "diff",
+    filePath: absPath,
+    fileName: basename(absPath),
+    initialContent: current,
+    currentContent: current,
+    modified: false,
+    lineEnding: "lf",
+    diffBaseContent: head.ok ? head.content : "",
+  };
+  addTab(tab);
+  setActiveTab(diffId);
   notify();
 }
 
@@ -400,6 +456,142 @@ function hideGitContextMenu(): void {
   }
 }
 
+async function doDiscardFile(rootId: string, filePath: string): Promise<void> {
+  const root = state.roots.find((r) => r.id === rootId);
+  if (!root) return;
+  const confirmed = confirm(`确定要放弃 "${filePath}" 的所有本地更改吗？此操作不可恢复。`);
+  if (!confirmed) return;
+  state.gitLoading = true;
+  notify();
+  try {
+    const result = await discardGitFile(root, filePath);
+    if (result.ok) {
+      state.statusMessage = `【${root.name}】已放弃 ${filePath} 的更改`;
+      const selected = getGitSelectedFileForRoot(rootId);
+      if (selected?.path === filePath) hideDiff();
+      await refreshGitStatus();
+    } else {
+      state.statusMessage = `【${root.name}】放弃更改失败: ${result.error || "未知错误"}`;
+    }
+  } catch (err) {
+    state.statusMessage = `【${root.name}】放弃更改失败: ${String(err)}`;
+  } finally {
+    state.gitLoading = false;
+    notify();
+  }
+}
+
+async function doAddToGitignore(rootId: string, filePath: string): Promise<void> {
+  const root = state.roots.find((r) => r.id === rootId);
+  if (!root) return;
+  state.gitLoading = true;
+  notify();
+  try {
+    const result = await addToGitignore(root, filePath);
+    if (result.ok) {
+      state.statusMessage = `【${root.name}】已将 ${filePath} 添加到 .gitignore`;
+      const selected = getGitSelectedFileForRoot(rootId);
+      if (selected?.path === filePath) hideDiff();
+      await refreshGitStatus();
+    } else {
+      state.statusMessage = `【${root.name}】添加到 .gitignore 失败: ${result.error || "未知错误"}`;
+    }
+  } catch (err) {
+    state.statusMessage = `【${root.name}】添加到 .gitignore 失败: ${String(err)}`;
+  } finally {
+    state.gitLoading = false;
+    notify();
+  }
+}
+
+function showGitFileContextMenu(rootId: string, filePath: string, status: "staged" | "modified" | "untracked" | "conflicted", x: number, y: number): void {
+  hideGitContextMenu();
+  const root = state.roots.find((r) => r.id === rootId);
+  if (!root) return;
+
+  const menu = document.createElement("div");
+  menu.className = "ide__git-context-menu";
+
+  const openItem = document.createElement("div");
+  openItem.className = "ide__git-context-item";
+  openItem.textContent = "打开文件";
+  openItem.addEventListener("click", () => {
+    hideGitContextMenu();
+    void openFile(relativeToAbsolute(filePath, root.path));
+  });
+  menu.appendChild(openItem);
+
+  const changesItem = document.createElement("div");
+  changesItem.className = "ide__git-context-item";
+  changesItem.textContent = "打开变更";
+  changesItem.title = "在新标签页中并排对比变更前后的内容";
+  changesItem.addEventListener("click", () => {
+    hideGitContextMenu();
+    void openChangesTab(rootId, filePath);
+  });
+  menu.appendChild(changesItem);
+
+  const stageItem = document.createElement("div");
+  stageItem.className = "ide__git-context-item";
+  stageItem.textContent = status === "staged" ? "取消暂存" : "暂存更改";
+  stageItem.addEventListener("click", () => {
+    hideGitContextMenu();
+    void toggleFileStage(rootId, filePath, status === "staged");
+  });
+  menu.appendChild(stageItem);
+
+  const discardItem = document.createElement("div");
+  discardItem.className = "ide__git-context-item ide__git-context-item--danger";
+  discardItem.textContent = "放弃更改";
+  discardItem.title = "撤销该文件的所有本地更改（未跟踪文件将被删除）";
+  discardItem.addEventListener("click", () => {
+    hideGitContextMenu();
+    void doDiscardFile(rootId, filePath);
+  });
+  menu.appendChild(discardItem);
+
+  const ignoreItem = document.createElement("div");
+  ignoreItem.className = "ide__git-context-item";
+  ignoreItem.textContent = "添加到 .gitignore";
+  ignoreItem.addEventListener("click", () => {
+    hideGitContextMenu();
+    void doAddToGitignore(rootId, filePath);
+  });
+  menu.appendChild(ignoreItem);
+
+  // 边界检测，避免溢出窗口
+  const rect = document.body.getBoundingClientRect();
+  const menuWidth = 200;
+  const menuHeight = 150;
+  const left = Math.min(x, rect.width - menuWidth - 4);
+  const top = Math.min(y, rect.height - menuHeight - 4);
+  menu.style.left = `${Math.max(0, left)}px`;
+  menu.style.top = `${Math.max(0, top)}px`;
+
+  document.body.appendChild(menu);
+  gitContextMenu = menu;
+
+  // 点击其他区域或按 Esc 关闭
+  const onOutsideClick = (e: MouseEvent) => {
+    if (gitContextMenu && !gitContextMenu.contains(e.target as Node)) {
+      hideGitContextMenu();
+      document.removeEventListener("mousedown", onOutsideClick);
+      document.removeEventListener("keydown", onEscKey);
+    }
+  };
+  const onEscKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      hideGitContextMenu();
+      document.removeEventListener("mousedown", onOutsideClick);
+      document.removeEventListener("keydown", onEscKey);
+    }
+  };
+  setTimeout(() => {
+    document.addEventListener("mousedown", onOutsideClick);
+    document.addEventListener("keydown", onEscKey);
+  }, 0);
+}
+
 function showGitLogContextMenu(rootId: string, entry: GitLogEntry, x: number, y: number): void {
   hideGitContextMenu();
   const menu = document.createElement("div");
@@ -541,6 +733,11 @@ function createFileRow(
   row.appendChild(checkbox);
   row.appendChild(label);
   row.appendChild(statusBadge);
+
+  row.addEventListener("contextmenu", (e: MouseEvent) => {
+    e.preventDefault();
+    showGitFileContextMenu(rootId, filePath, status, e.clientX, e.clientY);
+  });
   return row;
 }
 
@@ -797,9 +994,23 @@ function renderGitRoot(root: WorkspaceRoot): HTMLElement {
   rootEl.className = "ide__git-root";
 
   const status = getGitStatusForRoot(root.id);
+  const collapsed = state.gitCollapsedRoots[root.id] || false;
 
   const header = document.createElement("div");
   header.className = "ide__git-root-header";
+  const headLeft = document.createElement("div");
+  headLeft.className = "ide__git-root-head-left";
+  const collapseBtn = document.createElement("button");
+  collapseBtn.type = "button";
+  collapseBtn.className = "ide__git-collapse-btn";
+  collapseBtn.textContent = collapsed ? "▸" : "▾";
+  collapseBtn.title = collapsed ? "展开仓库" : "折叠仓库";
+  collapseBtn.addEventListener("click", () => {
+    if (collapsed) delete state.gitCollapsedRoots[root.id];
+    else state.gitCollapsedRoots[root.id] = true;
+    notify();
+  });
+  headLeft.appendChild(collapseBtn);
   const meta = document.createElement("div");
   meta.className = "ide__git-root-meta";
   const name = document.createElement("div");
@@ -819,10 +1030,11 @@ function renderGitRoot(root: WorkspaceRoot): HTMLElement {
   branchLine.textContent = parts.join(" · ");
   meta.appendChild(name);
   meta.appendChild(branchLine);
-  header.appendChild(meta);
+  headLeft.appendChild(meta);
+  header.appendChild(headLeft);
   rootEl.appendChild(header);
 
-  if (!status) return rootEl;
+  if (!status || collapsed) return rootEl;
 
   renderBranchControls(root, rootEl);
   renderRemoteControls(root, rootEl);
@@ -928,6 +1140,9 @@ function renderGitPanel() {
     for (const id of Object.keys(state.gitStatusByRoot)) {
       if (!state.roots.some((r) => r.id === id)) removeGitRootData(id);
     }
+    for (const id of Object.keys(state.gitCollapsedRoots)) {
+      if (!state.roots.some((r) => r.id === id)) delete state.gitCollapsedRoots[id];
+    }
     if (selectedRootId && !state.roots.some((r) => r.id === selectedRootId)) {
       selectedRootId = "";
     }
@@ -961,6 +1176,11 @@ export function initGitPanel(): void {
     void refreshGitStatus();
   });
   gitDiffCloseBtn.addEventListener("click", hideDiff);
+  gitOpenDiffTabBtn.addEventListener("click", () => {
+    const selected = selectedRootId ? getGitSelectedFileForRoot(selectedRootId) : null;
+    if (!selected || !selectedRootId) return;
+    void openChangesTab(selectedRootId, selected.path);
+  });
   gitOpenDiffBtn.addEventListener("click", () => {
     const selected = selectedRootId ? getGitSelectedFileForRoot(selectedRootId) : null;
     const root = selectedRootId ? state.roots.find((r) => r.id === selectedRootId) : undefined;

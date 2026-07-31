@@ -6,35 +6,75 @@ import { registerTerminalToggle } from "../services/layout";
 import { registerRunCommandInTerminal } from "../services/agent-bridge";
 
 const terminalPanelEl = document.getElementById("terminal-panel") as HTMLElement;
+const terminalTabsEl = document.getElementById("terminal-tabs") as HTMLElement;
 const terminalContentEl = document.getElementById("terminal-content") as HTMLElement;
+const terminalAddBtn = document.getElementById("terminal-add-btn") as HTMLButtonElement;
 const terminalToggleBtn = document.getElementById("terminal-toggle-btn") as HTMLButtonElement;
 const terminalCloseBtn = document.getElementById("terminal-close-btn") as HTMLButtonElement;
 
-function disposeTerminal() {
-  state.terminalDataUnsub?.();
-  state.terminalExitUnsub?.();
-  state.terminalDataUnsub = null;
-  state.terminalExitUnsub = null;
-  state.terminal?.dispose();
-  state.terminal = null;
-  state.fitAddon = null;
-  if (state.terminalId) {
-    window.ide?.killTerminal(state.terminalId);
-    state.terminalId = null;
+interface TerminalTab {
+  id: string;
+  pid: number;
+  term: Terminal;
+  fitAddon: FitAddon;
+  container: HTMLElement;
+  tabEl: HTMLElement;
+}
+
+const terminalTabs = new Map<string, TerminalTab>();
+let activeTerminalId: string | null = null;
+
+function makeTerminalTheme() {
+  return {
+    background: "#1e1e1e",
+    foreground: "#d4d4d4",
+    cursor: "#d4d4d4",
+    selectionBackground: "#264f78",
+  };
+}
+
+function fitTab(tab: TerminalTab) {
+  if (!state.terminalVisible) return;
+  try {
+    tab.fitAddon.fit();
+    window.ide?.terminalResize(tab.id, tab.term.cols, tab.term.rows);
+  } catch {
+    // 容器不可见时 fit 可能抛错，切换到该标签时会再次触发
   }
 }
 
-async function ensureTerminal() {
-  if (state.terminal && state.terminalId) return;
-  disposeTerminal();
+function fitActiveTerminal() {
+  if (!state.terminalVisible) return;
+  const tab = activeTerminalId ? terminalTabs.get(activeTerminalId) : undefined;
+  if (tab) fitTab(tab);
+}
+
+function switchTerminalTab(id: string) {
+  if (!terminalTabs.has(id)) return;
+  activeTerminalId = id;
+  for (const [tid, tab] of terminalTabs) {
+    tab.container.style.display = tid === id ? "block" : "none";
+    tab.tabEl.classList.toggle("is-active", tid === id);
+  }
+  // 等布局稳定后再适配尺寸
+  requestAnimationFrame(() => fitActiveTerminal());
+}
+
+function terminalTitleFor(cwd?: string): string {
+  if (cwd) {
+    const parts = cwd.replace(/\\/g, "/").split("/").filter(Boolean);
+    return parts[parts.length - 1] || cwd;
+  }
+  return "终端";
+}
+
+async function createTerminalTab(cwd?: string): Promise<TerminalTab | null> {
+  const container = document.createElement("div");
+  container.className = "ide__terminal-view";
+  terminalContentEl.appendChild(container);
 
   const term = new Terminal({
-    theme: {
-      background: "#1e1e1e",
-      foreground: "#d4d4d4",
-      cursor: "#d4d4d4",
-      selectionBackground: "#264f78",
-    },
+    theme: makeTerminalTheme(),
     fontFamily: '"SF Mono", "Fira Code", "Consolas", monospace',
     fontSize: 13,
     cursorBlink: true,
@@ -42,47 +82,100 @@ async function ensureTerminal() {
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
-  term.open(terminalContentEl);
+  term.open(container);
+
+  const tab: TerminalTab = { id: "", pid: 0, term, fitAddon: fit, container, tabEl: document.createElement("div") };
+
   term.onData((data) => {
-    if (state.terminalId) window.ide?.terminalInput(state.terminalId, data);
+    if (tab.id) window.ide?.terminalInput(tab.id, data);
   });
   term.onResize(({ cols, rows }) => {
-    if (state.terminalId) window.ide?.terminalResize(state.terminalId, cols, rows);
+    if (tab.id) window.ide?.terminalResize(tab.id, cols, rows);
   });
 
-  state.terminalDataUnsub = window.ide?.onTerminalData(({ id, data }) => {
-    if (id === state.terminalId) term.write(data);
-  }) ?? null;
-  state.terminalExitUnsub = window.ide?.onTerminalExit(({ id }) => {
-    if (id === state.terminalId) {
-      term.writeln("\r\n[进程已退出]");
-      state.terminalId = null;
-    }
-  }) ?? null;
-
-  state.terminal = term;
-  state.fitAddon = fit;
-
+  let created: { id: string; pid: number } | null = null;
   try {
-    state.terminalId = (await window.ide?.createTerminal(getActiveRootPath() || undefined)) ?? null;
-    fitTerminal();
+    created = (await window.ide?.createTerminal(cwd)) ?? null;
   } catch (err) {
     term.writeln(`\r\n[创建终端失败: ${String(err)}]`);
+    container.remove();
+    return null;
+  }
+  if (!created) {
+    term.writeln("\r\n[创建终端失败]");
+    container.remove();
+    return null;
+  }
+  tab.id = created.id;
+  tab.pid = created.pid;
+
+  const tabEl = document.createElement("div");
+  tabEl.className = "ide__terminal-tab";
+  tabEl.title = cwd ? `${cwd} · PID ${created.pid}` : `PID ${created.pid}`;
+  tabEl.addEventListener("click", () => switchTerminalTab(tab.id));
+  tabEl.addEventListener("auxclick", (e) => {
+    if (e.button === 1) closeTerminalTab(tab.id);
+  });
+
+  const titleEl = document.createElement("span");
+  titleEl.className = "ide__terminal-tab-title";
+  titleEl.textContent = terminalTitleFor(cwd);
+  tabEl.appendChild(titleEl);
+
+  const closeEl = document.createElement("button");
+  closeEl.type = "button";
+  closeEl.className = "ide__terminal-tab-close";
+  closeEl.textContent = "×";
+  closeEl.title = "关闭终端";
+  closeEl.addEventListener("click", (e) => {
+    e.stopPropagation();
+    closeTerminalTab(tab.id);
+  });
+  tabEl.appendChild(closeEl);
+
+  tab.tabEl = tabEl;
+  terminalTabsEl.appendChild(tabEl);
+
+  terminalTabs.set(tab.id, tab);
+  switchTerminalTab(tab.id);
+  fitTab(tab);
+  return tab;
+}
+
+function closeTerminalTab(id: string) {
+  const tab = terminalTabs.get(id);
+  if (!tab) return;
+  terminalTabs.delete(id);
+  window.ide?.killTerminal(id);
+  tab.container.remove();
+  tab.tabEl.remove();
+  tab.term.dispose();
+  if (activeTerminalId === id) {
+    const next = terminalTabs.keys().next().value as string | undefined;
+    activeTerminalId = next ?? null;
+    if (next) switchTerminalTab(next);
   }
 }
 
-function fitTerminal() {
-  if (!state.fitAddon || !state.terminalVisible) return;
-  state.fitAddon.fit();
-  if (state.terminalId && state.terminal) {
-    window.ide?.terminalResize(state.terminalId, state.terminal.cols, state.terminal.rows);
+function disposeAllTerminals() {
+  for (const tab of terminalTabs.values()) {
+    window.ide?.killTerminal(tab.id);
+    tab.container.remove();
+    tab.tabEl.remove();
+    tab.term.dispose();
   }
+  terminalTabs.clear();
+  activeTerminalId = null;
 }
 
 export function showTerminalPanel() {
   state.terminalVisible = true;
   terminalPanelEl.style.display = "flex";
-  void ensureTerminal();
+  if (terminalTabs.size === 0) {
+    void createTerminalTab(getActiveRootPath() || undefined);
+  } else {
+    fitActiveTerminal();
+  }
 }
 
 export function hideTerminalPanel() {
@@ -96,20 +189,43 @@ function toggleTerminalPanel() {
 }
 
 async function runCommandInTerminal(command: string): Promise<void> {
-  showTerminalPanel();
-  await ensureTerminal();
-  if (state.terminalId) {
-    window.ide?.terminalInput(state.terminalId, command + "\r");
+  state.terminalVisible = true;
+  terminalPanelEl.style.display = "flex";
+  if (terminalTabs.size === 0) {
+    const tab = await createTerminalTab(getActiveRootPath() || undefined);
+    if (tab) window.ide?.terminalInput(tab.id, command + "\r");
+    return;
   }
+  const tab = activeTerminalId ? terminalTabs.get(activeTerminalId) : undefined;
+  if (tab) window.ide?.terminalInput(tab.id, command + "\r");
+}
+
+/** 在指定目录新建一个集成终端（供文件树右键菜单调用） */
+export function openTerminalInDir(dirPath: string): void {
+  state.terminalVisible = true;
+  terminalPanelEl.style.display = "flex";
+  void createTerminalTab(dirPath);
 }
 
 export function initTerminalPanel(): void {
   registerTerminalToggle(toggleTerminalPanel);
   registerRunCommandInTerminal(runCommandInTerminal);
 
+  terminalAddBtn.addEventListener("click", () => void createTerminalTab(getActiveRootPath() || undefined));
   terminalToggleBtn.addEventListener("click", () => void toggleTerminalPanel());
   terminalCloseBtn.addEventListener("click", hideTerminalPanel);
-  window.addEventListener("resize", () => {
-    window.setTimeout(fitTerminal, 100);
+
+  // 全局订阅：所有终端的输出与退出事件按 id 分发到对应标签
+  window.ide?.onTerminalData(({ id, data }) => {
+    terminalTabs.get(id)?.term.write(data);
   });
+  window.ide?.onTerminalExit(({ id }) => {
+    const tab = terminalTabs.get(id);
+    if (tab) tab.term.writeln("\r\n[进程已退出]");
+  });
+
+  window.addEventListener("resize", () => {
+    window.setTimeout(fitActiveTerminal, 100);
+  });
+  window.addEventListener("beforeunload", disposeAllTerminals);
 }

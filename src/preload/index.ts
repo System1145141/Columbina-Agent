@@ -151,6 +151,7 @@ const ideApi = {
   minimize: () => ipcRenderer.send(IPC.IDE_MINIMIZE),
   toggleMaximize: () => ipcRenderer.send(IPC.IDE_TOGGLE_MAXIMIZE),
   pickFolder: () => ipcRenderer.invoke(IPC.IDE_PICK_FOLDER),
+  copyText: (text: string) => ipcRenderer.invoke(IPC.IDE_COPY_TEXT, text) as Promise<boolean>,
   readDir: (dirPath: string) => ipcRenderer.invoke(IPC.IDE_READ_DIR, dirPath),
   readFile: (filePath: string) => ipcRenderer.invoke(IPC.IDE_READ_FILE, filePath),
   readFileChunk: (filePath: string, offset: number, length: number) =>
@@ -165,8 +166,8 @@ const ideApi = {
   createDir: (dirPath: string, dirName: string) => ipcRenderer.invoke(IPC.IDE_CREATE_DIR, dirPath, dirName) as Promise<{ ok: boolean; path?: string; error?: string }>,
   delete: (targetPath: string) => ipcRenderer.invoke(IPC.IDE_DELETE, targetPath) as Promise<{ ok: boolean; error?: string }>,
   rename: (targetPath: string, newName: string) => ipcRenderer.invoke(IPC.IDE_RENAME, targetPath, newName) as Promise<{ ok: boolean; path?: string; error?: string }>,
-  startLanguageServer: (languageId: string, workspacePath: string) =>
-    ipcRenderer.invoke(IPC.IDE_LSP_START, languageId, workspacePath) as Promise<{ ok: boolean; error?: string }>,
+  startLanguageServer: (languageId: string, workspacePath: string, config?: { command: string; args?: string[] }) =>
+    ipcRenderer.invoke(IPC.IDE_LSP_START, languageId, workspacePath, config) as Promise<{ ok: boolean; error?: string }>,
   stopLanguageServer: (languageId: string, workspacePath: string) => ipcRenderer.send(IPC.IDE_LSP_STOP, languageId, workspacePath),
   sendLspRequest: (languageId: string, workspacePath: string, request: { id: number; method: string; params?: unknown }) =>
     ipcRenderer.send(IPC.IDE_LSP_REQUEST, languageId, workspacePath, request),
@@ -177,7 +178,7 @@ const ideApi = {
     ipcRenderer.on(IPC.IDE_LSP_DATA, listener);
     return () => ipcRenderer.off(IPC.IDE_LSP_DATA, listener);
   },
-  createTerminal: (cwd?: string) => ipcRenderer.invoke(IPC.IDE_TERMINAL_CREATE, cwd) as Promise<string>,
+  createTerminal: (cwd?: string) => ipcRenderer.invoke(IPC.IDE_TERMINAL_CREATE, cwd) as Promise<{ id: string; pid: number }>,
   terminalInput: (id: string, data: string) => ipcRenderer.send(IPC.IDE_TERMINAL_INPUT, id, data),
   terminalResize: (id: string, cols: number, rows: number) => ipcRenderer.send(IPC.IDE_TERMINAL_RESIZE, id, cols, rows),
   killTerminal: (id: string) => ipcRenderer.send(IPC.IDE_TERMINAL_KILL, id),
@@ -224,6 +225,12 @@ const ideApi = {
     ipcRenderer.invoke(IPC.IDE_GIT_CHERRY_PICK, folderPath, commitHash, noCommit) as Promise<{ ok: boolean; error?: string; stdout?: string }>,
   revertGit: (folderPath: string, commitHash: string, noCommit?: boolean) =>
     ipcRenderer.invoke(IPC.IDE_GIT_REVERT, folderPath, commitHash, noCommit) as Promise<{ ok: boolean; error?: string; stdout?: string }>,
+  discardGitFile: (folderPath: string, filePath: string) =>
+    ipcRenderer.invoke(IPC.IDE_GIT_DISCARD, folderPath, filePath) as Promise<{ ok: boolean; error?: string; stdout?: string }>,
+  addToGitignore: (folderPath: string, filePath: string) =>
+    ipcRenderer.invoke(IPC.IDE_GIT_ADD_GITIGNORE, folderPath, filePath) as Promise<{ ok: boolean; error?: string; stdout?: string }>,
+  showGitHeadContent: (folderPath: string, filePath: string) =>
+    ipcRenderer.invoke(IPC.IDE_GIT_SHOW_HEAD, folderPath, filePath) as Promise<{ ok: boolean; content: string }>,
   saveWorkspace: (filePath: string | null, state: Record<string, unknown>) =>
     ipcRenderer.invoke(IPC.IDE_SAVE_WORKSPACE, filePath, state) as Promise<{ ok: boolean; filePath?: string; error?: string }>,
   saveWorkspaceSync: (filePath: string | null, state: Record<string, unknown>) =>

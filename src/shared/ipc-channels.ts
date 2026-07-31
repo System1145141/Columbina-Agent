@@ -219,6 +219,7 @@ export const IPC = {
   IDE_MINIMIZE: "ide:minimize",           // 最小化 IDE 窗口
   IDE_TOGGLE_MAXIMIZE: "ide:toggle-maximize",
   IDE_PICK_FOLDER: "ide:pick-folder",     // 选择文件夹
+  IDE_COPY_TEXT: "ide:copy-text",         // 复制文本到剪贴板
   IDE_READ_DIR: "ide:read-dir",           // 读取目录
   IDE_READ_FILE: "ide:read-file",         // 读取文件内容
   IDE_READ_FILE_CHUNK: "ide:read-file-chunk", // 分块读取文件内容
@@ -264,6 +265,9 @@ export const IPC = {
   IDE_GIT_STASH_DROP: "ide:git-stash-drop",       // stash drop
   IDE_GIT_CHERRY_PICK: "ide:git-cherry-pick",     // cherry-pick
   IDE_GIT_REVERT: "ide:git-revert",               // revert
+  IDE_GIT_DISCARD: "ide:git-discard",             // 放弃文件更改
+  IDE_GIT_ADD_GITIGNORE: "ide:git-add-gitignore", // 将文件添加到 .gitignore
+  IDE_GIT_SHOW_HEAD: "ide:git-show-head",         // 获取文件在 HEAD 中的内容
 
   IDE_SAVE_WORKSPACE: "ide:save-workspace",           // 保存工作区文件
   IDE_SAVE_WORKSPACE_SYNC: "ide:save-workspace-sync", // 同步保存工作区（beforeunload 用）

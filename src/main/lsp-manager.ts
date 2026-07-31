@@ -169,11 +169,19 @@ function broadcastToIdeWindows(channel: string, payload: unknown): void {
   }
 }
 
-async function startLanguageServer(languageId: string, workspacePath: string): Promise<{ ok: boolean; error?: string }> {
+async function startLanguageServer(
+  languageId: string,
+  workspacePath: string,
+  customConfig?: { command: string; args?: string[] },
+): Promise<{ ok: boolean; error?: string }> {
   const key = buildSessionKey(languageId, workspacePath);
   if (sessions.has(key)) return { ok: true };
 
-  const config = defaultLspCommands[languageId];
+  // 优先使用用户自定义配置，未配置时回退到内置映射
+  const config =
+    customConfig && typeof customConfig.command === "string" && customConfig.command.trim() !== ""
+      ? { command: customConfig.command, args: Array.isArray(customConfig.args) ? customConfig.args : [] }
+      : defaultLspCommands[languageId];
   if (!config) {
     return { ok: false, error: `不支持的语言: ${languageId}` };
   }
@@ -238,6 +246,9 @@ async function startLanguageServer(languageId: string, workspacePath: string): P
         rootUri: workspacePath ? pathToFileUri(workspacePath) : null,
         capabilities: {
           textDocument: {
+            // typescript-language-server 等服务器要求客户端显式声明诊断支持，
+            // 否则 diagnosticsSupport=false 且不发布任何诊断
+            publishDiagnostics: { relatedInformation: true, versionSupport: false },
             synchronization: { dynamicRegistration: false, willSave: false, willSaveWaitUntil: false, didSave: true },
             completion: { dynamicRegistration: false, completionItem: { snippetSupport: false, commitCharactersSupport: false } },
             hover: { dynamicRegistration: false },
@@ -307,11 +318,19 @@ function sendLspNotification(languageId: string, workspacePath: string, notifica
 }
 
 export function setupLspIpc(): void {
-  ipcMain.handle(IPC.IDE_LSP_START, async (_event, languageId: unknown, workspacePath: unknown) => {
+  ipcMain.handle(IPC.IDE_LSP_START, async (_event, languageId: unknown, workspacePath: unknown, customConfig: unknown) => {
     if (typeof languageId !== "string" || typeof workspacePath !== "string") {
       return { ok: false, error: "参数类型错误" };
     }
-    return startLanguageServer(languageId, workspacePath);
+    const raw =
+      typeof customConfig === "object" && customConfig !== null
+        ? (customConfig as { command?: unknown; args?: unknown })
+        : undefined;
+    const config =
+      raw && typeof raw.command === "string" && raw.command.trim() !== ""
+        ? { command: raw.command, args: Array.isArray(raw.args) ? (raw.args as string[]) : [] }
+        : undefined;
+    return startLanguageServer(languageId, workspacePath, config);
   });
 
   ipcMain.on(IPC.IDE_LSP_STOP, (_event, languageId: unknown, workspacePath: unknown) => {

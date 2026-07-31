@@ -14,13 +14,14 @@ function renderTabs() {
   for (const tab of state.tabs.values()) {
     const btn = document.createElement("button");
     btn.className = "ide__tab" + (tab.id === state.activeTabId ? " is-active" : "");
-    btn.title = tab.filePath;
+    btn.title = tab.kind === "diff" ? `变更对比: ${tab.filePath}` : tab.filePath;
     btn.draggable = true;
     btn.dataset.tabId = tab.id;
+    if (tab.kind === "diff") btn.classList.add("ide__tab--diff");
 
     const name = document.createElement("span");
     name.className = "ide__tab-name";
-    name.textContent = tab.fileName + (tab.modified ? " ●" : "");
+    name.textContent = tab.kind === "diff" ? `${tab.fileName}(变更)` : tab.fileName + (tab.modified ? " ●" : "");
 
     const close = document.createElement("span");
     close.className = "ide__tab-close";

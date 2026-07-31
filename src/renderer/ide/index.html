@@ -32,6 +32,7 @@
           <span class="ide__sidebar-title" id="sidebar-title">资源管理器</span>
           <div class="ide__sidebar-actions">
             <button type="button" class="ide__sidebar-action" id="search-toggle-btn" title="在文件夹中搜索 (Ctrl+Shift+F)">🔍</button>
+            <button type="button" class="ide__sidebar-action" id="problems-toggle-btn" title="问题面板 (Ctrl+Shift+M)">⚠</button>
             <button type="button" class="ide__sidebar-action" id="git-toggle-btn" title="源代码管理">🌿</button>
           </div>
         </div>
@@ -45,6 +46,14 @@
           <div class="ide__search-roots" id="search-roots"></div>
           <button type="button" class="ide__search-back" id="search-back-btn">← 返回资源管理器</button>
           <div class="ide__search-results" id="search-results"></div>
+        </div>
+        <div class="ide__problems" id="problems-panel" style="display: none;">
+          <div class="ide__problems-header">
+            <span class="ide__problems-title">问题</span>
+            <span class="ide__problems-count" id="problems-count"></span>
+            <button type="button" class="ide__problems-clear" id="problems-clear-btn" title="清空所有问题" aria-label="清空所有问题">×</button>
+          </div>
+          <div class="ide__problems-list" id="problems-list"></div>
         </div>
         <div class="ide__git" id="git-panel" style="display: none;">
           <div class="ide__git-header">
@@ -61,6 +70,7 @@
               <span class="ide__git-diff-path" id="git-diff-path"></span>
               <div class="ide__git-diff-actions">
                 <button type="button" class="ide__git-diff-open" id="git-open-diff" title="打开文件">打开</button>
+                <button type="button" class="ide__git-diff-open" id="git-open-diff-tab" title="在新标签页中并排对比变更">并排对比</button>
                 <button type="button" class="ide__git-diff-close" id="git-diff-close" title="关闭">×</button>
               </div>
             </div>
@@ -74,8 +84,11 @@
         <div class="ide__editor" id="editor"></div>
         <div class="ide__terminal" id="terminal-panel" style="display: none;">
           <div class="ide__terminal-header">
-            <span>终端</span>
-            <button type="button" class="ide__terminal-close" id="terminal-close-btn" aria-label="关闭终端">×</button>
+            <div class="ide__terminal-tabs" id="terminal-tabs"></div>
+            <div class="ide__terminal-actions">
+              <button type="button" class="ide__terminal-add" id="terminal-add-btn" title="新建终端" aria-label="新建终端">+</button>
+              <button type="button" class="ide__terminal-close" id="terminal-close-btn" aria-label="关闭终端">×</button>
+            </div>
           </div>
           <div class="ide__terminal-content" id="terminal-content"></div>
         </div>

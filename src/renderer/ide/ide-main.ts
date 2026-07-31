@@ -9,6 +9,7 @@ import { initCommandPalette } from "./components/command-palette";
 import { initAiPanel } from "./components/ai-panel";
 import { initTerminalPanel } from "./components/terminal-panel";
 import { initGitPanel } from "./components/git-panel";
+import { initProblemsPanel } from "./components/problems-panel";
 import { initializePlugins } from "./plugins/manager";
 
 function initWindowControls(): void {
@@ -59,6 +60,7 @@ function init(): void {
   initAiPanel();
   initTerminalPanel();
   initGitPanel();
+  initProblemsPanel();
 
   void loadIdeSettings();
   void restoreWorkspace();

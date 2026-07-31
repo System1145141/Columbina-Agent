@@ -1,5 +1,7 @@
 import { EditorView, keymap, lineNumbers, WidgetType, Decoration, ViewPlugin, ViewUpdate } from "@codemirror/view";
-import { EditorState, StateEffect, StateField, EditorSelection } from "@codemirror/state";
+import { EditorState, StateEffect, StateField, EditorSelection, type SelectionRange } from "@codemirror/state";
+import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
+import { foldGutter, foldKeymap } from "@codemirror/language";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
@@ -23,6 +25,8 @@ import {
 } from "./lsp-integration";
 import { inlineCompletionExtension } from "./inline-completion";
 import { showPromptDialog } from "./file-tree";
+
+import { renderDiffTab } from "./diff-view";
 
 const editorEl = document.getElementById("editor") as HTMLElement;
 
@@ -237,6 +241,64 @@ export function createEditor(initialContent = "", filePath = ""): EditorView | n
   }
 }
 
+/** Ctrl+Alt+↑：在上一行对应列添加光标（保留已有光标） */
+function addCursorUp(view: EditorView): boolean {
+  const doc = view.state.doc;
+  let updated = false;
+  const newRanges: SelectionRange[] = [];
+  const seen = new Set<number>();
+  for (const range of view.state.selection.ranges) {
+    const line = doc.lineAt(range.head);
+    if (line.number === 1) {
+      newRanges.push(range);
+      continue;
+    }
+    const target = doc.line(line.number - 1);
+    const pos = Math.min(range.head - line.from, target.length) + target.from;
+    if (seen.has(pos)) {
+      newRanges.push(range);
+    } else {
+      seen.add(pos);
+      newRanges.push(EditorSelection.cursor(pos));
+      updated = true;
+    }
+  }
+  if (updated) {
+    view.dispatch({ selection: EditorSelection.create(newRanges, view.state.selection.mainIndex) });
+    return true;
+  }
+  return false;
+}
+
+/** Ctrl+Alt+↓：在下一行对应列添加光标（保留已有光标） */
+function addCursorDown(view: EditorView): boolean {
+  const doc = view.state.doc;
+  let updated = false;
+  const newRanges: SelectionRange[] = [];
+  const seen = new Set<number>();
+  for (const range of view.state.selection.ranges) {
+    const line = doc.lineAt(range.head);
+    if (line.number === doc.lines) {
+      newRanges.push(range);
+      continue;
+    }
+    const target = doc.line(line.number + 1);
+    const pos = Math.min(range.head - line.from, target.length) + target.from;
+    if (seen.has(pos)) {
+      newRanges.push(range);
+    } else {
+      seen.add(pos);
+      newRanges.push(EditorSelection.cursor(pos));
+      updated = true;
+    }
+  }
+  if (updated) {
+    view.dispatch({ selection: EditorSelection.create(newRanges, view.state.selection.mainIndex) });
+    return true;
+  }
+  return false;
+}
+
 function doCreateEditor(initialContent = "", filePath = ""): EditorView | null {
   const previousLspFile = currentLspFile;
   if (previousLspFile && previousLspFile !== filePath) {
@@ -245,6 +307,8 @@ function doCreateEditor(initialContent = "", filePath = ""): EditorView | null {
   currentLspFile = filePath;
 
   state.editorView?.destroy();
+  state.editorView = null;
+  editorEl.innerHTML = ""; // 清理残留视图（如并排 diff），再挂载 CodeMirror
 
   const isLight = state.ideSettings.theme === "light";
   const editorTheme = EditorView.theme({
@@ -277,8 +341,18 @@ function doCreateEditor(initialContent = "", filePath = ""): EditorView | null {
     isLight ? [] : oneDark,
     editorTheme,
     keymap.of([
+      ...searchKeymap,
+      ...foldKeymap,
       ...defaultKeymap,
       indentWithTab,
+      {
+        key: "Mod-Alt-ArrowUp",
+        run: addCursorUp,
+      },
+      {
+        key: "Mod-Alt-ArrowDown",
+        run: addCursorDown,
+      },
       {
         key: "Mod-s",
         run: () => {
@@ -309,6 +383,8 @@ function doCreateEditor(initialContent = "", filePath = ""): EditorView | null {
       },
     ]),
     detectLanguage(filePath),
+    foldGutter(),
+    highlightSelectionMatches(),
     lspExtension(filePath),
     inlineChatField,
     inlineChatPlugin,
@@ -384,11 +460,16 @@ function onStateChange(): void {
     lastFontSize = state.ideSettings.fontSize;
 
     if (activeTab) {
-      createEditor(activeTab.currentContent, activeTab.filePath);
-      const anchor = state.pendingAnchor;
-      if (anchor && state.editorView) {
-        state.pendingAnchor = null;
-        moveCursorTo(state.editorView, anchor.line, anchor.col);
+      if (activeTab.kind === "diff") {
+        destroyEditor();
+        renderDiffTab(activeTab, editorEl);
+      } else {
+        createEditor(activeTab.currentContent, activeTab.filePath);
+        const anchor = state.pendingAnchor;
+        if (anchor && state.editorView) {
+          state.pendingAnchor = null;
+          moveCursorTo(state.editorView, anchor.line, anchor.col);
+        }
       }
       renderLargeFileBanner(activeTab);
     } else {

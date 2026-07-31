@@ -75,3 +75,4 @@ PRODUCT.md
 sticker-descriptions/
 .trae/rules/git-commit-message.md
 dist/renderer/ide/index.html
+.qoder/
