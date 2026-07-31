@@ -44,6 +44,8 @@ export interface IdeSettings {
   theme: "dark" | "light";
   fontSize: number;
   tabSize: number;
+  /** 是否开启自动保存（编辑停止后延时保存、失焦兜底保存） */
+  autoSave?: boolean;
   /** 自定义语言服务器配置，key 为语言 ID（如 typescript / python）；未配置的语言使用内置映射 */
   languageServers?: Record<string, LanguageServerConfig>;
 }
@@ -207,6 +209,7 @@ export const state = {
     theme: "dark" as "dark" | "light",
     fontSize: 13,
     tabSize: 2,
+    autoSave: true,
   } as IdeSettings,
 
   draggedTabId: "",
@@ -527,6 +530,9 @@ declare global {
       readFile: (filePath: string) => Promise<string>;
       readFileChunk: (filePath: string, offset: number, length: number) => Promise<{ content: string; totalSize: number; isEnd: boolean }>;
       writeFile: (filePath: string, content: string) => Promise<{ ok: boolean; error?: string }>;
+      watchFile: (filePath: string) => Promise<void>;
+      unwatchFile: (filePath: string) => void;
+      onFileChanged: (callback: (payload: { filePath: string; deleted: boolean }) => void) => () => void;
       getFileInfo: (filePath: string) => Promise<{ isDirectory: boolean; size: number }>;
       searchFiles: (
         folderPath: string,

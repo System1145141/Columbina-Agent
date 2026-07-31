@@ -220,6 +220,9 @@ export const IPC = {
   IDE_TOGGLE_MAXIMIZE: "ide:toggle-maximize",
   IDE_PICK_FOLDER: "ide:pick-folder",     // 选择文件夹
   IDE_COPY_TEXT: "ide:copy-text",         // 复制文本到剪贴板
+  IDE_WATCH_FILE: "ide:watch-file",       // 注册监听文件外部变更
+  IDE_UNWATCH_FILE: "ide:unwatch-file",   // 注销文件监听
+  IDE_FILE_CHANGED: "ide:file-changed",   // 文件外部变更通知（主进程 → 渲染进程）
   IDE_READ_DIR: "ide:read-dir",           // 读取目录
   IDE_READ_FILE: "ide:read-file",         // 读取文件内容
   IDE_READ_FILE_CHUNK: "ide:read-file-chunk", // 分块读取文件内容

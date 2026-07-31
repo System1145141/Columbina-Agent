@@ -3054,6 +3054,22 @@ ipcMain.handle(IPC.IDE_COPY_TEXT, (_event, text: unknown) => {
   return false;
 });
 
+ipcMain.handle(IPC.IDE_WATCH_FILE, (_event, filePath: unknown) => {
+  if (typeof filePath !== "string" || filePath.length === 0) return;
+  try {
+    const st = fs.statSync(filePath);
+    watchedFiles.set(filePath, { mtimeMs: st.mtimeMs, size: st.size });
+  } catch {
+    // 文件尚不存在，跳过
+  }
+});
+
+ipcMain.on(IPC.IDE_UNWATCH_FILE, (_event, filePath: unknown) => {
+  if (typeof filePath === "string") {
+    watchedFiles.delete(filePath);
+  }
+});
+
 // 渲染进程同步工作区 roots 到主进程，用于文件操作 IPC 的路径校验
 ipcMain.on(IPC.IDE_SET_WORKSPACE_ROOTS, (_event, roots: unknown) => {
   if (!Array.isArray(roots)) return;
@@ -3115,6 +3131,7 @@ ipcMain.handle(IPC.IDE_WRITE_FILE, async (_event, filePath: unknown, content: un
   if (!isPathWithinWorkspace(filePath)) return { ok: false, error: "路径不在工作区内" };
   try {
     fs.writeFileSync(filePath, content, "utf8");
+    syncWatchedFileBaseline(filePath); // 自身写入不触发外部变更通知
     return { ok: true };
   } catch (err: any) {
     return { ok: false, error: err?.message || "写入失败" };
@@ -3483,6 +3500,56 @@ const ideTerminals = new Map<string, pty.IPty>();
 
 // 主进程维护的工作区 roots 集合，用于文件操作 IPC 的路径校验
 const ideWorkspaceRoots = new Set<string>();
+
+// 已打开编辑器文件的外部变更监听：记录文件 mtime+size，轮询比对以发现外部修改
+const watchedFiles = new Map<string, { mtimeMs: number; size: number }>();
+
+function broadcastIdeFileChanged(filePath: string, deleted: boolean): void {
+  ideWindow?.webContents.send(IPC.IDE_FILE_CHANGED, { filePath, deleted });
+}
+
+/** 同步某文件的监听基准（IDE 自身写入或改名/移动后调用，避免误报） */
+function syncWatchedFileBaseline(filePath: string): void {
+  if (!watchedFiles.has(filePath)) return;
+  try {
+    const st = fs.statSync(filePath);
+    watchedFiles.set(filePath, { mtimeMs: st.mtimeMs, size: st.size });
+  } catch {
+    // 文件不存在
+  }
+}
+
+/** 将监听记录从旧路径迁移到新路径（rename / move 后调用） */
+function migrateWatchedFile(oldPath: string, newPath: string): void {
+  const prev = watchedFiles.get(oldPath);
+  if (!prev) return;
+  watchedFiles.delete(oldPath);
+  try {
+    const st = fs.statSync(newPath);
+    watchedFiles.set(newPath, { mtimeMs: st.mtimeMs, size: st.size });
+  } catch {
+    watchedFiles.set(newPath, prev);
+  }
+}
+
+function refreshWatchedFiles(): void {
+  if (watchedFiles.size === 0) return;
+  for (const [filePath, prev] of [...watchedFiles]) {
+    try {
+      const st = fs.statSync(filePath);
+      if (st.mtimeMs !== prev.mtimeMs || st.size !== prev.size) {
+        watchedFiles.set(filePath, { mtimeMs: st.mtimeMs, size: st.size });
+        broadcastIdeFileChanged(filePath, false);
+      }
+    } catch {
+      // 文件已被删除
+      watchedFiles.delete(filePath);
+      broadcastIdeFileChanged(filePath, true);
+    }
+  }
+}
+
+setInterval(refreshWatchedFiles, 2000);
 
 function cleanupIdeSubprocesses(): void {
   // 清理所有 pty 终端进程

@@ -21,6 +21,7 @@ import {
   toggleIdeTheme,
   changeEditorFontSize,
   toggleAiPanel,
+  toggleAutoSave,
 } from "../services/layout";
 import { saveWorkspace, openWorkspace } from "../services/workspace-service";
 
@@ -133,6 +134,12 @@ function getBaseCommands(): CommandItem[] {
       icon: "⌨️",
       shortcut: "Ctrl+`",
       run: () => toggleTerminalPanel(),
+    },
+    {
+      id: "toggle-autosave",
+      label: state.ideSettings.autoSave ? "关闭自动保存" : "开启自动保存",
+      icon: "💾",
+      run: () => void toggleAutoSave(),
     },
     {
       id: "toggle-theme",

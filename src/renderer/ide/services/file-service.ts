@@ -139,6 +139,7 @@ export async function copyText(text: string): Promise<boolean> {
 }
 
 export async function loadDirectory(dirPath: string): Promise<void> {
+  unwatchAllOpenTabs();
   const root = createWorkspaceRoot(dirPath);
   setRoots([root]);
   setActiveRoot(root.id);
@@ -207,6 +208,7 @@ export async function openFile(filePath: string, anchorLine = 1, anchorCol = 1):
     addTab(tab);
     state.pendingAnchor = { line: anchorLine, col: anchorCol };
     setActiveTab(filePath);
+    registerFileWatch(filePath);
     notify();
   } catch (err) {
     state.statusMessage = `读取失败: ${String(err)}`;
@@ -240,6 +242,8 @@ export async function openFileAt(filePath: string, line: number, col: number): P
 export async function saveTab(tabId: string): Promise<boolean> {
   const tab = state.tabs.get(tabId);
   if (!tab) return false;
+  // diff 标签是只读对比视图，不参与保存
+  if (tab.kind === "diff") return true;
 
   if (tab.largeFile && !tab.loadedFull) {
     const load = confirm(`"${tab.fileName}" 为超大文件且尚未完整加载，保存将覆盖磁盘上的完整文件。\n\n建议先加载完整文件再编辑。是否现在加载完整文件？`);
@@ -285,6 +289,7 @@ export async function closeTab(tabId: string): Promise<void> {
         state.isClosing = false;
         if (ok) {
           closeTabState(tabId);
+          unregisterFileWatch(tab.filePath);
           notify();
         }
       } catch {
@@ -295,6 +300,7 @@ export async function closeTab(tabId: string): Promise<void> {
   }
 
   closeTabState(tabId);
+  unregisterFileWatch(tab.filePath);
   notify();
 }
 
@@ -304,6 +310,8 @@ export async function refreshAfterRename(oldPath: string, newPath: string | unde
   // Update any open tab path
   if (!isDirectory && state.tabs.has(oldPath)) {
     updateTabPath(oldPath, newPath, basename(newPath));
+    unregisterFileWatch(oldPath);
+    registerFileWatch(newPath);
   }
   // Notify so tree can refresh
   notify();
@@ -313,8 +321,101 @@ export async function refreshAfterRename(oldPath: string, newPath: string | unde
 export async function refreshAfterDelete(filePath: string, isDirectory: boolean): Promise<void> {
   if (!isDirectory && state.tabs.has(filePath)) {
     closeTabState(filePath);
+    unregisterFileWatch(filePath);
   }
   notify();
+}
+
+// ── 外部文件变更监听 ──
+
+function registerFileWatch(filePath: string): void {
+  try {
+    void window.ide?.watchFile?.(filePath);
+  } catch {
+    // 忽略注册失败
+  }
+}
+
+function unregisterFileWatch(filePath: string, force = false): void {
+  // 若仍有文件标签引用同一路径（例如并排 diff 视图被关闭而文件标签仍打开），保留监听
+  if (!force) {
+    const stillReferenced = Array.from(state.tabs.values()).some((t) => t.filePath === filePath && t.kind !== "diff");
+    if (stillReferenced) return;
+  }
+  try {
+    window.ide?.unwatchFile?.(filePath);
+  } catch {
+    // 忽略注销失败
+  }
+}
+
+export function unwatchAllOpenTabs(): void {
+  for (const tab of state.tabs.values()) {
+    unregisterFileWatch(tab.filePath, true);
+  }
+}
+
+/** 注册主进程 → 渲染进程的外部变更通知，处理已打开文件的自动重载/关闭 */
+export function initFileWatcher(): void {
+  window.ide?.onFileChanged?.(({ filePath, deleted }) => {
+    void handleExternalFileChanged(filePath, deleted);
+  });
+}
+
+async function handleExternalFileChanged(filePath: string, deleted: boolean): Promise<void> {
+  const tab = state.tabs.get(filePath);
+  if (!tab || tab.kind === "diff") return;
+
+  if (deleted) {
+    if (tab.modified) {
+      state.statusMessage = `文件已在外部被删除: ${tab.fileName}（本地未保存修改已保留）`;
+      notify();
+      return;
+    }
+    closeTabState(filePath);
+    unregisterFileWatch(filePath);
+    state.statusMessage = `文件已在外部被删除: ${tab.fileName}`;
+    notify();
+    return;
+  }
+
+  // 本地有未保存修改时不做覆盖，避免丢失用户输入
+  if (tab.modified) {
+    state.statusMessage = `文件已被外部修改: ${tab.fileName}（本地未保存修改已保留，保存将覆盖）`;
+    notify();
+    return;
+  }
+
+  try {
+    let rawContent: string;
+    if (tab.largeFile && !tab.loadedFull) {
+      const chunk = await readFileChunk(filePath, 0, LARGE_FILE_INITIAL_SIZE);
+      rawContent = chunk.content;
+      tab.fullSize = chunk.totalSize;
+    } else {
+      rawContent = await readFile(filePath);
+    }
+    const content = normalizeLineEndings(rawContent);
+    tab.initialContent = content;
+    tab.currentContent = content;
+    tab.modified = false;
+    tab.lineEnding = detectLineEnding(rawContent);
+
+    // 当前激活标签直接同步到编辑器，并保留光标位置
+    if (state.editorView && state.activeTabId === tab.id) {
+      const view = state.editorView;
+      const prevHead = view.state.selection.main.head;
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: content },
+        selection: { anchor: Math.min(prevHead, content.length) },
+      });
+      state.statusMessage = `已从磁盘重新加载: ${tab.fileName}`;
+    }
+    notify();
+  } catch (err) {
+    state.statusMessage = `重新加载文件失败: ${String(err)}`;
+    notify();
+  }
 }
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".cache", ".vscode", ".idea"]);

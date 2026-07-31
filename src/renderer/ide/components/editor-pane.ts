@@ -186,6 +186,41 @@ let lastTheme = state.ideSettings.theme;
 let lastFontSize = state.ideSettings.fontSize;
 let currentLspFile = "";
 
+// 自动保存：编辑停止 800ms 后触发，失焦（flushAutoSave）时兜底
+const AUTO_SAVE_DELAY = 800;
+let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleAutoSave(tabId: string): void {
+  if (autoSaveTimer) clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => {
+    autoSaveTimer = null;
+    const tab = state.tabs.get(tabId);
+    if (!tab || tab.kind === "diff" || !tab.modified) return;
+    // 超大文件未完整加载时不自动保存，避免静默覆盖磁盘完整文件
+    if (tab.largeFile && !tab.loadedFull) return;
+    if (state.activeTabId === tabId && state.editorView) {
+      saveCurrentEditorToTab(tabId);
+    }
+    void saveTab(tabId);
+  }, AUTO_SAVE_DELAY);
+}
+
+/** 失焦/关闭前兜底保存：清空待执行的自动保存并立即保存 */
+export function flushAutoSave(): void {
+  if (autoSaveTimer) {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = null;
+  }
+  if (!state.ideSettings.autoSave) return;
+  const tabId = state.activeTabId;
+  if (!tabId) return;
+  const tab = state.tabs.get(tabId);
+  if (!tab || !tab.modified || tab.kind === "diff") return;
+  if (tab.largeFile && !tab.loadedFull) return;
+  saveCurrentEditorToTab(tabId);
+  void saveTab(tabId);
+}
+
 function detectLanguage(filePath: string) {
   const ext = getFileExtension(filePath);
   switch (ext) {
@@ -406,6 +441,9 @@ function doCreateEditor(initialContent = "", filePath = ""): EditorView | null {
         if (currentLspFile) {
           notifyLspChange(currentLspFile, update.state.doc.toString());
         }
+        if (state.ideSettings.autoSave && tab.kind !== "diff") {
+          scheduleAutoSave(tab.id);
+        }
         notify();
       }
       if (update.selectionSet) {
@@ -438,6 +476,11 @@ function destroyEditor(): void {
 }
 
 export function saveCurrentTab(): void {
+  // 手动保存时取消待执行的自动保存，避免重复写入
+  if (autoSaveTimer) {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = null;
+  }
   if (state.activeTabId) {
     // Make sure current editor content is saved to state first
     saveCurrentEditorToTab(state.activeTabId);

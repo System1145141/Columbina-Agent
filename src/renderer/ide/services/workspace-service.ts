@@ -10,7 +10,7 @@ import {
   type WorkspaceRoot,
   type AiMessage,
 } from "./state";
-import { openFile, basename } from "./file-service";
+import { openFile, basename, unwatchAllOpenTabs } from "./file-service";
 import { showAiPanel, hideAiPanel, showSearchPanel, hideSearchPanel, showGitPanel, hideGitPanel } from "./layout";
 import { showTerminalPanel, hideTerminalPanel } from "../components/terminal-panel";
 
@@ -100,6 +100,7 @@ async function applyWorkspace(data: WorkspaceData, filePath?: string): Promise<v
   state.projectIndex = [];
   state.expandedDirs = new Set((data.expandedDirs || []).filter((p) => typeof p === "string"));
 
+  unwatchAllOpenTabs();
   state.tabs.clear();
   state.activeTabId = "";
 

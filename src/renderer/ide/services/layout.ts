@@ -44,6 +44,7 @@ export async function loadIdeSettings(): Promise<void> {
           tabSize: typeof saved.tabSize === "number" && Number.isFinite(saved.tabSize)
             ? Math.max(1, Math.min(8, Math.round(saved.tabSize)))
             : state.ideSettings.tabSize,
+          autoSave: typeof saved.autoSave === "boolean" ? saved.autoSave : state.ideSettings.autoSave,
           languageServers: saved.languageServers && typeof saved.languageServers === "object"
             ? saved.languageServers
             : state.ideSettings.languageServers,
@@ -79,6 +80,10 @@ export function changeEditorFontSize(delta: number): void {
   if (next !== state.ideSettings.fontSize) {
     void saveIdeSettings({ fontSize: next });
   }
+}
+
+export function toggleAutoSave(): Promise<void> {
+  return saveIdeSettings({ autoSave: !state.ideSettings.autoSave });
 }
 
 export function showSearchPanel(): void {

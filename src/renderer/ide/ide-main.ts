@@ -1,9 +1,10 @@
 import { state } from "./services/state";
 import { loadIdeSettings, toggleSearchPanel, toggleTerminalPanel, changeEditorFontSize } from "./services/layout";
 import { restoreWorkspace, saveWorkspaceSync } from "./services/workspace-service";
+import { initFileWatcher } from "./services/file-service";
 import { initStatusBar } from "./components/status-bar";
 import { initTabBar } from "./components/tab-bar";
-import { initEditorPane } from "./components/editor-pane";
+import { initEditorPane, flushAutoSave } from "./components/editor-pane";
 import { initFileTree } from "./components/file-tree";
 import { initCommandPalette } from "./components/command-palette";
 import { initAiPanel } from "./components/ai-panel";
@@ -65,6 +66,10 @@ function init(): void {
   void loadIdeSettings();
   void restoreWorkspace();
   void initializePlugins();
+  initFileWatcher();
+
+  // 窗口失焦兜底：清空待执行的自动保存定时器并立即保存
+  window.addEventListener("blur", () => flushAutoSave());
 
   window.addEventListener("beforeunload", () => {
     if (state.roots.length > 0) {
