@@ -1,5 +1,6 @@
 import { EditorView, keymap, lineNumbers, WidgetType, Decoration, ViewPlugin, ViewUpdate } from "@codemirror/view";
-import { EditorState, StateEffect, StateField, EditorSelection } from "@codemirror/state";
+import { EditorState, StateEffect, StateField, EditorSelection, type SelectionRange } from "@codemirror/state";
+import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
@@ -239,6 +240,64 @@ export function createEditor(initialContent = "", filePath = ""): EditorView | n
   }
 }
 
+/** Ctrl+Alt+↑：在上一行对应列添加光标（保留已有光标） */
+function addCursorUp(view: EditorView): boolean {
+  const doc = view.state.doc;
+  let updated = false;
+  const newRanges: SelectionRange[] = [];
+  const seen = new Set<number>();
+  for (const range of view.state.selection.ranges) {
+    const line = doc.lineAt(range.head);
+    if (line.number === 1) {
+      newRanges.push(range);
+      continue;
+    }
+    const target = doc.line(line.number - 1);
+    const pos = Math.min(range.head - line.from, target.length) + target.from;
+    if (seen.has(pos)) {
+      newRanges.push(range);
+    } else {
+      seen.add(pos);
+      newRanges.push(EditorSelection.cursor(pos));
+      updated = true;
+    }
+  }
+  if (updated) {
+    view.dispatch({ selection: EditorSelection.create(newRanges, view.state.selection.mainIndex) });
+    return true;
+  }
+  return false;
+}
+
+/** Ctrl+Alt+↓：在下一行对应列添加光标（保留已有光标） */
+function addCursorDown(view: EditorView): boolean {
+  const doc = view.state.doc;
+  let updated = false;
+  const newRanges: SelectionRange[] = [];
+  const seen = new Set<number>();
+  for (const range of view.state.selection.ranges) {
+    const line = doc.lineAt(range.head);
+    if (line.number === doc.lines) {
+      newRanges.push(range);
+      continue;
+    }
+    const target = doc.line(line.number + 1);
+    const pos = Math.min(range.head - line.from, target.length) + target.from;
+    if (seen.has(pos)) {
+      newRanges.push(range);
+    } else {
+      seen.add(pos);
+      newRanges.push(EditorSelection.cursor(pos));
+      updated = true;
+    }
+  }
+  if (updated) {
+    view.dispatch({ selection: EditorSelection.create(newRanges, view.state.selection.mainIndex) });
+    return true;
+  }
+  return false;
+}
+
 function doCreateEditor(initialContent = "", filePath = ""): EditorView | null {
   const previousLspFile = currentLspFile;
   if (previousLspFile && previousLspFile !== filePath) {
@@ -281,8 +340,17 @@ function doCreateEditor(initialContent = "", filePath = ""): EditorView | null {
     isLight ? [] : oneDark,
     editorTheme,
     keymap.of([
+      ...searchKeymap,
       ...defaultKeymap,
       indentWithTab,
+      {
+        key: "Mod-Alt-ArrowUp",
+        run: addCursorUp,
+      },
+      {
+        key: "Mod-Alt-ArrowDown",
+        run: addCursorDown,
+      },
       {
         key: "Mod-s",
         run: () => {
@@ -313,6 +381,7 @@ function doCreateEditor(initialContent = "", filePath = ""): EditorView | null {
       },
     ]),
     detectLanguage(filePath),
+    highlightSelectionMatches(),
     lspExtension(filePath),
     inlineChatField,
     inlineChatPlugin,

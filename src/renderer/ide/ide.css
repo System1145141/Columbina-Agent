@@ -1348,6 +1348,95 @@ html, body, .ide {
   height: 100%;
 }
 
+/* CodeMirror 查找/替换面板 */
+.cm-panel.cm-search {
+  background: #2d2d30;
+  color: #cccccc;
+  border-bottom: 1px solid #3e3e42;
+  padding: 6px 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-family: system-ui, sans-serif;
+}
+
+.cm-panel.cm-search label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #bbbbbb;
+  font-size: 11px;
+}
+
+.cm-panel.cm-search input.cm-textfield {
+  background: #3c3c3c;
+  color: #e0e0e0;
+  border: 1px solid #3e3e42;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 12px;
+  font-family: inherit;
+  min-width: 120px;
+}
+
+.cm-panel.cm-search input.cm-textfield:focus {
+  outline: none;
+  border-color: #0e639c;
+}
+
+.cm-panel.cm-search button.cm-button {
+  background: #0e639c;
+  color: #ffffff;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.cm-panel.cm-search button.cm-button:hover {
+  background: #1177bb;
+}
+
+.cm-selectionMatch {
+  background: rgba(234, 92, 0, 0.33);
+}
+
+.cm-searchMatch {
+  background: rgba(234, 92, 0, 0.33);
+}
+
+.cm-searchMatch-selected {
+  background: rgba(234, 92, 0, 0.55) !important;
+}
+
+/* 查找面板浅色主题 */
+.ide.ide--light .cm-panel.cm-search {
+  background: #f3f3f3;
+  color: #333333;
+  border-bottom-color: #e5e5e5;
+}
+
+.ide.ide--light .cm-panel.cm-search label {
+  color: #555555;
+}
+
+.ide.ide--light .cm-panel.cm-search input.cm-textfield {
+  background: #ffffff;
+  color: #333333;
+  border-color: #d0d7de;
+}
+
+.ide.ide--light .cm-panel.cm-search button.cm-button {
+  background: #007acc;
+}
+
+.ide.ide--light .cm-panel.cm-search button.cm-button:hover {
+  background: #0062a3;
+}
+
 .ide__large-file-banner {
   height: 28px;
   display: flex;
