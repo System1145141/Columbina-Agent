@@ -562,6 +562,8 @@ declare global {
       stashGitDrop: (folderPath: string, stashRef: string) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
       cherryPickGit: (folderPath: string, commitHash: string, noCommit?: boolean) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
       revertGit: (folderPath: string, commitHash: string, noCommit?: boolean) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      discardGitFile: (folderPath: string, filePath: string) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      addToGitignore: (folderPath: string, filePath: string) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
       saveWorkspace: (filePath: string | null, state: Record<string, unknown>) => Promise<{ ok: boolean; filePath?: string; error?: string }>;
       saveWorkspaceSync: (filePath: string | null, state: Record<string, unknown>) => { ok: boolean; filePath?: string; error?: string };
       openWorkspace: () => Promise<{ ok: boolean; workspace?: Record<string, unknown>; filePath?: string; error?: string }>;

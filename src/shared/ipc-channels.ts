@@ -264,6 +264,8 @@ export const IPC = {
   IDE_GIT_STASH_DROP: "ide:git-stash-drop",       // stash drop
   IDE_GIT_CHERRY_PICK: "ide:git-cherry-pick",     // cherry-pick
   IDE_GIT_REVERT: "ide:git-revert",               // revert
+  IDE_GIT_DISCARD: "ide:git-discard",             // 放弃文件更改
+  IDE_GIT_ADD_GITIGNORE: "ide:git-add-gitignore", // 将文件添加到 .gitignore
 
   IDE_SAVE_WORKSPACE: "ide:save-workspace",           // 保存工作区文件
   IDE_SAVE_WORKSPACE_SYNC: "ide:save-workspace-sync", // 同步保存工作区（beforeunload 用）

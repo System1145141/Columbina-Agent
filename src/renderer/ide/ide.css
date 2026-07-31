@@ -850,6 +850,15 @@ html, body, .ide {
   color: #ffffff;
 }
 
+.ide__git-context-item--danger {
+  color: #f48771;
+}
+
+.ide__git-context-item--danger:hover {
+  background: #a1260d;
+  color: #ffffff;
+}
+
 .ide__search-empty {
   color: #858585;
   font-size: 12px;

@@ -155,6 +155,20 @@ export async function revertGit(
   return window.ide!.revertGit(root.path, commitHash, noCommit);
 }
 
+export async function discardGitFile(
+  root: WorkspaceRoot,
+  filePath: string
+): Promise<{ ok: boolean; error?: string; stdout?: string }> {
+  return window.ide!.discardGitFile(root.path, filePath);
+}
+
+export async function addToGitignore(
+  root: WorkspaceRoot,
+  filePath: string
+): Promise<{ ok: boolean; error?: string; stdout?: string }> {
+  return window.ide!.addToGitignore(root.path, filePath);
+}
+
 export function isFileStaged(rootId: string, filePath: string): boolean {
   return state.gitStatusByRoot[rootId]?.staged.includes(filePath) ?? false;
 }

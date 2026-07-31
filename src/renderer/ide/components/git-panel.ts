@@ -37,6 +37,8 @@ import {
   stashGitDrop,
   cherryPickGit,
   revertGit,
+  discardGitFile,
+  addToGitignore,
 } from "../services/git-service";
 
 const gitToggleBtn = document.getElementById("git-toggle-btn") as HTMLButtonElement;
@@ -400,6 +402,132 @@ function hideGitContextMenu(): void {
   }
 }
 
+async function doDiscardFile(rootId: string, filePath: string): Promise<void> {
+  const root = state.roots.find((r) => r.id === rootId);
+  if (!root) return;
+  const confirmed = confirm(`确定要放弃 "${filePath}" 的所有本地更改吗？此操作不可恢复。`);
+  if (!confirmed) return;
+  state.gitLoading = true;
+  notify();
+  try {
+    const result = await discardGitFile(root, filePath);
+    if (result.ok) {
+      state.statusMessage = `【${root.name}】已放弃 ${filePath} 的更改`;
+      const selected = getGitSelectedFileForRoot(rootId);
+      if (selected?.path === filePath) hideDiff();
+      await refreshGitStatus();
+    } else {
+      state.statusMessage = `【${root.name}】放弃更改失败: ${result.error || "未知错误"}`;
+    }
+  } catch (err) {
+    state.statusMessage = `【${root.name}】放弃更改失败: ${String(err)}`;
+  } finally {
+    state.gitLoading = false;
+    notify();
+  }
+}
+
+async function doAddToGitignore(rootId: string, filePath: string): Promise<void> {
+  const root = state.roots.find((r) => r.id === rootId);
+  if (!root) return;
+  state.gitLoading = true;
+  notify();
+  try {
+    const result = await addToGitignore(root, filePath);
+    if (result.ok) {
+      state.statusMessage = `【${root.name}】已将 ${filePath} 添加到 .gitignore`;
+      const selected = getGitSelectedFileForRoot(rootId);
+      if (selected?.path === filePath) hideDiff();
+      await refreshGitStatus();
+    } else {
+      state.statusMessage = `【${root.name}】添加到 .gitignore 失败: ${result.error || "未知错误"}`;
+    }
+  } catch (err) {
+    state.statusMessage = `【${root.name}】添加到 .gitignore 失败: ${String(err)}`;
+  } finally {
+    state.gitLoading = false;
+    notify();
+  }
+}
+
+function showGitFileContextMenu(rootId: string, filePath: string, status: "staged" | "modified" | "untracked" | "conflicted", x: number, y: number): void {
+  hideGitContextMenu();
+  const root = state.roots.find((r) => r.id === rootId);
+  if (!root) return;
+
+  const menu = document.createElement("div");
+  menu.className = "ide__git-context-menu";
+
+  const openItem = document.createElement("div");
+  openItem.className = "ide__git-context-item";
+  openItem.textContent = "打开文件";
+  openItem.addEventListener("click", () => {
+    hideGitContextMenu();
+    void openFile(relativeToAbsolute(filePath, root.path));
+  });
+  menu.appendChild(openItem);
+
+  const stageItem = document.createElement("div");
+  stageItem.className = "ide__git-context-item";
+  stageItem.textContent = status === "staged" ? "取消暂存" : "暂存更改";
+  stageItem.addEventListener("click", () => {
+    hideGitContextMenu();
+    void toggleFileStage(rootId, filePath, status === "staged");
+  });
+  menu.appendChild(stageItem);
+
+  const discardItem = document.createElement("div");
+  discardItem.className = "ide__git-context-item ide__git-context-item--danger";
+  discardItem.textContent = "放弃更改";
+  discardItem.title = "撤销该文件的所有本地更改（未跟踪文件将被删除）";
+  discardItem.addEventListener("click", () => {
+    hideGitContextMenu();
+    void doDiscardFile(rootId, filePath);
+  });
+  menu.appendChild(discardItem);
+
+  const ignoreItem = document.createElement("div");
+  ignoreItem.className = "ide__git-context-item";
+  ignoreItem.textContent = "添加到 .gitignore";
+  ignoreItem.addEventListener("click", () => {
+    hideGitContextMenu();
+    void doAddToGitignore(rootId, filePath);
+  });
+  menu.appendChild(ignoreItem);
+
+  // 边界检测，避免溢出窗口
+  const rect = document.body.getBoundingClientRect();
+  const menuWidth = 200;
+  const menuHeight = 150;
+  const left = Math.min(x, rect.width - menuWidth - 4);
+  const top = Math.min(y, rect.height - menuHeight - 4);
+  menu.style.left = `${Math.max(0, left)}px`;
+  menu.style.top = `${Math.max(0, top)}px`;
+
+  document.body.appendChild(menu);
+  gitContextMenu = menu;
+
+  // 点击其他区域或按 Esc 关闭
+  const onOutsideClick = (e: MouseEvent) => {
+    if (gitContextMenu && !gitContextMenu.contains(e.target as Node)) {
+      hideGitContextMenu();
+      document.removeEventListener("mousedown", onOutsideClick);
+      document.removeEventListener("keydown", onEscKey);
+    }
+  };
+  const onEscKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      hideGitContextMenu();
+      document.removeEventListener("mousedown", onOutsideClick);
+      document.removeEventListener("keydown", onEscKey);
+    }
+  };
+  setTimeout(() => {
+    document.addEventListener("mousedown", onOutsideClick);
+    document.addEventListener("keydown", onEscKey);
+  }, 0);
+}
+
 function showGitLogContextMenu(rootId: string, entry: GitLogEntry, x: number, y: number): void {
   hideGitContextMenu();
   const menu = document.createElement("div");
@@ -541,6 +669,11 @@ function createFileRow(
   row.appendChild(checkbox);
   row.appendChild(label);
   row.appendChild(statusBadge);
+
+  row.addEventListener("contextmenu", (e: MouseEvent) => {
+    e.preventDefault();
+    showGitFileContextMenu(rootId, filePath, status, e.clientX, e.clientY);
+  });
   return row;
 }
 
