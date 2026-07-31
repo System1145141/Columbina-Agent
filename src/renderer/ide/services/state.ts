@@ -31,10 +31,17 @@ export interface Tab {
   loadedFull?: boolean;
 }
 
+export interface LanguageServerConfig {
+  command: string;
+  args?: string[];
+}
+
 export interface IdeSettings {
   theme: "dark" | "light";
   fontSize: number;
   tabSize: number;
+  /** 自定义语言服务器配置，key 为语言 ID（如 typescript / python）；未配置的语言使用内置映射 */
+  languageServers?: Record<string, LanguageServerConfig>;
 }
 
 export interface WorkspaceRoot {
@@ -530,7 +537,7 @@ declare global {
       createDir: (dirPath: string, dirName: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
       delete: (targetPath: string) => Promise<{ ok: boolean; error?: string }>;
       rename: (targetPath: string, newName: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
-      startLanguageServer: (languageId: string, workspacePath: string) => Promise<{ ok: boolean; error?: string }>;
+      startLanguageServer: (languageId: string, workspacePath: string, config?: LanguageServerConfig) => Promise<{ ok: boolean; error?: string }>;
       stopLanguageServer: (languageId: string, workspacePath: string) => void;
       sendLspRequest: (languageId: string, workspacePath: string, request: { id: number; method: string; params?: unknown }) => void;
       sendLspNotification: (languageId: string, workspacePath: string, notification: { method: string; params?: unknown }) => void;

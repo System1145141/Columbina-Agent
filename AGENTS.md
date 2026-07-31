@@ -256,7 +256,7 @@
 
 ##### 配置与发现
 
-11. **语言服务器配置**
+11. **语言服务器配置** ✅ 已完成
     - 在 `ideSettings` 中新增 `languageServers` 字段：
       ```json
       {
@@ -264,6 +264,7 @@
         "python": { "command": "pyright-langserver", "args": ["--stdio"] }
       }
       ```
+    - 渲染进程启动语言服务器时携带该语言的自定义配置，主进程优先使用，未配置时回退到内置映射；自定义语言 ID（如 rust）也可用。
     - 若未配置，按内置映射自动尝试启动常见语言服务器。
     - 启动失败时在状态栏显示提示，不阻塞 IDE 使用。
 
@@ -371,7 +372,7 @@ Git 面板 / 状态栏
 services/git-service.ts  (渲染进程，调用 IPC)
        │
        ▼
-src/main/git-manager.ts  (主进程，spawn git)
+src/main/git-service.ts  (主进程，spawn git)
        │
        ▼
     git CLI
@@ -679,6 +680,8 @@ src/renderer/ide/
     terminal-panel.ts # 底部终端面板
     command-palette.ts# 命令面板
     git-panel.ts      # Git 面板组件
+    inline-completion.ts # Inline 幽灵文本补全
+    lsp-integration.ts   # LSP → CodeMirror 集成（诊断/补全/悬停/跳转）
   services/
     file-service.ts   # 文件 IPC 操作、目录遍历、项目索引、搜索
     state.ts          # IDE 全局状态与状态变更通知
@@ -686,16 +689,17 @@ src/renderer/ide/
     agent-bridge.ts   # Agent 调用、工具解析、动作执行、确认/撤销
     git-service.ts    # Git IPC 调用与状态聚合
     lsp-client.ts     # LSP 客户端封装
-  main/
-    git-manager.ts    # 主进程 Git 子进程管理
-    lsp-manager.ts    # 主进程 LSP 子进程管理
-    workspace-manager.ts # 工作区持久化
+    workspace-service.ts # 工作区保存/打开/恢复/重新定位
   styles/
     ide.css           # IDE 级样式
     theme.css         # 主题变量
   plugins/
     api.ts            # 插件 API 定义
     host.ts           # 插件宿主/Worker 管理
+src/main/
+  git-service.ts      # 主进程 Git 子进程管理（spawn git，shell: false）
+  lsp-manager.ts      # 主进程 LSP 子进程管理
+  index.ts            # 主进程入口；IDE 工作区持久化 IPC 亦注册于此
 ```
 
 ### 4.2 拆分原则

@@ -1,3 +1,5 @@
+import { state } from "./state";
+
 export interface LspClientConfig {
   languageId: string;
   workspacePath: string;
@@ -77,7 +79,9 @@ class LspClient {
 
   async start(): Promise<{ ok: boolean; error?: string }> {
     if (this.started) return { ok: true };
-    const result = await window.ide?.startLanguageServer(this.languageId, this.workspacePath);
+    // 用户可针对语言 ID 自定义语言服务器命令；未配置时主进程使用内置映射
+    const customConfig = state.ideSettings.languageServers?.[this.languageId];
+    const result = await window.ide?.startLanguageServer(this.languageId, this.workspacePath, customConfig);
     if (!result?.ok) {
       return { ok: false, error: result?.error || "启动语言服务器失败" };
     }

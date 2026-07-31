@@ -165,8 +165,8 @@ const ideApi = {
   createDir: (dirPath: string, dirName: string) => ipcRenderer.invoke(IPC.IDE_CREATE_DIR, dirPath, dirName) as Promise<{ ok: boolean; path?: string; error?: string }>,
   delete: (targetPath: string) => ipcRenderer.invoke(IPC.IDE_DELETE, targetPath) as Promise<{ ok: boolean; error?: string }>,
   rename: (targetPath: string, newName: string) => ipcRenderer.invoke(IPC.IDE_RENAME, targetPath, newName) as Promise<{ ok: boolean; path?: string; error?: string }>,
-  startLanguageServer: (languageId: string, workspacePath: string) =>
-    ipcRenderer.invoke(IPC.IDE_LSP_START, languageId, workspacePath) as Promise<{ ok: boolean; error?: string }>,
+  startLanguageServer: (languageId: string, workspacePath: string, config?: { command: string; args?: string[] }) =>
+    ipcRenderer.invoke(IPC.IDE_LSP_START, languageId, workspacePath, config) as Promise<{ ok: boolean; error?: string }>,
   stopLanguageServer: (languageId: string, workspacePath: string) => ipcRenderer.send(IPC.IDE_LSP_STOP, languageId, workspacePath),
   sendLspRequest: (languageId: string, workspacePath: string, request: { id: number; method: string; params?: unknown }) =>
     ipcRenderer.send(IPC.IDE_LSP_REQUEST, languageId, workspacePath, request),

@@ -43,6 +43,9 @@ export async function loadIdeSettings(): Promise<void> {
           tabSize: typeof saved.tabSize === "number" && Number.isFinite(saved.tabSize)
             ? Math.max(1, Math.min(8, Math.round(saved.tabSize)))
             : state.ideSettings.tabSize,
+          languageServers: saved.languageServers && typeof saved.languageServers === "object"
+            ? saved.languageServers
+            : state.ideSettings.languageServers,
         };
       }
     }
