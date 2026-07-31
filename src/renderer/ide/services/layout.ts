@@ -5,6 +5,7 @@ const sidebarTitleEl = document.getElementById("sidebar-title") as HTMLElement;
 const treeRootEl = document.getElementById("tree-root") as HTMLElement;
 const searchPanelEl = document.getElementById("search-panel") as HTMLElement;
 const gitPanelEl = document.getElementById("git-panel") as HTMLElement;
+const problemsPanelEl = document.getElementById("problems-panel") as HTMLElement;
 const aiPanelEl = document.getElementById("ai-panel") as HTMLElement;
 
 let terminalToggleImpl: (() => void) | null = null;
@@ -83,10 +84,12 @@ export function changeEditorFontSize(delta: number): void {
 export function showSearchPanel(): void {
   state.searchVisible = true;
   state.gitPanelVisible = false;
+  state.problemsVisible = false;
   sidebarTitleEl.textContent = "搜索";
   treeRootEl.style.display = "none";
   searchPanelEl.style.display = "flex";
   gitPanelEl.style.display = "none";
+  problemsPanelEl.style.display = "none";
   document.getElementById("search-input")?.focus();
   notify();
 }
@@ -105,13 +108,42 @@ export function toggleSearchPanel(): void {
   else showSearchPanel();
 }
 
+export function showProblemsPanel(): void {
+  state.problemsVisible = true;
+  state.searchVisible = false;
+  state.gitPanelVisible = false;
+  sidebarTitleEl.textContent = "问题";
+  treeRootEl.style.display = "none";
+  searchPanelEl.style.display = "none";
+  gitPanelEl.style.display = "none";
+  problemsPanelEl.style.display = "flex";
+  notify();
+}
+
+export function hideProblemsPanel(): void {
+  state.problemsVisible = false;
+  sidebarTitleEl.textContent = "资源管理器";
+  treeRootEl.style.display = "block";
+  searchPanelEl.style.display = "none";
+  gitPanelEl.style.display = "none";
+  problemsPanelEl.style.display = "none";
+  notify();
+}
+
+export function toggleProblemsPanel(): void {
+  if (state.problemsVisible) hideProblemsPanel();
+  else showProblemsPanel();
+}
+
 export function showGitPanel(): void {
   state.gitPanelVisible = true;
   state.searchVisible = false;
+  state.problemsVisible = false;
   sidebarTitleEl.textContent = "源代码管理";
   treeRootEl.style.display = "none";
   searchPanelEl.style.display = "none";
   gitPanelEl.style.display = "flex";
+  problemsPanelEl.style.display = "none";
   notify();
 }
 

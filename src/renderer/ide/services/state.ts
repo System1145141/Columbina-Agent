@@ -231,6 +231,7 @@ export const state = {
   projectIndex: [] as ProjectIndexEntry[],
 
   searchVisible: false,
+  problemsVisible: false,
   commandPaletteVisible: false,
   commandItems: [] as CommandItem[],
   commandSelectedIndex: -1,
