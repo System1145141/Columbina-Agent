@@ -797,9 +797,23 @@ function renderGitRoot(root: WorkspaceRoot): HTMLElement {
   rootEl.className = "ide__git-root";
 
   const status = getGitStatusForRoot(root.id);
+  const collapsed = state.gitCollapsedRoots[root.id] || false;
 
   const header = document.createElement("div");
   header.className = "ide__git-root-header";
+  const headLeft = document.createElement("div");
+  headLeft.className = "ide__git-root-head-left";
+  const collapseBtn = document.createElement("button");
+  collapseBtn.type = "button";
+  collapseBtn.className = "ide__git-collapse-btn";
+  collapseBtn.textContent = collapsed ? "▸" : "▾";
+  collapseBtn.title = collapsed ? "展开仓库" : "折叠仓库";
+  collapseBtn.addEventListener("click", () => {
+    if (collapsed) delete state.gitCollapsedRoots[root.id];
+    else state.gitCollapsedRoots[root.id] = true;
+    notify();
+  });
+  headLeft.appendChild(collapseBtn);
   const meta = document.createElement("div");
   meta.className = "ide__git-root-meta";
   const name = document.createElement("div");
@@ -819,10 +833,11 @@ function renderGitRoot(root: WorkspaceRoot): HTMLElement {
   branchLine.textContent = parts.join(" · ");
   meta.appendChild(name);
   meta.appendChild(branchLine);
-  header.appendChild(meta);
+  headLeft.appendChild(meta);
+  header.appendChild(headLeft);
   rootEl.appendChild(header);
 
-  if (!status) return rootEl;
+  if (!status || collapsed) return rootEl;
 
   renderBranchControls(root, rootEl);
   renderRemoteControls(root, rootEl);
@@ -927,6 +942,9 @@ function renderGitPanel() {
     lastRootsKey = rootsKey;
     for (const id of Object.keys(state.gitStatusByRoot)) {
       if (!state.roots.some((r) => r.id === id)) removeGitRootData(id);
+    }
+    for (const id of Object.keys(state.gitCollapsedRoots)) {
+      if (!state.roots.some((r) => r.id === id)) delete state.gitCollapsedRoots[id];
     }
     if (selectedRootId && !state.roots.some((r) => r.id === selectedRootId)) {
       selectedRootId = "";

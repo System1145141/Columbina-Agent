@@ -321,6 +321,31 @@ html, body, .ide {
   gap: 8px;
 }
 
+.ide__git-root-head-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ide__git-collapse-btn {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  margin-left: -4px;
+  font-size: 11px;
+  line-height: 1;
+  color: #858585;
+  cursor: pointer;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.ide__git-collapse-btn:hover {
+  background: #3e3e42;
+  color: #ffffff;
+}
+
 .ide__git-root-meta {
   display: flex;
   flex-direction: column;
@@ -2228,8 +2253,14 @@ html, body, .ide {
 }
 
 .ide.ide--light .ide__git-refresh,
-.ide.ide--light .ide__git-diff-close {
+.ide.ide--light .ide__git-diff-close,
+.ide.ide--light .ide__git-collapse-btn {
   color: #666666;
+}
+
+.ide.ide--light .ide__git-collapse-btn:hover {
+  background: #e8e8e8;
+  color: #333333;
 }
 
 .ide.ide--light .ide__git-refresh:hover,

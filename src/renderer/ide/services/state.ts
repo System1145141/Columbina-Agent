@@ -247,6 +247,7 @@ export const state = {
   gitLogVisible: false,
   gitStashesByRoot: {} as Record<string, GitStashEntry[]>,
   gitStashVisible: false,
+  gitCollapsedRoots: {} as Record<string, boolean>,
 
   searchSelectedRootIds: [] as string[],
 
