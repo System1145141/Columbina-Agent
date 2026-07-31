@@ -28,6 +28,8 @@ export interface Tab {
   currentContent: string;
   modified: boolean;
   lineEnding: "crlf" | "lf" | "mixed" | "unknown";
+  /** 文件编码（"utf-8" | "utf-8-bom" | "utf-16le" | "utf-16be" | "gb18030"），打开时自动探测，保存时按此编码写盘 */
+  encoding: string;
   largeFile?: boolean;
   fullSize?: number;
   loadedFull?: boolean;
@@ -528,8 +530,9 @@ declare global {
       copyText: (text: string) => Promise<boolean>;
       readDir: (dirPath: string) => Promise<IdeDirEntry[]>;
       readFile: (filePath: string) => Promise<string>;
+      readFileEncoded: (filePath: string) => Promise<{ content: string; encoding: string }>;
       readFileChunk: (filePath: string, offset: number, length: number) => Promise<{ content: string; totalSize: number; isEnd: boolean }>;
-      writeFile: (filePath: string, content: string) => Promise<{ ok: boolean; error?: string }>;
+      writeFile: (filePath: string, content: string, encoding?: string) => Promise<{ ok: boolean; error?: string }>;
       watchFile: (filePath: string) => Promise<void>;
       unwatchFile: (filePath: string) => void;
       onFileChanged: (callback: (payload: { filePath: string; deleted: boolean }) => void) => () => void;

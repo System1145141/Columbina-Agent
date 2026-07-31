@@ -763,11 +763,11 @@ src/main/
 
 ### 近期（阶段 5：编辑器体验与数据安全补全）
 
-1. **文件编码识别与切换**
+1. **文件编码识别与切换** ✅ 已完成
    - 打开文件时自动探测编码：UTF-8（含 BOM）、UTF-16LE/BE、GBK/GB18030。
    - 状态栏显示当前编码，点击可切换并转换保存（中文用户高频痛点）。
-   - 实现：主进程 `IDE_READ_FILE` 改返回 Buffer，渲染进程用 TextDecoder 解码；Tab 增加 `encoding` 字段，保存时按所选编码编码写盘。
    - 验收：打开 GBK 中文文件不乱码；切换编码后保存，磁盘字节符合目标编码。
+   - 实现：新增 `IDE_READ_FILE_ENCODED` 通道与 `src/main/file-encoding.ts`（BOM → UTF-16 零字节启发式 → UTF-8 严格校验 → GB18030 兜底，依赖 iconv-lite）；`IDE_WRITE_FILE` 支持可选 `encoding` 参数；Tab 增加 `encoding` 字段；状态栏新增编码指示器与切换菜单；外部变更重载与大文件完整加载也会重新探测编码。
 
 2. **大纲 / 符号列表**
    - 复用 LSP `textDocument/documentSymbol`，在侧边栏新增「大纲」视图（与文件树/搜索/Git 面板并列切换）。

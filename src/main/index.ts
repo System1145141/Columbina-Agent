@@ -45,6 +45,8 @@ import type { StickerConfigItem } from "../shared/sticker-types";
 import { initReranker, getRerankerInstallStatus } from "./rag/reranker";
 import { setupLspIpc, stopAllLanguageServers } from "./lsp-manager";
 import { setupGitIpc } from "./git-service";
+import { detectFileEncoding, decodeFileBuffer, encodeFileString } from "./file-encoding";
+import { isFileEncoding } from "../shared/file-encoding";
 import { memoryStore } from "./memory/memory-store"
 import type { L0Profile, L1Profile } from "./memory/memory-types";
 import { registerChatsIpc } from "./chats/chats-ipc";
@@ -3106,6 +3108,18 @@ ipcMain.handle(IPC.IDE_READ_FILE, async (_event, filePath: unknown) => {
     throw new Error(err?.message || "读取失败");
   }
 });
+ipcMain.handle(IPC.IDE_READ_FILE_ENCODED, async (_event, filePath: unknown) => {
+  if (typeof filePath !== "string") throw new Error("Invalid path");
+  if (!isPathWithinWorkspace(filePath)) throw new Error("路径不在工作区内");
+  try {
+    const buffer = fs.readFileSync(filePath);
+    const encoding = detectFileEncoding(buffer);
+    const content = decodeFileBuffer(buffer, encoding);
+    return { content, encoding };
+  } catch (err: any) {
+    throw new Error(err?.message || "读取失败");
+  }
+});
 ipcMain.handle(IPC.IDE_READ_FILE_CHUNK, async (_event, filePath: unknown, offset: unknown, length: unknown) => {
   if (typeof filePath !== "string") throw new Error("Invalid path");
   if (!isPathWithinWorkspace(filePath)) throw new Error("路径不在工作区内");
@@ -3126,11 +3140,15 @@ ipcMain.handle(IPC.IDE_READ_FILE_CHUNK, async (_event, filePath: unknown, offset
     throw new Error(err?.message || "读取失败");
   }
 });
-ipcMain.handle(IPC.IDE_WRITE_FILE, async (_event, filePath: unknown, content: unknown) => {
+ipcMain.handle(IPC.IDE_WRITE_FILE, async (_event, filePath: unknown, content: unknown, encoding: unknown) => {
   if (typeof filePath !== "string" || typeof content !== "string") return { ok: false, error: "Invalid args" };
   if (!isPathWithinWorkspace(filePath)) return { ok: false, error: "路径不在工作区内" };
   try {
-    fs.writeFileSync(filePath, content, "utf8");
+    if (isFileEncoding(encoding)) {
+      fs.writeFileSync(filePath, encodeFileString(content, encoding));
+    } else {
+      fs.writeFileSync(filePath, content, "utf8");
+    }
     syncWatchedFileBaseline(filePath); // 自身写入不触发外部变更通知
     return { ok: true };
   } catch (err: any) {

@@ -163,6 +163,7 @@ async function openChangesTab(rootId: string, filePath: string): Promise<void> {
     currentContent: current,
     modified: false,
     lineEnding: "lf",
+    encoding: "utf-8",
     diffBaseContent: head.ok ? head.content : "",
   };
   addTab(tab);

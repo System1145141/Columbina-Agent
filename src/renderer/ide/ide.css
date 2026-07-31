@@ -1518,6 +1518,27 @@ html, body, .ide {
   white-space: nowrap;
 }
 
+.ide__status-encoding {
+  margin-left: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ide__status-encoding:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.ide.ide--light .ide__status-encoding:hover {
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.ide__context-menu-item.is-active {
+  color: #4ec9b0;
+  font-weight: 600;
+}
+
 /* Terminal panel */
 .ide__terminal {
   height: 200px;

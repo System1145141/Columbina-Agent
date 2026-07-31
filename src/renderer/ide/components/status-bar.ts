@@ -1,9 +1,50 @@
 import { diagnosticCount } from "@codemirror/lint";
 import { state, subscribe, getLspDiagnostics, getGitStatusForRoot, getActiveRoot } from "../services/state";
-import { getFileExtension, lineEndingLabel } from "../services/file-service";
+import { getFileExtension, lineEndingLabel, changeTabEncoding } from "../services/file-service";
+import { fileEncodingLabel, FILE_ENCODINGS, type FileEncoding } from "../../../shared/file-encoding";
 
 const statusLeftEl = document.getElementById("status-left") as HTMLElement;
 const statusRightEl = document.getElementById("status-right") as HTMLElement;
+
+let encodingMenu: HTMLElement | null = null;
+
+function hideEncodingMenu(): void {
+  if (encodingMenu) {
+    encodingMenu.remove();
+    encodingMenu = null;
+  }
+}
+
+function showEncodingMenu(anchorEl: HTMLElement): void {
+  hideEncodingMenu();
+  const tab = state.activeTabId ? state.tabs.get(state.activeTabId) : null;
+  if (!tab) return;
+
+  const menu = document.createElement("div");
+  menu.className = "ide__context-menu ide__encoding-menu";
+
+  for (const enc of FILE_ENCODINGS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ide__context-menu-item";
+    const isCurrent = tab.encoding === enc;
+    btn.textContent = (isCurrent ? "✓ " : "") + fileEncodingLabel(enc as FileEncoding);
+    if (isCurrent) btn.classList.add("is-active");
+    btn.addEventListener("click", () => {
+      hideEncodingMenu();
+      if (state.activeTabId) changeTabEncoding(state.activeTabId, enc);
+    });
+    menu.appendChild(btn);
+  }
+
+  document.body.appendChild(menu);
+
+  const rect = anchorEl.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, rect.left)}px`;
+  menu.style.bottom = `${window.innerHeight - rect.top + 6}px`;
+
+  encodingMenu = menu;
+}
 
 function buildGitSummary(gitStatus: import("../services/state").GitStatus): string {
   const parts: string[] = [gitStatus.branch];
@@ -41,8 +82,11 @@ function renderStatusBar() {
     statusLeftEl.textContent = leftParts.join("  ·  ");
   }
 
+  statusRightEl.textContent = "";
+  statusRightEl.replaceChildren();
+  hideEncodingMenu();
+
   if (!tab) {
-    statusRightEl.textContent = "";
     return;
   }
 
@@ -76,10 +120,32 @@ function renderStatusBar() {
     parts.push(diagParts.join(" · "));
   }
 
-  statusRightEl.textContent = parts.join("  ·  ");
+  const textParts = parts.join("  ·  ");
+  if (textParts) {
+    const span = document.createElement("span");
+    span.textContent = textParts;
+    statusRightEl.appendChild(span);
+  }
+
+  // 编码指示器：点击弹出切换菜单
+  const encodingSpan = document.createElement("span");
+  encodingSpan.className = "ide__status-encoding";
+  encodingSpan.textContent = fileEncodingLabel(tab.encoding);
+  encodingSpan.title = "点击切换文件编码";
+  encodingSpan.addEventListener("click", (e) => {
+    e.stopPropagation();
+    showEncodingMenu(encodingSpan);
+  });
+  statusRightEl.appendChild(encodingSpan);
 }
 
 export function initStatusBar(): void {
   subscribe(renderStatusBar);
   renderStatusBar();
+
+  document.addEventListener("click", (e) => {
+    if (encodingMenu && !encodingMenu.contains(e.target as Node)) {
+      hideEncodingMenu();
+    }
+  });
 }

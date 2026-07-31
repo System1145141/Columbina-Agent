@@ -224,9 +224,10 @@ export const IPC = {
   IDE_UNWATCH_FILE: "ide:unwatch-file",   // 注销文件监听
   IDE_FILE_CHANGED: "ide:file-changed",   // 文件外部变更通知（主进程 → 渲染进程）
   IDE_READ_DIR: "ide:read-dir",           // 读取目录
-  IDE_READ_FILE: "ide:read-file",         // 读取文件内容
+  IDE_READ_FILE: "ide:read-file",         // 读取文件内容（UTF-8）
+  IDE_READ_FILE_ENCODED: "ide:read-file-encoded", // 读取文件内容并自动探测编码
   IDE_READ_FILE_CHUNK: "ide:read-file-chunk", // 分块读取文件内容
-  IDE_WRITE_FILE: "ide:write-file",       // 写入文件内容
+  IDE_WRITE_FILE: "ide:write-file",       // 写入文件内容（可指定编码）
   IDE_GET_FILE_INFO: "ide:get-file-info", // 获取文件信息
   IDE_SEARCH_FILES: "ide:search-files",   // 项目内文本搜索
   IDE_TERMINAL_CREATE: "ide:terminal-create", // 创建终端

@@ -154,9 +154,11 @@ const ideApi = {
   copyText: (text: string) => ipcRenderer.invoke(IPC.IDE_COPY_TEXT, text) as Promise<boolean>,
   readDir: (dirPath: string) => ipcRenderer.invoke(IPC.IDE_READ_DIR, dirPath),
   readFile: (filePath: string) => ipcRenderer.invoke(IPC.IDE_READ_FILE, filePath),
+  readFileEncoded: (filePath: string) =>
+    ipcRenderer.invoke(IPC.IDE_READ_FILE_ENCODED, filePath) as Promise<{ content: string; encoding: string }>,
   readFileChunk: (filePath: string, offset: number, length: number) =>
     ipcRenderer.invoke(IPC.IDE_READ_FILE_CHUNK, filePath, offset, length) as Promise<{ content: string; totalSize: number; isEnd: boolean }>,
-  writeFile: (filePath: string, content: string) => ipcRenderer.invoke(IPC.IDE_WRITE_FILE, filePath, content),
+  writeFile: (filePath: string, content: string, encoding?: string) => ipcRenderer.invoke(IPC.IDE_WRITE_FILE, filePath, content, encoding),
   watchFile: (filePath: string) => ipcRenderer.invoke(IPC.IDE_WATCH_FILE, filePath) as Promise<void>,
   unwatchFile: (filePath: string) => ipcRenderer.send(IPC.IDE_UNWATCH_FILE, filePath),
   onFileChanged: (callback: (payload: { filePath: string; deleted: boolean }) => void) => {

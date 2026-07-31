@@ -19,6 +19,7 @@ import {
   type Tab,
   type WorkspaceRoot,
 } from "./state";
+import { fileEncodingLabel } from "../../../shared/file-encoding";
 
 export function basename(filePath: string): string {
   return filePath.replace(/\\/g, "/").split("/").pop() || filePath;
@@ -90,12 +91,17 @@ export async function readFile(filePath: string): Promise<string> {
   return window.ide!.readFile(filePath);
 }
 
+/** 读取文件内容并自动探测编码（UTF-8 / UTF-8 BOM / UTF-16 / GB18030） */
+export async function readFileEncoded(filePath: string): Promise<{ content: string; encoding: string }> {
+  return window.ide!.readFileEncoded(filePath);
+}
+
 export async function readFileChunk(filePath: string, offset: number, length: number): Promise<{ content: string; totalSize: number; isEnd: boolean }> {
   return window.ide!.readFileChunk(filePath, offset, length);
 }
 
-export async function writeFile(filePath: string, content: string): Promise<{ ok: boolean; error?: string }> {
-  return window.ide!.writeFile(filePath, content);
+export async function writeFile(filePath: string, content: string, encoding?: string): Promise<{ ok: boolean; error?: string }> {
+  return window.ide!.writeFile(filePath, content, encoding);
 }
 
 export async function getFileInfo(filePath: string): Promise<{ isDirectory: boolean; size: number }> {
@@ -177,6 +183,7 @@ export async function openFile(filePath: string, anchorLine = 1, anchorCol = 1):
   try {
     const info = await getFileInfo(filePath);
     let rawContent: string;
+    let encoding = "utf-8";
     let largeFile = false;
     let fullSize: number | undefined;
     let loadedFull = true;
@@ -187,8 +194,11 @@ export async function openFile(filePath: string, anchorLine = 1, anchorCol = 1):
       largeFile = true;
       fullSize = chunk.totalSize;
       loadedFull = chunk.isEnd;
+      // 大文件懒加载路径暂按 UTF-8 处理（超大文件几乎都是 UTF-8 文本）
     } else {
-      rawContent = await readFile(filePath);
+      const encoded = await readFileEncoded(filePath);
+      rawContent = encoded.content;
+      encoding = encoded.encoding;
     }
 
     const lineEnding = detectLineEnding(rawContent);
@@ -201,6 +211,7 @@ export async function openFile(filePath: string, anchorLine = 1, anchorCol = 1):
       currentContent: content,
       modified: false,
       lineEnding,
+      encoding,
       largeFile,
       fullSize,
       loadedFull,
@@ -220,12 +231,14 @@ export async function loadFullFile(tabId: string): Promise<boolean> {
   const tab = state.tabs.get(tabId);
   if (!tab || !tab.largeFile) return false;
   try {
-    const rawContent = await readFile(tab.filePath);
+    const encoded = await readFileEncoded(tab.filePath);
+    const rawContent = encoded.content;
     tab.initialContent = normalizeLineEndings(rawContent);
     tab.currentContent = tab.initialContent;
     tab.modified = false;
     tab.loadedFull = true;
     tab.lineEnding = detectLineEnding(rawContent);
+    tab.encoding = encoded.encoding;
     notify();
     return true;
   } catch (err) {
@@ -259,7 +272,7 @@ export async function saveTab(tabId: string): Promise<boolean> {
   if (content === tab.initialContent && !tab.modified) return true;
 
   const output = encodeLineEndings(content, tab.lineEnding);
-  const result = await writeFile(tab.filePath, output);
+  const result = await writeFile(tab.filePath, output, tab.encoding);
   if (result.ok) {
     markTabSaved(tabId);
     notify();
@@ -268,6 +281,19 @@ export async function saveTab(tabId: string): Promise<boolean> {
     alert(`保存失败: ${result.error || "未知错误"}`);
     return false;
   }
+}
+
+/** 切换标签的文件编码：标记为已修改，保存时按新编码重写磁盘字节 */
+export function changeTabEncoding(tabId: string, encoding: string): void {
+  const tab = state.tabs.get(tabId);
+  if (!tab || tab.kind === "diff") return;
+  if (tab.encoding === encoding) return;
+  tab.encoding = encoding;
+  if (tab.currentContent === tab.initialContent) {
+    tab.modified = true;
+  }
+  state.statusMessage = `编码已切换为 ${fileEncodingLabel(encoding)}，保存后生效`;
+  notify();
 }
 
 export async function closeTab(tabId: string): Promise<void> {
@@ -393,7 +419,9 @@ async function handleExternalFileChanged(filePath: string, deleted: boolean): Pr
       rawContent = chunk.content;
       tab.fullSize = chunk.totalSize;
     } else {
-      rawContent = await readFile(filePath);
+      const encoded = await readFileEncoded(filePath);
+      rawContent = encoded.content;
+      tab.encoding = encoded.encoding;
     }
     const content = normalizeLineEndings(rawContent);
     tab.initialContent = content;
