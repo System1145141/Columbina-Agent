@@ -48,6 +48,7 @@ function isPathUnderRoot(filePath: string, rootPath: string): boolean {
 function collectWorkspaceState(): Record<string, unknown> {
   const openFiles: string[] = [];
   for (const tab of state.tabs.values()) {
+    if (tab.kind === "diff") continue; // 变更对比标签为临时视图，不随工作区持久化
     openFiles.push(tab.filePath);
   }
   return {

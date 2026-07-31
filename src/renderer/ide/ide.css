@@ -859,6 +859,101 @@ html, body, .ide {
   color: #ffffff;
 }
 
+/* 并排 diff 视图（变更对比标签） */
+.ide__diff-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.ide__diff-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #3e3e42;
+  flex-shrink: 0;
+}
+
+.ide__diff-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.ide__diff-sub {
+  font-size: 11px;
+  color: #858585;
+}
+
+.ide__diff-body {
+  flex: 1;
+  overflow: auto;
+  font-family: "SF Mono", Monaco, "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ide__diff-row {
+  display: flex;
+  min-width: 100%;
+}
+
+.ide__diff-cell {
+  display: flex;
+  align-items: flex-start;
+  width: 50%;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.ide__diff-cell--left {
+  border-right: 1px solid #3e3e42;
+}
+
+.ide__diff-line-no {
+  flex-shrink: 0;
+  width: 44px;
+  text-align: right;
+  padding-right: 8px;
+  color: #858585;
+  user-select: none;
+  background: rgba(127, 127, 127, 0.12);
+}
+
+.ide__diff-text {
+  white-space: pre;
+  padding: 0 8px;
+  min-width: 0;
+}
+
+.ide__diff-cell--add {
+  background: rgba(45, 125, 60, 0.35);
+}
+
+.ide__diff-cell--del {
+  background: rgba(190, 60, 60, 0.35);
+}
+
+.ide__diff-cell--add .ide__diff-line-no {
+  color: #9ece9e;
+}
+
+.ide__diff-cell--del .ide__diff-line-no {
+  color: #e6a3a3;
+}
+
+/* 无内容占位一侧显示虚线 */
+.ide__diff-cell--add.ide__diff-cell--left,
+.ide__diff-cell--del.ide__diff-cell--right {
+  background: repeating-linear-gradient(135deg, transparent 0 6px, rgba(127, 127, 127, 0.15) 6px 12px);
+}
+
+.ide__tab--diff .ide__tab-name {
+  color: #79b8ff;
+}
+
 .ide__search-empty {
   color: #858585;
   font-size: 12px;
@@ -2276,6 +2371,49 @@ html, body, .ide {
 .ide.ide--light .ide__git-diff-close:hover,
 .ide.ide--light .ide__git-file:hover {
   background: #e8e8e8;
+}
+
+/* 并排 diff 视图浅色主题 */
+.ide.ide--light .ide__diff-header {
+  border-bottom-color: #e5e5e5;
+}
+
+.ide.ide--light .ide__diff-title {
+  color: #333333;
+}
+
+.ide.ide--light .ide__diff-cell--left {
+  border-right-color: #e5e5e5;
+}
+
+.ide.ide--light .ide__diff-cell--add {
+  background: rgba(46, 160, 67, 0.25);
+}
+
+.ide.ide--light .ide__diff-cell--del {
+  background: rgba(196, 43, 28, 0.2);
+}
+
+.ide.ide--light .ide__diff-cell--add.ide__diff-cell--left,
+.ide.ide--light .ide__diff-cell--del.ide__diff-cell--right {
+  background: repeating-linear-gradient(135deg, transparent 0 6px, rgba(0, 0, 0, 0.06) 6px 12px);
+}
+
+.ide.ide--light .ide__diff-line-no {
+  background: rgba(0, 0, 0, 0.04);
+  color: #666666;
+}
+
+.ide.ide--light .ide__diff-cell--add .ide__diff-line-no {
+  color: #1a7f37;
+}
+
+.ide.ide--light .ide__diff-cell--del .ide__diff-line-no {
+  color: #cf222e;
+}
+
+.ide.ide--light .ide__tab--diff .ide__tab-name {
+  color: #0366d6;
 }
 
 .ide.ide--light .ide__git-section-title {

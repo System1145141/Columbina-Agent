@@ -24,6 +24,8 @@ import {
 import { inlineCompletionExtension } from "./inline-completion";
 import { showPromptDialog } from "./file-tree";
 
+import { renderDiffTab } from "./diff-view";
+
 const editorEl = document.getElementById("editor") as HTMLElement;
 
 const setInlineChat = StateEffect.define<InlineChatState>();
@@ -384,11 +386,16 @@ function onStateChange(): void {
     lastFontSize = state.ideSettings.fontSize;
 
     if (activeTab) {
-      createEditor(activeTab.currentContent, activeTab.filePath);
-      const anchor = state.pendingAnchor;
-      if (anchor && state.editorView) {
-        state.pendingAnchor = null;
-        moveCursorTo(state.editorView, anchor.line, anchor.col);
+      if (activeTab.kind === "diff") {
+        destroyEditor();
+        renderDiffTab(activeTab, editorEl);
+      } else {
+        createEditor(activeTab.currentContent, activeTab.filePath);
+        const anchor = state.pendingAnchor;
+        if (anchor && state.editorView) {
+          state.pendingAnchor = null;
+          moveCursorTo(state.editorView, anchor.line, anchor.col);
+        }
       }
       renderLargeFileBanner(activeTab);
     } else {

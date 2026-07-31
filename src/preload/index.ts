@@ -228,6 +228,8 @@ const ideApi = {
     ipcRenderer.invoke(IPC.IDE_GIT_DISCARD, folderPath, filePath) as Promise<{ ok: boolean; error?: string; stdout?: string }>,
   addToGitignore: (folderPath: string, filePath: string) =>
     ipcRenderer.invoke(IPC.IDE_GIT_ADD_GITIGNORE, folderPath, filePath) as Promise<{ ok: boolean; error?: string; stdout?: string }>,
+  showGitHeadContent: (folderPath: string, filePath: string) =>
+    ipcRenderer.invoke(IPC.IDE_GIT_SHOW_HEAD, folderPath, filePath) as Promise<{ ok: boolean; content: string }>,
   saveWorkspace: (filePath: string | null, state: Record<string, unknown>) =>
     ipcRenderer.invoke(IPC.IDE_SAVE_WORKSPACE, filePath, state) as Promise<{ ok: boolean; filePath?: string; error?: string }>,
   saveWorkspaceSync: (filePath: string | null, state: Record<string, unknown>) =>

@@ -11,11 +11,14 @@ import {
   getGitStashesForRoot,
   setGitSelectedFileForRoot,
   setGitDiffForRoot,
+  addTab,
+  setActiveTab,
   type WorkspaceRoot,
   type GitLogEntry,
+  type Tab,
 } from "../services/state";
 import { toggleGitPanel } from "../services/layout";
-import { openFile } from "../services/file-service";
+import { openFile, readFile, basename } from "../services/file-service";
 import { showPromptDialog } from "./file-tree";
 import {
   refreshGitStatus,
@@ -39,6 +42,7 @@ import {
   revertGit,
   discardGitFile,
   addToGitignore,
+  getGitHeadContent,
 } from "../services/git-service";
 
 const gitToggleBtn = document.getElementById("git-toggle-btn") as HTMLButtonElement;
@@ -49,6 +53,7 @@ const gitDiffPathEl = document.getElementById("git-diff-path") as HTMLElement;
 const gitDiffContentEl = document.getElementById("git-diff-content") as HTMLElement;
 const gitDiffCloseBtn = document.getElementById("git-diff-close") as HTMLButtonElement;
 const gitOpenDiffBtn = document.getElementById("git-open-diff") as HTMLButtonElement;
+const gitOpenDiffTabBtn = document.getElementById("git-open-diff-tab") as HTMLButtonElement;
 const gitLoadingEl = document.getElementById("git-loading") as HTMLElement;
 
 let lastRootsKey = "";
@@ -113,6 +118,55 @@ function hideDiff(): void {
     setGitDiffForRoot(selectedRootId, "");
   }
   selectedRootId = "";
+  notify();
+}
+
+/**
+ * 在新标签页中打开并排变更对比：
+ * 左侧为变更前（HEAD）内容，右侧为当前工作区内容（若已在编辑器打开则取其当前内容）。
+ */
+async function openChangesTab(rootId: string, filePath: string): Promise<void> {
+  const root = state.roots.find((r) => r.id === rootId);
+  if (!root) return;
+  const absPath = relativeToAbsolute(filePath, root.path);
+  const diffId = `diff:${absPath}`;
+
+  let current = "";
+  const opened = state.tabs.get(absPath);
+  if (opened && opened.kind !== "diff") {
+    current = opened.currentContent;
+  } else {
+    try {
+      current = await readFile(absPath);
+    } catch {
+      current = "";
+    }
+  }
+
+  const head = await getGitHeadContent(root, absPath);
+
+  const existing = state.tabs.get(diffId);
+  if (existing && existing.kind === "diff") {
+    existing.currentContent = current;
+    existing.diffBaseContent = head.ok ? head.content : "";
+    setActiveTab(diffId);
+    notify();
+    return;
+  }
+
+  const tab: Tab = {
+    id: diffId,
+    kind: "diff",
+    filePath: absPath,
+    fileName: basename(absPath),
+    initialContent: current,
+    currentContent: current,
+    modified: false,
+    lineEnding: "lf",
+    diffBaseContent: head.ok ? head.content : "",
+  };
+  addTab(tab);
+  setActiveTab(diffId);
   notify();
 }
 
@@ -466,6 +520,16 @@ function showGitFileContextMenu(rootId: string, filePath: string, status: "stage
     void openFile(relativeToAbsolute(filePath, root.path));
   });
   menu.appendChild(openItem);
+
+  const changesItem = document.createElement("div");
+  changesItem.className = "ide__git-context-item";
+  changesItem.textContent = "打开变更";
+  changesItem.title = "在新标签页中并排对比变更前后的内容";
+  changesItem.addEventListener("click", () => {
+    hideGitContextMenu();
+    void openChangesTab(rootId, filePath);
+  });
+  menu.appendChild(changesItem);
 
   const stageItem = document.createElement("div");
   stageItem.className = "ide__git-context-item";
@@ -1112,6 +1176,11 @@ export function initGitPanel(): void {
     void refreshGitStatus();
   });
   gitDiffCloseBtn.addEventListener("click", hideDiff);
+  gitOpenDiffTabBtn.addEventListener("click", () => {
+    const selected = selectedRootId ? getGitSelectedFileForRoot(selectedRootId) : null;
+    if (!selected || !selectedRootId) return;
+    void openChangesTab(selectedRootId, selected.path);
+  });
   gitOpenDiffBtn.addEventListener("click", () => {
     const selected = selectedRootId ? getGitSelectedFileForRoot(selectedRootId) : null;
     const root = selectedRootId ? state.roots.find((r) => r.id === selectedRootId) : undefined;

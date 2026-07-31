@@ -266,6 +266,7 @@ export const IPC = {
   IDE_GIT_REVERT: "ide:git-revert",               // revert
   IDE_GIT_DISCARD: "ide:git-discard",             // 放弃文件更改
   IDE_GIT_ADD_GITIGNORE: "ide:git-add-gitignore", // 将文件添加到 .gitignore
+  IDE_GIT_SHOW_HEAD: "ide:git-show-head",         // 获取文件在 HEAD 中的内容
 
   IDE_SAVE_WORKSPACE: "ide:save-workspace",           // 保存工作区文件
   IDE_SAVE_WORKSPACE_SYNC: "ide:save-workspace-sync", // 同步保存工作区（beforeunload 用）

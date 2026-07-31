@@ -169,6 +169,13 @@ export async function addToGitignore(
   return window.ide!.addToGitignore(root.path, filePath);
 }
 
+export async function getGitHeadContent(
+  root: WorkspaceRoot,
+  filePath: string
+): Promise<{ ok: boolean; content: string }> {
+  return window.ide!.showGitHeadContent(root.path, filePath);
+}
+
 export function isFileStaged(rootId: string, filePath: string): boolean {
   return state.gitStatusByRoot[rootId]?.staged.includes(filePath) ?? false;
 }

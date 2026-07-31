@@ -16,8 +16,12 @@ export interface IdeDirEntry {
   children?: IdeDirEntry[];
 }
 
+export type TabKind = "file" | "diff";
+
 export interface Tab {
   id: string;
+  /** "file" 为普通文件编辑标签，缺省即文件；"diff" 为并排变更对比标签 */
+  kind?: TabKind;
   filePath: string;
   fileName: string;
   initialContent: string;
@@ -27,6 +31,8 @@ export interface Tab {
   largeFile?: boolean;
   fullSize?: number;
   loadedFull?: boolean;
+  /** diff 标签专用：变更前（HEAD）内容 */
+  diffBaseContent?: string;
 }
 
 export interface LanguageServerConfig {
@@ -564,6 +570,7 @@ declare global {
       revertGit: (folderPath: string, commitHash: string, noCommit?: boolean) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
       discardGitFile: (folderPath: string, filePath: string) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
       addToGitignore: (folderPath: string, filePath: string) => Promise<{ ok: boolean; error?: string; stdout?: string }>;
+      showGitHeadContent: (folderPath: string, filePath: string) => Promise<{ ok: boolean; content: string }>;
       saveWorkspace: (filePath: string | null, state: Record<string, unknown>) => Promise<{ ok: boolean; filePath?: string; error?: string }>;
       saveWorkspaceSync: (filePath: string | null, state: Record<string, unknown>) => { ok: boolean; filePath?: string; error?: string };
       openWorkspace: () => Promise<{ ok: boolean; workspace?: Record<string, unknown>; filePath?: string; error?: string }>;

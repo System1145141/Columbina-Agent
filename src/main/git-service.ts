@@ -405,6 +405,14 @@ export async function addToGitignore(folderPath: string, filePath: string): Prom
   }
 }
 
+/** 获取文件在 HEAD 提交中的内容；文件未被跟踪时返回 ok: false */
+export async function showHeadContent(folderPath: string, filePath: string): Promise<{ ok: boolean; content: string }> {
+  const rel = toRelativePath(folderPath, filePath);
+  const { stdout, exitCode } = await execGit(["show", `HEAD:${rel}`], folderPath, { timeout: 15_000 });
+  if (exitCode !== 0) return { ok: false, content: "" };
+  return { ok: true, content: stdout };
+}
+
 export async function getLog(folderPath: string, maxCount = 20): Promise<GitLogEntry[]> {
   const format = "%H%x00%s%x00%an%x00%ad";
   const { stdout, exitCode } = await execGit(
@@ -689,6 +697,18 @@ export function setupGitIpc(): void {
     } catch (err: any) {
       console.error("[Columbina IDE] git add to gitignore failed:", err?.message || err);
       return { ok: false, error: err?.message || "写入 .gitignore 失败" };
+    }
+  });
+
+  ipcMain.handle(IPC.IDE_GIT_SHOW_HEAD, async (_event, folderPath: unknown, filePath: unknown) => {
+    if (typeof folderPath !== "string" || typeof filePath !== "string") {
+      return { ok: false, content: "" };
+    }
+    try {
+      return await showHeadContent(folderPath, filePath);
+    } catch (err: any) {
+      console.error("[Columbina IDE] git show head failed:", err?.message || err);
+      return { ok: false, content: "" };
     }
   });
 }
