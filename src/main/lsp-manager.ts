@@ -246,6 +246,9 @@ async function startLanguageServer(
         rootUri: workspacePath ? pathToFileUri(workspacePath) : null,
         capabilities: {
           textDocument: {
+            // typescript-language-server 等服务器要求客户端显式声明诊断支持，
+            // 否则 diagnosticsSupport=false 且不发布任何诊断
+            publishDiagnostics: { relatedInformation: true, versionSupport: false },
             synchronization: { dynamicRegistration: false, willSave: false, willSaveWaitUntil: false, didSave: true },
             completion: { dynamicRegistration: false, completionItem: { snippetSupport: false, commitCharactersSupport: false } },
             hover: { dynamicRegistration: false },
