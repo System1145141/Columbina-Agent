@@ -74,8 +74,11 @@
         <div class="ide__editor" id="editor"></div>
         <div class="ide__terminal" id="terminal-panel" style="display: none;">
           <div class="ide__terminal-header">
-            <span>终端</span>
-            <button type="button" class="ide__terminal-close" id="terminal-close-btn" aria-label="关闭终端">×</button>
+            <div class="ide__terminal-tabs" id="terminal-tabs"></div>
+            <div class="ide__terminal-actions">
+              <button type="button" class="ide__terminal-add" id="terminal-add-btn" title="新建终端" aria-label="新建终端">+</button>
+              <button type="button" class="ide__terminal-close" id="terminal-close-btn" aria-label="关闭终端">×</button>
+            </div>
           </div>
           <div class="ide__terminal-content" id="terminal-content"></div>
         </div>

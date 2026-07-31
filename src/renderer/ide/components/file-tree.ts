@@ -19,6 +19,7 @@ import {
 } from "../services/file-service";
 import { showSearchPanel, toggleSearchPanel, hideSearchPanel } from "../services/layout";
 import { relocateRoot, closeTabsForRoot } from "../services/workspace-service";
+import { openTerminalInDir } from "./terminal-panel";
 
 const treeRootEl = document.getElementById("tree-root") as HTMLElement;
 const folderPathEl = document.getElementById("folder-path") as HTMLSpanElement;
@@ -98,6 +99,7 @@ function showTreeContextMenu(x: number, y: number, entry: IdeDirEntry) {
   if (root) {
     items.push({ label: "新建文件", action: () => void promptCreate(entry.path, "file") });
     items.push({ label: "新建文件夹", action: () => void promptCreate(entry.path, "dir") });
+    items.push({ label: "在集成终端中打开", action: () => void openTerminalInDir(entry.path) });
     items.push({ label: "重新定位文件夹", action: () => void relocateRoot(root.id) });
     items.push({ label: "从工作区移除", action: () => void removeRootFromTree(root), danger: true });
     items.push({ label: "刷新", action: () => void refreshTreeItem(entry.path) });
@@ -105,6 +107,7 @@ function showTreeContextMenu(x: number, y: number, entry: IdeDirEntry) {
     if (entry.isDirectory) {
       items.push({ label: "新建文件", action: () => void promptCreate(entry.path, "file") });
       items.push({ label: "新建文件夹", action: () => void promptCreate(entry.path, "dir") });
+      items.push({ label: "在集成终端中打开", action: () => void openTerminalInDir(entry.path) });
     }
     items.push({ label: "重命名", action: () => void promptRename(entry) });
     items.push({ label: "删除", action: () => void confirmDelete(entry), danger: true });

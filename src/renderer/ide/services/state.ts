@@ -1,6 +1,4 @@
 import type { EditorView } from "@codemirror/view";
-import type { Terminal } from "@xterm/xterm";
-import type { FitAddon } from "@xterm/addon-fit";
 import type { LspDiagnostic } from "./lsp-client";
 import type { PluginToolParameter } from "../plugins/api";
 
@@ -197,12 +195,7 @@ export const state = {
   expandedDirs: new Set<string>(),
   isClosing: false,
 
-  terminal: null as Terminal | null,
-  fitAddon: null as FitAddon | null,
-  terminalId: null as string | null,
   terminalVisible: false,
-  terminalDataUnsub: null as (() => void) | null,
-  terminalExitUnsub: null as (() => void) | null,
 
   ideSettings: {
     theme: "dark" as "dark" | "light",

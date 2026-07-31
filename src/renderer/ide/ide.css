@@ -1125,6 +1125,72 @@ html, body, .ide {
   font-size: 11px;
   font-weight: 600;
   user-select: none;
+  gap: 4px;
+}
+
+.ide__terminal-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  flex: 1;
+  min-width: 0;
+  scrollbar-width: thin;
+}
+
+.ide__terminal-tab {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 10px;
+  background: transparent;
+  border: none;
+  color: #bbbbbb;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 3px 3px 0 0;
+  white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ide__terminal-tab:hover {
+  background: #3e3e42;
+  color: #ffffff;
+}
+
+.ide__terminal-tab.is-active {
+  background: #1e1e1e;
+  color: #ffffff;
+}
+
+.ide__terminal-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.ide__terminal-add {
+  width: 20px;
+  height: 20px;
+  background: transparent;
+  border: none;
+  color: #bbbbbb;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 16px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ide__terminal-add:hover {
+  background: #3e3e42;
+  color: #ffffff;
 }
 
 .ide__terminal-close {
@@ -1149,11 +1215,18 @@ html, body, .ide {
 
 .ide__terminal-content {
   flex: 1;
-  padding: 4px;
+  position: relative;
   overflow: hidden;
 }
 
-.ide__terminal-content .xterm {
+.ide__terminal-view {
+  position: absolute;
+  inset: 0;
+  padding: 4px;
+  display: none;
+}
+
+.ide__terminal-view .xterm {
   height: 100%;
 }
 
@@ -1322,6 +1395,22 @@ html, body, .ide {
 .ide.ide--light .ide__terminal {
   background: #ffffff;
   border-color: #e5e5e5;
+}
+
+.ide.ide--light .ide__terminal-tab {
+  color: #555555;
+}
+
+.ide.ide--light .ide__terminal-tab:hover,
+.ide.ide--light .ide__terminal-add:hover,
+.ide.ide--light .ide__terminal-close:hover {
+  background: #e5e5e5;
+  color: #000000;
+}
+
+.ide.ide--light .ide__terminal-tab.is-active {
+  background: #ffffff;
+  color: #333333;
 }
 
 .ide.ide--light .ide__statusbar {
