@@ -811,11 +811,19 @@ src/main/
      - 命令面板新增「撤销上次重构」（`undoLastRefactor`）：从撤销栈弹出最近一组快照，恢复全部文件到重构前状态（写盘 + 同步标签/编辑器 + 推送 AI 消息），失败文件数会反馈。
      - 原 F2 `renameSymbol` 同步升级为「预览确认 → 应用」流程。
 
-7. **测试生成**
+7. **测试生成** ✅ 已完成
    - 自动检测项目测试框架（Jest / Vitest / Mocha），为当前函数/文件生成单元测试并给出运行命令。
-
-8. **代码审查**
+   - 实现：
+     - Agent 新增 `generate_tests` 工具：`detectTestFramework` 读取项目 `package.json` 的 dependencies/devDependencies/scripts，识别 vitest / jest / mocha / @vue/test-utils / @testing-library 并给出推荐运行命令；工具返回目标文件内容 + 框架检测结果，Agent 据此生成测试代码并用 `write_file` 写入。
+     - 命令面板新增「AI: 为当前文件生成测试」：一键对当前文件发起生成测试流程（file 上下文）。
+     - 无框架/无 package.json 时回退为 vitest 风格并说明。
+8. **代码审查** ✅ 已完成
    - Agent 审查 Git 变更文件（未提交改动或 PR 分支），按严重程度输出问题清单；提交前提示潜在问题（与 Git 面板集成）。
+   - 实现：
+     - Agent 新增 `review_changes` 工具与 `AiContextScope` 新增 `"git"` 上下文：`collectGitChangesForReview` 遍历所有 Root 的 `git status`，合并已暂存/已修改/未跟踪/冲突文件（上限 15 个、总量 60k 字符），未跟踪文件直接读内容、其余取 `git diff`（未暂存 + 已暂存）后交 Agent 审查。
+     - Git 面板每个 Root 提交区新增「AI 审查」按钮：打开 AI 面板并以 git 上下文发起审查，按高/中/低严重程度输出问题清单。
+     - AI 面板上下文下拉新增「Git 变更」选项；命令面板新增「AI: 审查代码变更」。
+     - 顺带修复：`parseActions` 工具白名单此前遗漏 `rename_symbol`（会导致 Agent 的重命名 action 被丢弃），本次一并补齐。
 
 ### 工程化（阶段 7：稳定性与发布，对应 4.8）
 

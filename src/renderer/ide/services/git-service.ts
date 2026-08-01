@@ -12,6 +12,10 @@ import {
   type GitStashEntry,
 } from "./state";
 
+export async function queryGitStatus(root: WorkspaceRoot): Promise<GitStatus> {
+  return window.ide!.getGitStatus(root.path);
+}
+
 export async function refreshGitStatus(): Promise<void> {
   if (state.roots.length === 0) {
     state.gitLoading = false;

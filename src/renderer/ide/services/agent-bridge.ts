@@ -26,6 +26,7 @@ import {
   detectLineEnding,
   collectProjectContextAcrossRoots,
 } from "./file-service";
+import { queryGitStatus, getGitDiff } from "./git-service";
 
 let runCommandInTerminalImpl: ((command: string) => Promise<void>) | null = null;
 
@@ -48,7 +49,7 @@ export function parseActions(content: string): AgentAction[] {
     try {
       const raw = JSON.parse(match[1].trim()) as Record<string, unknown>;
       const type = String(raw.type || "");
-      if (!["read_file", "write_file", "search_files", "run_command", "plugin"].includes(type)) continue;
+      if (!["read_file", "write_file", "search_files", "run_command", "rename_symbol", "generate_tests", "review_changes", "plugin"].includes(type)) continue;
       actions.push({
         id: `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         type: type as AgentAction["type"],
@@ -56,6 +57,9 @@ export function parseActions(content: string): AgentAction[] {
         content: typeof raw.content === "string" ? raw.content : undefined,
         query: typeof raw.query === "string" ? raw.query : undefined,
         command: typeof raw.command === "string" ? raw.command : undefined,
+        line: typeof raw.line === "number" ? raw.line : undefined,
+        col: typeof raw.col === "number" ? raw.col : undefined,
+        newName: typeof raw.newName === "string" ? raw.newName : undefined,
         pluginName: typeof raw.pluginName === "string" ? raw.pluginName : undefined,
         pluginParams: typeof raw.pluginParams === "object" && raw.pluginParams !== null ? (raw.pluginParams as Record<string, unknown>) : undefined,
       });
@@ -79,7 +83,7 @@ export function buildToolsPrompt(): string {
     pluginToolLines.push(`- ${tool.name}: ${tool.description}\n   { "type": "plugin", "pluginName": "${tool.name}", "pluginParams": { ${paramsDesc ? `${paramsDesc}` : ""} } }`);
   }
 
-  return `\n\n你可以使用以下工具来操作项目代码。当需要读取、修改、搜索文件或运行命令时，在回复末尾插入一个或多个 <action>{...}</action> JSON 标记。每个 action 都需要用户确认后才会执行，执行结果会再次发给你。\n\n可用工具：\n1. read_file: 读取文件内容\n   { "type": "read_file", "filePath": "相对或绝对路径" }\n2. write_file: 写入或覆盖文件（危险操作，会保存快照以便撤销）\n   { "type": "write_file", "filePath": "路径", "content": "完整文件内容" }\n3. search_files: 在项目文件夹中搜索文本\n   { "type": "search_files", "query": "搜索关键词" }\n4. run_command: 在集成终端中运行 shell 命令\n   { "type": "run_command", "command": "要执行的命令" }\n5. rename_symbol: 跨文件重命名符号（基于 LSP 引用分析，所有引用文件同步更新；会生成 diff 预览，需用户确认后应用，可整体撤销）\n   { "type": "rename_symbol", "filePath": "符号所在文件路径", "line": "符号所在行号(从1开始)", "col": "符号所在列号(从1开始)", "newName": "新名称" }${pluginToolLines.length > 0 ? "\n6. plugin: 调用插件提供的工具\n" + pluginToolLines.join("\n") : ""}\n\n注意：\n- 不要一次输出过多内容；优先分析再行动。\n- 写文件前最好先读取目标文件。\n- 回复中除了 action 标记外，可以用自然语言向用户说明你的计划。`;
+  return `\n\n你可以使用以下工具来操作项目代码。当需要读取、修改、搜索文件或运行命令时，在回复末尾插入一个或多个 <action>{...}</action> JSON 标记。每个 action 都需要用户确认后才会执行，执行结果会再次发给你。\n\n可用工具：\n1. read_file: 读取文件内容\n   { "type": "read_file", "filePath": "相对或绝对路径" }\n2. write_file: 写入或覆盖文件（危险操作，会保存快照以便撤销）\n   { "type": "write_file", "filePath": "路径", "content": "完整文件内容" }\n3. search_files: 在项目文件夹中搜索文本\n   { "type": "search_files", "query": "搜索关键词" }\n4. run_command: 在集成终端中运行 shell 命令\n   { "type": "run_command", "command": "要执行的命令" }\n5. rename_symbol: 跨文件重命名符号（基于 LSP 引用分析，所有引用文件同步更新；会生成 diff 预览，需用户确认后应用，可整体撤销）\n   { "type": "rename_symbol", "filePath": "符号所在文件路径", "line": "符号所在行号(从1开始)", "col": "符号所在列号(从1开始)", "newName": "新名称" }\n6. generate_tests: 为指定文件生成单元测试（返回文件内容、项目测试框架检测结果与运行命令，请基于此生成测试代码后用 write_file 写入）\n   { "type": "generate_tests", "filePath": "目标文件路径（省略则用当前打开文件）" }\n7. review_changes: 审查当前 Git 变更（收集所有工作区未提交/已暂存/未跟踪文件的 diff 与内容，按严重程度输出问题清单）\n   { "type": "review_changes" }${pluginToolLines.length > 0 ? "\n8. plugin: 调用插件提供的工具\n" + pluginToolLines.join("\n") : ""}\n\n注意：\n- 不要一次输出过多内容；优先分析再行动。\n- 写文件前最好先读取目标文件。\n- 回复中除了 action 标记外，可以用自然语言向用户说明你的计划。`;
 }
 
 export function formatActionLabel(action: AgentAction): string {
@@ -94,6 +98,10 @@ export function formatActionLabel(action: AgentAction): string {
       return `运行命令: ${action.command || ""}`;
     case "rename_symbol":
       return `重命名符号: ${action.newName || ""}（${action.filePath || ""}:${action.line || "?"}:${action.col || "?"}）`;
+    case "generate_tests":
+      return `生成测试: ${action.filePath || "当前文件"}`;
+    case "review_changes":
+      return `审查 Git 变更`;
     case "plugin":
       return `插件工具: ${action.pluginName || ""}`;
     default:
@@ -121,6 +129,92 @@ export async function saveSnapshot(filePath: string): Promise<void> {
   } catch {
     state.fileSnapshots.set(filePath, { filePath, content: "", lineEnding: "lf" });
   }
+}
+
+/** 检测项目测试框架（读取 package.json 的依赖与 scripts） */
+export async function detectTestFramework(rootPath: string): Promise<string> {
+  if (!rootPath) return "未定位到项目根目录，无法检测测试框架（建议生成 vitest 风格测试）";
+  try {
+    const raw = await readFile(`${rootPath}/package.json`);
+    const pkg = JSON.parse(raw) as {
+      scripts?: Record<string, string>;
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+    const found: string[] = [];
+    if (deps["vitest"]) found.push("vitest");
+    if (deps["jest"]) found.push("jest");
+    if (deps["mocha"]) found.push("mocha");
+    if (deps["@vue/test-utils"]) found.push("@vue/test-utils");
+    if (deps["@testing-library/react"]) found.push("@testing-library/react");
+    if (deps["@testing-library/vue"]) found.push("@testing-library/vue");
+    const framework = found.length > 0 ? found.join(" + ") : "未检测到常见测试框架（建议使用 vitest 风格测试）";
+    const runCmd = found.includes("vitest")
+      ? "npx vitest run <测试文件路径>"
+      : found.includes("jest")
+        ? "npx jest <测试文件路径>"
+        : found.includes("mocha")
+          ? "npx mocha <测试文件路径>"
+          : "npx vitest run <测试文件路径>";
+    return `项目测试框架: ${framework}\n推荐运行命令: ${runCmd}\npackage.json scripts:\n${JSON.stringify(pkg.scripts || {}, null, 2)}`;
+  } catch {
+    return "未找到 package.json，无法检测测试框架（建议生成 vitest 风格测试，运行命令 npx vitest run <测试文件路径>）";
+  }
+}
+
+const MAX_REVIEW_FILES = 15;
+const MAX_REVIEW_CHARS = 60000;
+
+/** 收集所有 Root 的 Git 变更（已暂存 + 未暂存 + 未跟踪 + 冲突）与 diff，供 Agent 审查 */
+export async function collectGitChangesForReview(): Promise<string> {
+  if (state.roots.length === 0) return "（当前没有打开项目文件夹，无法审查）";
+  const parts: string[] = [];
+  let totalChars = 0;
+  for (const root of state.roots) {
+    let status;
+    try {
+      status = await queryGitStatus(root);
+    } catch {
+      continue;
+    }
+    if (!status || status.clean) {
+      parts.push(`【${root.name}】无 Git 变更`);
+      continue;
+    }
+    const files = [
+      ...new Set([...status.staged, ...status.modified, ...status.conflicted, ...status.untracked]),
+    ];
+    parts.push(`【${root.name}】分支 ${status.branch || "(未在分支上)"}，共 ${files.length} 个变更文件（已暂存 ${status.staged.length} / 已修改 ${status.modified.length} / 未跟踪 ${status.untracked.length} / 冲突 ${status.conflicted.length}）`);
+    for (const relPath of files.slice(0, MAX_REVIEW_FILES)) {
+      if (totalChars >= MAX_REVIEW_CHARS) break;
+      const absPath = `${root.path}/${relPath.replace(/\\/g, "/")}`;
+      let content: string;
+      try {
+        const isUntracked = status.untracked.includes(relPath) && !status.staged.includes(relPath);
+        if (isUntracked) {
+          const raw = await readFile(absPath);
+          content = `（未跟踪文件，当前内容）\n${normalizeLineEndings(raw)}`;
+        } else {
+          const unstaged = await getGitDiff(root, relPath, false);
+          const staged = await getGitDiff(root, relPath, true);
+          content = `[未暂存 diff]\n${unstaged || "(无)"}\n[已暂存 diff]\n${staged || "(无)"}`;
+        }
+      } catch (err) {
+        content = `（读取失败: ${String(err)}）`;
+      }
+      const block = `\n--- 文件: ${absPath} ---\n${content}`;
+      parts.push(block);
+      totalChars += block.length;
+    }
+    if (files.length > MAX_REVIEW_FILES) {
+      parts.push(`（其余 ${files.length - MAX_REVIEW_FILES} 个文件未展开，可提示用户或使用 read_file 查看）`);
+    }
+  }
+  const joined = parts.join("\n\n");
+  return joined.length > MAX_REVIEW_CHARS
+    ? `${joined.slice(0, MAX_REVIEW_CHARS)}\n…（内容过长已截断，请按需用 read_file 查看具体文件）`
+    : joined;
 }
 
 export async function executeAction(action: AgentAction): Promise<AgentActionResult> {
@@ -214,6 +308,36 @@ export async function executeAction(action: AgentAction): Promise<AgentActionRes
         return { actionId: action.id, ok: false, error: "部分文件应用失败，请查看控制台" };
       } catch (err) {
         return { actionId: action.id, ok: false, error: `重命名失败: ${String(err)}` };
+      }
+    }
+    case "generate_tests": {
+      let target = action.filePath;
+      if (!target) {
+        target = state.activeTabId || "";
+        if (!target) {
+          return { actionId: action.id, ok: false, error: "请指定要生成测试的文件路径（或先打开一个文件）" };
+        }
+      }
+      try {
+        const root = state.roots.find((r) => target!.startsWith(r.path) || r.path.startsWith(target!));
+        const rootPath = root?.path || "";
+        const raw = await readFile(target);
+        const framework = await detectTestFramework(rootPath);
+        return {
+          actionId: action.id,
+          ok: true,
+          output: `目标文件: ${target}\n\n${framework}\n\n文件内容:\n\`\`\`\n${normalizeLineEndings(raw)}\n\`\`\`\n\n请基于上述内容与测试框架生成单元测试代码（覆盖核心逻辑与边界情况），然后用 write_file 工具写入合适的测试文件，并给出运行命令。`,
+        };
+      } catch (err) {
+        return { actionId: action.id, ok: false, error: `读取文件失败: ${String(err)}` };
+      }
+    }
+    case "review_changes": {
+      try {
+        const collected = await collectGitChangesForReview();
+        return { actionId: action.id, ok: true, output: collected };
+      } catch (err) {
+        return { actionId: action.id, ok: false, error: `收集 Git 变更失败: ${String(err)}` };
       }
     }
     case "plugin": {
@@ -354,6 +478,10 @@ export async function buildAiContext(scope: AiContextScope, query?: string): Pro
     } else {
       parts.push("（当前没有打开项目文件夹）");
     }
+  }
+
+  if (scope === "git") {
+    parts.push(await collectGitChangesForReview());
   }
 
   try {

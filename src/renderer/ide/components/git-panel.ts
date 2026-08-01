@@ -17,7 +17,8 @@ import {
   type GitLogEntry,
   type Tab,
 } from "../services/state";
-import { toggleGitPanel } from "../services/layout";
+import { toggleGitPanel, toggleAiPanel } from "../services/layout";
+import { runAgentTurn } from "../services/agent-bridge";
 import { openFile, readFile, basename } from "../services/file-service";
 import { showPromptDialog } from "./file-tree";
 import {
@@ -1119,6 +1120,20 @@ function renderGitRoot(root: WorkspaceRoot): HTMLElement {
   commitRow.appendChild(input);
   commitRow.appendChild(btn);
   rootEl.appendChild(commitRow);
+
+  const reviewRow = document.createElement("div");
+  reviewRow.className = "ide__git-commit";
+  const reviewBtn = document.createElement("button");
+  reviewBtn.type = "button";
+  reviewBtn.className = "ide__git-commit-btn";
+  reviewBtn.textContent = "AI 审查";
+  reviewBtn.title = "让 Agent 审查当前变更文件，按严重程度输出问题清单";
+  reviewBtn.addEventListener("click", () => {
+    toggleAiPanel();
+    void runAgentTurn("请审查当前 Git 变更文件（未提交的改动），按严重程度（高/中/低）输出问题清单，并给出修复建议。", "git");
+  });
+  reviewRow.appendChild(reviewBtn);
+  rootEl.appendChild(reviewRow);
 
   return rootEl;
 }

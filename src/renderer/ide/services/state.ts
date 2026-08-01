@@ -228,7 +228,7 @@ export interface CommandItem {
   run: () => void | Promise<void>;
 }
 
-export type AiContextScope = "file" | "selection" | "project";
+export type AiContextScope = "file" | "selection" | "project" | "git";
 
 export const state = {
   roots: [] as WorkspaceRoot[],

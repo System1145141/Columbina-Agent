@@ -13,7 +13,7 @@ import {
   findReferences,
   formatDocument,
 } from "./lsp-integration";
-import { runAgentPlan, undoLastRefactor } from "../services/agent-bridge";
+import { runAgentPlan, undoLastRefactor, runAgentTurn } from "../services/agent-bridge";
 import {
   toggleSearchPanel,
   toggleProblemsPanel,
@@ -127,6 +127,27 @@ function getBaseCommands(): CommandItem[] {
       label: "撤销上次重构",
       icon: "↩",
       run: () => void undoLastRefactor(),
+    },
+    {
+      id: "ai-generate-tests",
+      label: "AI: 为当前文件生成测试",
+      icon: "🧪",
+      run: () => {
+        toggleAiPanel();
+        void runAgentTurn(
+          "请为当前打开的文件生成单元测试：先用 generate_tests 工具获取文件内容与项目测试框架，再生成覆盖核心逻辑和边界情况的测试代码，用 write_file 写入合适的测试文件，并给出运行命令。",
+          "file"
+        );
+      },
+    },
+    {
+      id: "ai-review-changes",
+      label: "AI: 审查代码变更",
+      icon: "🔎",
+      run: () => {
+        toggleAiPanel();
+        void runAgentTurn("请审查当前 Git 变更文件（未提交的改动），按严重程度（高/中/低）输出问题清单，并给出修复建议。", "git");
+      },
     },
     {
       id: "toggle-search",
