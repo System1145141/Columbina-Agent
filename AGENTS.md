@@ -775,9 +775,10 @@ src/main/
    - 验收：打开 TS/JS 文件能看到符号树并可点击跳转。
    - 实现：`refreshOutline`（lsp-integration，自动启动语言服务器，支持 DocumentSymbol/SymbolInformation 两种响应并构建符号树）；新增 `outline-panel.ts` 组件与 `outlineVisible/outlineSymbols/outlineVersion` 状态；侧边栏 ☰ 按钮与命令面板「切换大纲」（Ctrl+Shift+O）可开关；标签切换立即刷新、编辑停止 350ms 防抖刷新；点击符号定位光标（跨标签自动打开文件）。
 
-3. **全局替换完善**
+3. **全局替换完善** ✅ 已完成
    - 搜索面板补齐「替换」输入框与「替换全部 / 逐个替换」流程，替换前逐条 diff 预览确认。
    - 验收：可在整个项目批量替换并预览每次改动。
+   - 实现：主进程搜索改为收集每行全部匹配并返回 `matchText/matchLength`；搜索面板新增替换输入框（⬅ 切换）与「替换全部」/每行「替换」按钮；替换前弹出预览弹窗（按文件分组、旧→新 diff 高亮）确认；按原始行偏移从后往前应用（保留 CRLF/LF 与编码），写盘后同步已打开标签与编辑器并自动重跑搜索刷新结果。
 
 4. **最近打开文件（MRU）**
    - 记录最近打开的文件与工作区（`ideSettings` 或 settings 持久化），命令面板与菜单展示，点击快速打开。

@@ -7,6 +7,10 @@ export interface IdeSearchResult {
   line: number;
   column: number;
   text: string;
+  /** 匹配到的原始文本（用于替换预览） */
+  matchText?: string;
+  /** 匹配长度（字符数，用于精确替换定位） */
+  matchLength?: number;
 }
 
 export interface IdeDirEntry {

@@ -172,6 +172,78 @@ html, body, .ide {
   border-color: #007acc;
 }
 
+.ide__search-input-row {
+  display: flex;
+  gap: 6px;
+}
+
+.ide__search-replace-toggle {
+  flex-shrink: 0;
+  background: #3c3c3c;
+  border: 1px solid #3e3e42;
+  color: #cccccc;
+  border-radius: 3px;
+  padding: 0 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.ide__search-replace-toggle:hover {
+  background: #4e4e4e;
+}
+
+.ide__search-replace-toggle.is-active {
+  background: #007acc;
+  border-color: #007acc;
+  color: #ffffff;
+}
+
+.ide__search-replace-row {
+  display: flex;
+  gap: 6px;
+}
+
+.ide__search-replace-all {
+  margin-left: auto;
+  background: #3c3c3c;
+  border: 1px solid #3e3e42;
+  color: #cccccc;
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ide__search-replace-all:hover {
+  background: #007acc;
+  border-color: #007acc;
+  color: #ffffff;
+}
+
+.ide__search-row-replace {
+  margin-left: auto;
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid #3e3e42;
+  color: #9cdcfe;
+  border-radius: 3px;
+  padding: 0 6px;
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.ide__search-row:hover .ide__search-row-replace {
+  opacity: 1;
+}
+
+.ide__search-row-replace:hover {
+  background: #007acc;
+  border-color: #007acc;
+  color: #ffffff;
+}
+
 .ide__search-options {
   display: flex;
   flex-direction: column;
@@ -2603,6 +2675,91 @@ html, body, .ide {
   gap: 8px;
 }
 
+/* 全局替换预览弹窗 */
+.ide__replace-modal {
+  background: #252526;
+  border: 1px solid #3e3e42;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  padding: 16px;
+  width: 560px;
+  max-width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ide__replace-modal-title {
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ide__replace-modal-list {
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  padding: 6px 8px;
+  background: #1e1e1e;
+}
+
+.ide__replace-file {
+  color: #9cdcfe;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 0 2px;
+}
+
+.ide__replace-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 12px;
+  overflow: hidden;
+}
+
+.ide__replace-pos {
+  color: #858585;
+  flex-shrink: 0;
+  width: 64px;
+}
+
+.ide__replace-old {
+  color: #f48771;
+  text-decoration: line-through;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide__replace-arrow {
+  color: #858585;
+  flex-shrink: 0;
+}
+
+.ide__replace-new {
+  color: #89d185;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide__replace-hint {
+  color: #858585;
+  font-size: 11px;
+}
+
+.ide__replace-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .ide__prompt-btn {
   background: #3c3c3c;
   border: 1px solid #3e3e42;
@@ -2719,6 +2876,61 @@ html, body, .ide {
 .ide.ide--light .ide__prompt-box {
   background: #ffffff;
   border-color: #e5e5e5;
+}
+
+.ide.ide--light .ide__replace-modal {
+  background: #ffffff;
+  border-color: #e5e5e5;
+}
+
+.ide.ide--light .ide__replace-modal-title {
+  color: #333333;
+}
+
+.ide.ide--light .ide__replace-modal-list {
+  background: #f8f8f8;
+  border-color: #e5e5e5;
+}
+
+.ide.ide--light .ide__replace-file {
+  color: #0b4d8f;
+}
+
+.ide.ide--light .ide__replace-old {
+  color: #c75450;
+}
+
+.ide.ide--light .ide__replace-new {
+  color: #1a7f37;
+}
+
+.ide.ide--light .ide__replace-hint {
+  color: #888888;
+}
+
+.ide.ide--light .ide__search-replace-toggle,
+.ide.ide--light .ide__search-replace-all {
+  background: #ffffff;
+  border-color: #e5e5e5;
+  color: #333333;
+}
+
+.ide.ide--light .ide__search-replace-toggle.is-active {
+  background: #007acc;
+  border-color: #007acc;
+  color: #ffffff;
+}
+
+.ide.ide--light .ide__search-replace-all:hover,
+.ide.ide--light .ide__search-row-replace:hover {
+  background: #007acc;
+  border-color: #007acc;
+  color: #ffffff;
+}
+
+.ide.ide--light .ide__search-row-replace {
+  border-color: #e5e5e5;
+  color: #0b4d8f;
 }
 
 .ide.ide--light .ide__prompt-label {

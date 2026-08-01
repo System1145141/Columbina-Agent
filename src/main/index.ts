@@ -3427,6 +3427,10 @@ interface IdeSearchResult {
   line: number;
   column: number;
   text: string;
+  /** 匹配到的原始文本（用于替换预览） */
+  matchText?: string;
+  /** 匹配长度（字符数，用于精确替换定位） */
+  matchLength?: number;
 }
 
 const IDE_SEARCH_IGNORE_DIRS = new Set(["node_modules", ".git", "dist", "build", ".cache", "coverage"]);
@@ -3470,14 +3474,20 @@ function searchInDirectory(
         for (let i = 0; i < lines.length && results.length < maxResults; i++) {
           const lineText = lines[i];
           regex.lastIndex = 0;
-          const match = regex.exec(lineText);
-          if (match) {
+          let match: RegExpExecArray | null;
+          // 收集该行的全部匹配（正则已带 g/gi 标志）
+          while ((match = regex.exec(lineText)) !== null) {
             results.push({
               filePath: fullPath,
               line: i + 1,
               column: match.index + 1,
+              matchText: match[0],
+              matchLength: match[0].length,
               text: lineText.trim(),
             });
+            if (results.length >= maxResults) break;
+            // 空匹配时推进游标，避免死循环
+            if (match[0].length === 0) regex.lastIndex++;
           }
         }
       } catch {

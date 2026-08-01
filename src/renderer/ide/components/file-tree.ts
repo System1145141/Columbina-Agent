@@ -17,6 +17,10 @@ import {
   basename,
   pickFolder,
   copyText,
+  readFileEncoded,
+  writeFile,
+  normalizeLineEndings,
+  detectLineEnding,
 } from "../services/file-service";
 import { showSearchPanel, toggleSearchPanel, hideSearchPanel } from "../services/layout";
 import { relocateRoot, closeTabsForRoot } from "../services/workspace-service";
@@ -29,6 +33,9 @@ const addFolderBtn = document.getElementById("add-folder-btn") as HTMLButtonElem
 const searchToggleBtn = document.getElementById("search-toggle-btn") as HTMLButtonElement;
 const searchBackBtn = document.getElementById("search-back-btn") as HTMLButtonElement;
 const searchInputEl = document.getElementById("search-input") as HTMLInputElement;
+const searchReplaceToggleBtn = document.getElementById("search-replace-toggle") as HTMLButtonElement;
+const searchReplaceRowEl = document.getElementById("search-replace-row") as HTMLElement;
+const searchReplaceInputEl = document.getElementById("search-replace-input") as HTMLInputElement;
 const searchCaseEl = document.getElementById("search-case") as HTMLInputElement;
 const searchWordEl = document.getElementById("search-word") as HTMLInputElement;
 const searchRegexEl = document.getElementById("search-regex") as HTMLInputElement;
@@ -558,10 +565,46 @@ async function runSearch() {
   }
 }
 
+interface ReplaceChange {
+  filePath: string;
+  line: number; // 1-based
+  column: number; // 1-based
+  matchLength: number;
+  matchText: string;
+  replacement: string;
+}
+
+let lastResultsByRoot: Map<string, import("../services/state").IdeSearchResult[]> | null = null;
+let lastSearchTitle: string | undefined;
+let lastAllowReplace = true;
+let replaceMode = false;
+
+function buildReplaceChanges(
+  results: import("../services/state").IdeSearchResult[],
+  replacement: string
+): ReplaceChange[] {
+  return results
+    .filter((r) => (r.matchLength ?? 0) > 0)
+    .map((r) => ({
+      filePath: r.filePath,
+      line: r.line,
+      column: r.column,
+      matchLength: r.matchLength ?? r.matchText?.length ?? 0,
+      matchText: r.matchText ?? "",
+      replacement,
+    }));
+}
+
 function renderSearchResults(
   resultsByRoot: Map<string, import("../services/state").IdeSearchResult[]>,
-  title?: string
+  title?: string,
+  allowReplace = true
 ) {
+  lastResultsByRoot = resultsByRoot;
+  lastSearchTitle = title;
+  lastAllowReplace = allowReplace;
+  const canReplace = allowReplace && replaceMode;
+
   searchResultsEl.innerHTML = "";
   let total = 0;
   for (const items of resultsByRoot.values()) total += items.length;
@@ -572,7 +615,31 @@ function renderSearchResults(
 
   const summary = document.createElement("div");
   summary.className = "ide__search-summary";
-  summary.textContent = title ? `${title} (${total})` : `共 ${total} 条结果`;
+  const summaryText = document.createElement("span");
+  summaryText.textContent = title ? `${title} (${total})` : `共 ${total} 条结果`;
+  summary.appendChild(summaryText);
+
+  if (canReplace) {
+    const replaceAllBtn = document.createElement("button");
+    replaceAllBtn.type = "button";
+    replaceAllBtn.className = "ide__search-replace-all";
+    replaceAllBtn.textContent = "替换全部";
+    replaceAllBtn.addEventListener("click", () => {
+      const replacement = searchReplaceInputEl.value;
+      if (!replacement) {
+        alert("请输入替换内容");
+        return;
+      }
+      const all = Array.from(resultsByRoot.values()).flat();
+      const changes = buildReplaceChanges(all, replacement);
+      if (changes.length === 0) {
+        alert("没有可替换的匹配项");
+        return;
+      }
+      showReplacePreview(changes, () => void applyReplacements(changes));
+    });
+    summary.appendChild(replaceAllBtn);
+  }
   searchResultsEl.appendChild(summary);
 
   for (const [rootId, results] of resultsByRoot) {
@@ -618,6 +685,24 @@ function renderSearchResults(
         row.appendChild(lineNo);
         row.appendChild(text);
         row.addEventListener("click", () => void openFile(item.filePath, item.line, item.column));
+        if (canReplace) {
+          const repBtn = document.createElement("button");
+          repBtn.type = "button";
+          repBtn.className = "ide__search-row-replace";
+          repBtn.textContent = "替换";
+          repBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const replacement = searchReplaceInputEl.value;
+            if (!replacement) {
+              alert("请输入替换内容");
+              return;
+            }
+            const changes = buildReplaceChanges([item], replacement);
+            if (changes.length === 0) return;
+            showReplacePreview(changes, () => void applyReplacements(changes));
+          });
+          row.appendChild(repBtn);
+        }
         fileGroup.appendChild(row);
       }
 
@@ -626,6 +711,157 @@ function renderSearchResults(
 
     searchResultsEl.appendChild(rootGroup);
   }
+}
+
+function showReplacePreview(changes: ReplaceChange[], onConfirm: () => void): void {
+  const overlay = document.createElement("div");
+  overlay.className = "ide__prompt-overlay";
+  overlay.style.zIndex = "1200";
+
+  const box = document.createElement("div");
+  box.className = "ide__replace-modal";
+
+  const title = document.createElement("div");
+  title.className = "ide__replace-modal-title";
+  title.textContent = `替换预览（${changes.length} 处）`;
+
+  const list = document.createElement("div");
+  list.className = "ide__replace-modal-list";
+  const byFile = new Map<string, ReplaceChange[]>();
+  for (const c of changes) {
+    const l = byFile.get(c.filePath) || [];
+    l.push(c);
+    byFile.set(c.filePath, l);
+  }
+  for (const [filePath, items] of byFile) {
+    const fileHeader = document.createElement("div");
+    fileHeader.className = "ide__replace-file";
+    fileHeader.textContent = basename(filePath);
+    fileHeader.title = filePath;
+    list.appendChild(fileHeader);
+    for (const item of items) {
+      const row = document.createElement("div");
+      row.className = "ide__replace-item";
+      const pos = document.createElement("span");
+      pos.className = "ide__replace-pos";
+      pos.textContent = `${item.line}:${item.column}`;
+      const oldT = document.createElement("span");
+      oldT.className = "ide__replace-old";
+      oldT.textContent = item.matchText || "(空匹配)";
+      const arrow = document.createElement("span");
+      arrow.className = "ide__replace-arrow";
+      arrow.textContent = "→";
+      const newT = document.createElement("span");
+      newT.className = "ide__replace-new";
+      newT.textContent = item.replacement || "(空)";
+      row.append(pos, oldT, arrow, newT);
+      list.appendChild(row);
+    }
+  }
+
+  const hint = document.createElement("div");
+  hint.className = "ide__replace-hint";
+  hint.textContent = "确认后将直接写入磁盘（如需撤销可借助 Git 或手动改回）";
+
+  const actions = document.createElement("div");
+  actions.className = "ide__replace-actions";
+  const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
+  cancelBtn.className = "ide__prompt-btn";
+  cancelBtn.textContent = "取消";
+  const confirmBtn = document.createElement("button");
+  confirmBtn.type = "button";
+  confirmBtn.className = "ide__prompt-btn ide__prompt-btn--primary";
+  confirmBtn.textContent = "全部替换";
+  actions.append(cancelBtn, confirmBtn);
+
+  const close = () => overlay.remove();
+  cancelBtn.addEventListener("click", close);
+  confirmBtn.addEventListener("click", () => {
+    close();
+    onConfirm();
+  });
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close();
+  });
+
+  box.append(title, list, hint, actions);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+}
+
+/** 将替换结果同步到已打开标签与编辑器 */
+function syncTabAfterWrite(filePath: string, rawContent: string): void {
+  const tab = state.tabs.get(filePath);
+  if (!tab || tab.kind === "diff") return;
+  const content = normalizeLineEndings(rawContent);
+  tab.initialContent = content;
+  tab.currentContent = content;
+  tab.modified = false;
+  tab.lineEnding = detectLineEnding(rawContent);
+  if (state.editorView && state.activeTabId === tab.id) {
+    const view = state.editorView;
+    const prevHead = view.state.selection.main.head;
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: content },
+      selection: { anchor: Math.min(prevHead, content.length) },
+    });
+  }
+}
+
+async function applyReplacements(changes: ReplaceChange[]): Promise<void> {
+  if (changes.length === 0) return;
+  const byFile = new Map<string, ReplaceChange[]>();
+  for (const c of changes) {
+    const list = byFile.get(c.filePath) || [];
+    list.push(c);
+    byFile.set(c.filePath, list);
+  }
+
+  let applied = 0;
+  const failures: string[] = [];
+  for (const [filePath, items] of byFile) {
+    let fileApplied = 0;
+    try {
+      const encoded = await readFileEncoded(filePath);
+      const content = encoded.content;
+      // 基于原始内容计算每行起始偏移，保证行尾（CRLF/LF）不被破坏
+      const starts: number[] = [0];
+      for (let i = 0; i < content.length; i++) {
+        if (content[i] === "\n") starts.push(i + 1);
+      }
+      const offsetOf = (c: ReplaceChange) => (starts[c.line - 1] ?? content.length) + c.column - 1;
+      const sorted = [...items].sort((a, b) => offsetOf(b) - offsetOf(a));
+      let result = content;
+      for (const item of sorted) {
+        const start = offsetOf(item);
+        const end = Math.min(start + Math.max(0, item.matchLength), result.length);
+        if (start < 0 || start > result.length || end < start) continue;
+        result = result.slice(0, start) + item.replacement + result.slice(end);
+        fileApplied++;
+      }
+      const writeRes = await writeFile(filePath, result, encoded.encoding);
+      if (!writeRes.ok) {
+        failures.push(`${basename(filePath)}: ${writeRes.error}`);
+        fileApplied = 0;
+      } else {
+        syncTabAfterWrite(filePath, result);
+      }
+    } catch (err) {
+      failures.push(`${basename(filePath)}: ${String(err)}`);
+      fileApplied = 0;
+    }
+    applied += fileApplied;
+  }
+
+  notify();
+  if (failures.length > 0) {
+    alert(`替换部分完成：成功 ${applied} 处；失败文件：\n${failures.join("\n")}`);
+  } else {
+    state.statusMessage = `已替换 ${applied} 处`;
+  }
+  // 刷新搜索结果，反映替换后的内容
+  void runSearch();
 }
 
 export function showReferencesResults(results: import("../services/state").IdeSearchResult[]): void {
@@ -639,7 +875,7 @@ export function showReferencesResults(results: import("../services/state").IdeSe
     list.push(r);
     map.set(key, list);
   }
-  renderSearchResults(map, `引用`);
+  renderSearchResults(map, `引用`, false);
 }
 
 export function initFileTree(): void {
@@ -662,6 +898,26 @@ export function initFileTree(): void {
     if (e.key === "Enter") {
       e.preventDefault();
       void runSearch();
+    }
+  });
+  searchReplaceToggleBtn.addEventListener("click", () => {
+    replaceMode = !replaceMode;
+    searchReplaceRowEl.style.display = replaceMode ? "flex" : "none";
+    searchReplaceToggleBtn.classList.toggle("is-active", replaceMode);
+    if (lastResultsByRoot) {
+      renderSearchResults(lastResultsByRoot, lastSearchTitle, lastAllowReplace);
+    }
+  });
+  searchReplaceInputEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (!lastResultsByRoot || !replaceMode) return;
+      const replacement = searchReplaceInputEl.value;
+      if (!replacement) return;
+      const all = Array.from(lastResultsByRoot.values()).flat();
+      const changes = buildReplaceChanges(all, replacement);
+      if (changes.length === 0) return;
+      showReplacePreview(changes, () => void applyReplacements(changes));
     }
   });
 

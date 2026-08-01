@@ -38,7 +38,13 @@
           </div>
         </div>
         <div class="ide__search" id="search-panel" style="display: none;">
-          <input type="text" class="ide__search-input" id="search-input" placeholder="搜索" />
+          <div class="ide__search-input-row">
+            <input type="text" class="ide__search-input" id="search-input" placeholder="搜索" />
+            <button type="button" class="ide__search-replace-toggle" id="search-replace-toggle" title="切换替换模式">⬅</button>
+          </div>
+          <div class="ide__search-replace-row" id="search-replace-row" style="display: none;">
+            <input type="text" class="ide__search-input" id="search-replace-input" placeholder="替换为" />
+          </div>
           <div class="ide__search-options">
             <label><input type="checkbox" id="search-case" /> 区分大小写</label>
             <label><input type="checkbox" id="search-word" /> 全词匹配</label>
