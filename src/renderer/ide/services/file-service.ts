@@ -20,6 +20,7 @@ import {
   type WorkspaceRoot,
 } from "./state";
 import { fileEncodingLabel } from "../../../shared/file-encoding";
+import { recordRecentFile, removeRecentFile } from "./recent-files";
 
 export function basename(filePath: string): string {
   return filePath.replace(/\\/g, "/").split("/").pop() || filePath;
@@ -176,6 +177,7 @@ export async function openFile(filePath: string, anchorLine = 1, anchorCol = 1):
   if (state.tabs.has(filePath)) {
     state.pendingAnchor = { line: anchorLine, col: anchorCol };
     setActiveTab(filePath);
+    void recordRecentFile(filePath);
     notify();
     return;
   }
@@ -220,6 +222,7 @@ export async function openFile(filePath: string, anchorLine = 1, anchorCol = 1):
     state.pendingAnchor = { line: anchorLine, col: anchorCol };
     setActiveTab(filePath);
     registerFileWatch(filePath);
+    void recordRecentFile(filePath);
     notify();
   } catch (err) {
     state.statusMessage = `读取失败: ${String(err)}`;
@@ -348,6 +351,7 @@ export async function refreshAfterDelete(filePath: string, isDirectory: boolean)
   if (!isDirectory && state.tabs.has(filePath)) {
     closeTabState(filePath);
     unregisterFileWatch(filePath);
+    void removeRecentFile(filePath);
   }
   notify();
 }
@@ -400,6 +404,7 @@ async function handleExternalFileChanged(filePath: string, deleted: boolean): Pr
     }
     closeTabState(filePath);
     unregisterFileWatch(filePath);
+    void removeRecentFile(filePath);
     state.statusMessage = `文件已在外部被删除: ${tab.fileName}`;
     notify();
     return;

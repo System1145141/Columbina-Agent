@@ -25,6 +25,7 @@ import {
   toggleOutlinePanel,
 } from "../services/layout";
 import { saveWorkspace, openWorkspace } from "../services/workspace-service";
+import { getRecentFiles } from "../services/recent-files";
 
 const commandPanelEl = document.getElementById("command-panel") as HTMLElement;
 const commandInputEl = document.getElementById("command-input") as HTMLInputElement;
@@ -63,6 +64,12 @@ function getBaseCommands(): CommandItem[] {
       icon: "📄",
       shortcut: "Ctrl+P",
       run: () => showQuickOpen(),
+    },
+    {
+      id: "recent-files",
+      label: "最近打开的文件",
+      icon: "🕘",
+      run: () => void showRecentFilesCommand(),
     },
     {
       id: "save-file",
@@ -172,6 +179,34 @@ function getBaseCommands(): CommandItem[] {
   ];
 }
 
+function isPathUnderRoot(filePath: string, rootPath: string): boolean {
+  const fp = filePath.replace(/\\/g, "/");
+  const rp = rootPath.replace(/\\/g, "/");
+  return fp === rp || fp.startsWith(rp.endsWith("/") ? rp : rp + "/");
+}
+
+function recentFileLabel(path: string): string {
+  const root = getRootForPath(path);
+  return root ? path.replace(root.path.replace(/\\/g, "/") + "/", "") : path;
+}
+
+function buildRecentFileCommands(): Promise<CommandItem[]> {
+  return getRecentFiles().then((entries) =>
+    entries
+      // 仅展示当前工作区内的最近文件（工作区外文件无法通过 IDE 路径校验打开）
+      .filter((e) => state.roots.some((r) => isPathUnderRoot(e.path, r.path)))
+      .map((e) => ({
+        id: `recent-file:${e.path}`,
+        label: recentFileLabel(e.path),
+        icon: "🕘",
+        run: () => {
+          void openFile(e.path);
+          hideCommandPalette();
+        },
+      }))
+  );
+}
+
 async function showQuickOpen() {
   state.commandPaletteVisible = true;
   commandPanelEl.style.display = "flex";
@@ -200,24 +235,59 @@ async function showQuickOpen() {
   state.commandSelectedIndex = -1;
   renderCommandList();
 
-  const files: import("../services/state").IdeDirEntry[] = [];
-  for (const root of state.roots) {
-    files.push(...(await collectFilesForQuickOpen(root.path)));
+  const [recentItems, files] = await Promise.all([
+    buildRecentFileCommands(),
+    (async () => {
+      const all: import("../services/state").IdeDirEntry[] = [];
+      for (const root of state.roots) {
+        all.push(...(await collectFilesForQuickOpen(root.path)));
+      }
+      return all;
+    })(),
+  ]);
+
+  const recentPaths = new Set(recentItems.map((c) => c.id.replace(/^recent-file:/, "")));
+  const fileItems = files
+    .filter((f) => !recentPaths.has(f.path))
+    .map((f) => {
+      const root = getRootForPath(f.path);
+      const label = root ? f.path.replace(root.path.replace(/\\/g, "/") + "/", "") : f.path;
+      return {
+        id: `file:${f.path}`,
+        label,
+        icon: "📄",
+        run: () => {
+          void openFile(f.path);
+          hideCommandPalette();
+        },
+      };
+    });
+
+  state.fileCommandItems = [...recentItems, ...fileItems];
+  state.commandItems = [...recentItems, ...fileItems].slice(0, 50);
+  state.commandSelectedIndex = state.commandItems.length > 0 ? 0 : -1;
+  renderCommandList();
+}
+
+/** 命令面板「最近打开的文件」：仅展示最近文件列表 */
+async function showRecentFilesCommand() {
+  state.commandPaletteVisible = true;
+  commandPanelEl.style.display = "flex";
+  commandInputEl.placeholder = "最近打开的文件";
+  commandInputEl.value = "";
+  commandInputEl.focus();
+  state.fileCommandItems = [];
+
+  const recent = await buildRecentFileCommands();
+  if (recent.length === 0) {
+    recent.push({
+      id: "__no-recent-files__",
+      label: "暂无最近打开的文件",
+      icon: "",
+      run: () => {},
+    });
   }
-  state.fileCommandItems = files.map((f) => {
-    const root = getRootForPath(f.path);
-    const label = root ? f.path.replace(root.path.replace(/\\/g, "/") + "/", "") : f.path;
-    return {
-      id: `file:${f.path}`,
-      label,
-      icon: "📄",
-      run: () => {
-        void openFile(f.path);
-        hideCommandPalette();
-      },
-    };
-  });
-  state.commandItems = state.fileCommandItems.slice(0, 50);
+  state.commandItems = recent;
   state.commandSelectedIndex = state.commandItems.length > 0 ? 0 : -1;
   renderCommandList();
 }
