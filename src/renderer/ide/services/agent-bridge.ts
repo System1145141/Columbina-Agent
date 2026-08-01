@@ -12,6 +12,7 @@ import {
   setAiCurrentPlan,
   setAiTaskPlanRunning,
   clearInlineCompletion,
+  getRootForPath,
 } from "./state";
 import { ensureActiveSession } from "./ai-sessions";
 import { previewRenameSymbol, applyRefactorChanges } from "../components/lsp-integration";
@@ -186,9 +187,11 @@ export async function collectGitChangesForReview(): Promise<string> {
       ...new Set([...status.staged, ...status.modified, ...status.conflicted, ...status.untracked]),
     ];
     parts.push(`【${root.name}】分支 ${status.branch || "(未在分支上)"}，共 ${files.length} 个变更文件（已暂存 ${status.staged.length} / 已修改 ${status.modified.length} / 未跟踪 ${status.untracked.length} / 冲突 ${status.conflicted.length}）`);
-    for (const relPath of files.slice(0, MAX_REVIEW_FILES)) {
+    for (const rawRel of files.slice(0, MAX_REVIEW_FILES)) {
       if (totalChars >= MAX_REVIEW_CHARS) break;
-      const absPath = `${root.path}/${relPath.replace(/\\/g, "/")}`;
+      // 统一为 POSIX 分隔符：git status --porcelain 输出恒为正斜杠，规范化后同时用于展示与 diff 传参，保证一致
+      const relPath = rawRel.replace(/\\/g, "/");
+      const absPath = `${root.path.replace(/\\/g, "/")}/${relPath}`;
       let content: string;
       try {
         const isUntracked = status.untracked.includes(relPath) && !status.staged.includes(relPath);
@@ -319,7 +322,7 @@ export async function executeAction(action: AgentAction): Promise<AgentActionRes
         }
       }
       try {
-        const root = state.roots.find((r) => target!.startsWith(r.path) || r.path.startsWith(target!));
+        const root = getRootForPath(target);
         const rootPath = root?.path || "";
         const raw = await readFile(target);
         const framework = await detectTestFramework(rootPath);
