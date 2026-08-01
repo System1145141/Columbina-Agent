@@ -108,6 +108,54 @@ export async function buildPersonaPrompt(userText: string): Promise<string> {
   );
 }
 
+export interface AgentModelInfo {
+  id: string;
+  nickname: string;
+}
+
+/**
+ * 读取已保存的模型配置（与聊天模式共享 window.modelConfig）。
+ * 返回模型列表与当前身份应选中的模型 id（角色选择 → 全局默认 → 空）。
+ */
+export async function loadAgentModels(): Promise<{ models: AgentModelInfo[]; selectedId: string }> {
+  const identity = state.ideSettings.agentIdentity || "columbina";
+  try {
+    const config = (await window.modelConfig?.get()) as {
+      models?: { id: string; nickname?: string; model?: string }[];
+      defaultModelId?: string;
+      selectedModelIds?: Record<string, string>;
+    } | null;
+    if (!config || !Array.isArray(config.models)) return { models: [], selectedId: "" };
+    const models: AgentModelInfo[] = config.models.map((m) => ({
+      id: m.id,
+      nickname: m.nickname || m.model || m.id,
+    }));
+    const valid = (id?: string) => Boolean(id && models.some((m) => m.id === id));
+    const selectedId = valid(config.selectedModelIds?.[identity])
+      ? config.selectedModelIds![identity]
+      : valid(config.defaultModelId)
+        ? config.defaultModelId!
+        : "";
+    return { models, selectedId };
+  } catch {
+    return { models: [], selectedId: "" };
+  }
+}
+
+/** 设置当前身份的 Agent 模型，并持久化到共享的 modelConfig（与聊天模式同步） */
+export async function setAgentModel(modelId: string): Promise<void> {
+  state.aiModelId = modelId;
+  notify();
+  const identity = state.ideSettings.agentIdentity || "columbina";
+  try {
+    const config = (await window.modelConfig?.get()) as { selectedModelIds?: Record<string, string> } | null;
+    const selectedModelIds = { ...(config?.selectedModelIds || {}), [identity]: modelId };
+    await window.modelConfig?.saveSelectedModelIds(selectedModelIds);
+  } catch (err) {
+    console.error("[IDE] save selected model failed:", err);
+  }
+}
+
 export function buildToolsPrompt(): string {
   const pluginToolLines: string[] = [];
   for (const tool of state.pluginTools) {
@@ -562,6 +610,7 @@ export async function callAgentStream(prompt: string): Promise<{ content: string
     window.agui?.run({
       messages: [{ role: "user", content: prompt }],
       style: "chat",
+      modelId: state.aiModelId || undefined,
     }).then((ack) => {
       if (!ack?.success) {
         reject(new Error(ack?.error || "Agent 启动失败"));

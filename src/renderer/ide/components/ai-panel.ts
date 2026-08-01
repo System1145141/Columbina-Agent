@@ -7,6 +7,8 @@ import {
   undoLastWrite,
   resolveActionConfirmation,
   formatActionLabel,
+  loadAgentModels,
+  setAgentModel,
 } from "../services/agent-bridge";
 import { toggleAiPanel, hideAiPanel } from "../services/layout";
 import {
@@ -28,6 +30,7 @@ const aiMessagesEl = document.getElementById("ai-messages") as HTMLElement;
 const aiInputEl = document.getElementById("ai-input") as HTMLTextAreaElement;
 const aiSendBtn = document.getElementById("ai-send-btn") as HTMLButtonElement;
 const aiContextSelectEl = document.getElementById("ai-context-select") as HTMLSelectElement;
+const aiModelSelectEl = document.getElementById("ai-model-select") as HTMLSelectElement;
 const aiUndoBtn = document.getElementById("ai-undo-btn") as HTMLButtonElement;
 const aiSessionBtn = document.getElementById("ai-session-btn") as HTMLButtonElement;
 const aiInputAreaEl = document.querySelector(".ide__ai-input-area") as HTMLElement;
@@ -329,11 +332,38 @@ function renderAiPlan() {
   aiMessagesEl.parentElement?.insertBefore(card, aiMessagesEl);
 }
 
+/** 记录上次填充模型下拉时的身份，身份变化时重填 */
+let lastModelIdentity = "";
+
+/** 从 modelConfig 加载模型列表并按当前身份填充下拉 */
+async function refreshModelSelect(): Promise<void> {
+  const { models, selectedId } = await loadAgentModels();
+  aiModelSelectEl.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = models.length > 0 ? "选择模型" : "未配置模型";
+  aiModelSelectEl.appendChild(placeholder);
+  for (const m of models) {
+    const opt = document.createElement("option");
+    opt.value = m.id;
+    opt.textContent = m.nickname;
+    aiModelSelectEl.appendChild(opt);
+  }
+  aiModelSelectEl.value = selectedId;
+  if (state.aiModelId !== selectedId) state.aiModelId = selectedId;
+}
+
 function updateAiPanel() {
   if (!state.aiPanelVisible) hideSessionMenu();
   aiPanelEl.style.display = state.aiPanelVisible ? "flex" : "none";
   aiSendBtn.disabled = state.aiRunning;
   aiUndoBtn.disabled = state.fileSnapshots.size === 0;
+  // 身份切换时重填模型下拉（哥伦比娅 / 桑多涅各自记忆所选模型）
+  const identity = state.ideSettings.agentIdentity || "columbina";
+  if (identity !== lastModelIdentity) {
+    lastModelIdentity = identity;
+    void refreshModelSelect();
+  }
   renderSessionButton();
   renderAiMessages();
   renderAiPlan();
@@ -375,6 +405,9 @@ export function initAiPanel(): void {
     }
   });
   aiUndoBtn.addEventListener("click", () => void undoLastWrite());
+  aiModelSelectEl.addEventListener("change", () => {
+    void setAgentModel(aiModelSelectEl.value);
+  });
 
   if (aiInputAreaEl && !aiPlanModeCb) {
     const label = document.createElement("label");
@@ -387,5 +420,6 @@ export function initAiPanel(): void {
     aiInputAreaEl.insertBefore(label, aiInputAreaEl.firstChild);
   }
 
+  void refreshModelSelect();
   updateAiPanel();
 }

@@ -258,6 +258,8 @@ export const state = {
 
   aiPanelVisible: false,
   aiMessages: [] as AiMessage[],
+  /** 当前 Agent 使用的模型 id（与聊天模式共享，按身份持久化）；空串 = 跟随全局默认 */
+  aiModelId: "",
   /** 多会话：所有 Agent 会话（切换/复制/重命名/删除）；aiMessages 恒为当前会话的消息数组 */
   aiSessions: [] as AiSession[],
   activeAiSessionId: "" as string,
@@ -717,6 +719,15 @@ declare global {
       }) => Promise<{ success: boolean; error?: string }>;
       onEvent: (callback: (event: unknown) => void) => () => void;
       cancel: () => Promise<boolean>;
+    };
+    modelConfig?: {
+      get: () => Promise<{
+        models?: { id: string; nickname?: string; model?: string; provider?: string }[];
+        defaultModelId?: string;
+        selectedModelIds?: Record<string, string>;
+        connected?: boolean;
+      }>;
+      saveSelectedModelIds: (selectedModelIds: Record<string, string>) => Promise<unknown>;
     };
   }
 }

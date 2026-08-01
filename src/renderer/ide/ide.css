@@ -2315,6 +2315,12 @@ html, body, .ide {
   color: #bbbbbb;
 }
 
+.ide__ai-context-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .ide__ai-context-select {
   background: #3c3c3c;
   border: 1px solid #3e3e42;

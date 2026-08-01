@@ -118,14 +118,20 @@
         </div>
         <div class="ide__ai-messages" id="ai-messages"></div>
         <div class="ide__ai-input-area">
-          <div class="ide__ai-context">
-            <label class="ide__ai-context-label">上下文:</label>
-            <select id="ai-context-select" class="ide__ai-context-select">
-              <option value="file">当前文件</option>
-              <option value="selection">当前选区</option>
-              <option value="project">整个项目</option>
-              <option value="git">Git 变更</option>
-            </select>
+          <div class="ide__ai-context-row">
+            <div class="ide__ai-context">
+              <label class="ide__ai-context-label">模型:</label>
+              <select id="ai-model-select" class="ide__ai-context-select" title="选择当前身份使用的模型"></select>
+            </div>
+            <div class="ide__ai-context">
+              <label class="ide__ai-context-label">上下文:</label>
+              <select id="ai-context-select" class="ide__ai-context-select">
+                <option value="file">当前文件</option>
+                <option value="selection">当前选区</option>
+                <option value="project">整个项目</option>
+                <option value="git">Git 变更</option>
+              </select>
+            </div>
           </div>
           <div class="ide__ai-input-row">
             <textarea id="ai-input" class="ide__ai-input" placeholder="询问关于代码的问题..." rows="2"></textarea>
