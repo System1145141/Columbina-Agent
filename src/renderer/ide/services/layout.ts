@@ -44,6 +44,7 @@ export async function loadIdeSettings(): Promise<void> {
           tabSize: typeof saved.tabSize === "number" && Number.isFinite(saved.tabSize)
             ? Math.max(1, Math.min(8, Math.round(saved.tabSize)))
             : state.ideSettings.tabSize,
+          insertSpaces: typeof saved.insertSpaces === "boolean" ? saved.insertSpaces : state.ideSettings.insertSpaces,
           autoSave: typeof saved.autoSave === "boolean" ? saved.autoSave : state.ideSettings.autoSave,
           languageServers: saved.languageServers && typeof saved.languageServers === "object"
             ? saved.languageServers

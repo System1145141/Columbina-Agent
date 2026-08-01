@@ -1,49 +1,128 @@
 import { diagnosticCount } from "@codemirror/lint";
-import { state, subscribe, getLspDiagnostics, getGitStatusForRoot, getActiveRoot } from "../services/state";
-import { getFileExtension, lineEndingLabel, changeTabEncoding } from "../services/file-service";
+import {
+  state,
+  subscribe,
+  notify,
+  getLspDiagnostics,
+  getGitStatusForRoot,
+  getActiveRoot,
+  getLanguageLabel,
+  LANGUAGE_MODES,
+} from "../services/state";
+import { lineEndingLabel, changeTabEncoding, changeTabLineEnding } from "../services/file-service";
 import { fileEncodingLabel, FILE_ENCODINGS, type FileEncoding } from "../../../shared/file-encoding";
+import { saveIdeSettings } from "../services/layout";
 
 const statusLeftEl = document.getElementById("status-left") as HTMLElement;
 const statusRightEl = document.getElementById("status-right") as HTMLElement;
 
-let encodingMenu: HTMLElement | null = null;
+interface MenuItem {
+  label: string;
+  active?: boolean;
+  onClick: () => void;
+}
 
-function hideEncodingMenu(): void {
-  if (encodingMenu) {
-    encodingMenu.remove();
-    encodingMenu = null;
+let menu: HTMLElement | null = null;
+
+function hideMenu(): void {
+  if (menu) {
+    menu.remove();
+    menu = null;
   }
 }
 
-function showEncodingMenu(anchorEl: HTMLElement): void {
-  hideEncodingMenu();
-  const tab = state.activeTabId ? state.tabs.get(state.activeTabId) : null;
-  if (!tab) return;
+function showMenu(anchorEl: HTMLElement, items: MenuItem[]): void {
+  hideMenu();
+  const menuEl = document.createElement("div");
+  menuEl.className = "ide__context-menu";
 
-  const menu = document.createElement("div");
-  menu.className = "ide__context-menu ide__encoding-menu";
-
-  for (const enc of FILE_ENCODINGS) {
+  for (const item of items) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "ide__context-menu-item";
-    const isCurrent = tab.encoding === enc;
-    btn.textContent = (isCurrent ? "✓ " : "") + fileEncodingLabel(enc as FileEncoding);
-    if (isCurrent) btn.classList.add("is-active");
+    btn.textContent = (item.active ? "✓ " : "") + item.label;
+    if (item.active) btn.classList.add("is-active");
     btn.addEventListener("click", () => {
-      hideEncodingMenu();
-      if (state.activeTabId) changeTabEncoding(state.activeTabId, enc);
+      hideMenu();
+      item.onClick();
     });
-    menu.appendChild(btn);
+    menuEl.appendChild(btn);
   }
 
-  document.body.appendChild(menu);
-
+  document.body.appendChild(menuEl);
   const rect = anchorEl.getBoundingClientRect();
-  menu.style.left = `${Math.max(8, rect.left)}px`;
-  menu.style.bottom = `${window.innerHeight - rect.top + 6}px`;
+  menuEl.style.left = `${Math.max(8, rect.left)}px`;
+  menuEl.style.bottom = `${window.innerHeight - rect.top + 6}px`;
+  menu = menuEl;
+}
 
-  encodingMenu = menu;
+function appendIndicator(container: HTMLElement, label: string, title: string, onMenu: (el: HTMLElement) => void): void {
+  const span = document.createElement("span");
+  span.className = "ide__status-encoding";
+  span.textContent = label;
+  span.title = title;
+  span.addEventListener("click", (e) => {
+    e.stopPropagation();
+    onMenu(span);
+  });
+  container.appendChild(span);
+}
+
+// ── 各指示器菜单 ──
+
+function showLanguageMenu(anchor: HTMLElement, filePath: string): void {
+  const currentLabel = getLanguageLabel(filePath);
+  const items: MenuItem[] = LANGUAGE_MODES.map((m) => ({
+    label: m.label,
+    active: currentLabel === m.label,
+    onClick: () => {
+      state.fileLanguageOverrides[filePath] = m.id;
+      state.editorRecreateVersion++;
+      notify();
+      state.statusMessage = `语言模式已切换为 ${m.label}`;
+      notify();
+    },
+  }));
+  showMenu(anchor, items);
+}
+
+function indentLabel(): string {
+  const size = state.ideSettings.tabSize;
+  return state.ideSettings.insertSpaces === false ? `制表符: ${size}` : `空格: ${size}`;
+}
+
+function showIndentMenu(anchor: HTMLElement): void {
+  const current = indentLabel();
+  const options: { label: string; tabSize: number; insertSpaces: boolean }[] = [
+    { label: "空格: 2", tabSize: 2, insertSpaces: true },
+    { label: "空格: 4", tabSize: 4, insertSpaces: true },
+    { label: "空格: 8", tabSize: 8, insertSpaces: true },
+    { label: "制表符: 4", tabSize: 4, insertSpaces: false },
+  ];
+  showMenu(anchor, options.map((o) => ({
+    label: o.label,
+    active: o.label === current,
+    onClick: () => void saveIdeSettings({ tabSize: o.tabSize, insertSpaces: o.insertSpaces }),
+  })));
+}
+
+function showLineEndingMenu(anchor: HTMLElement, tabId: string): void {
+  const tab = state.tabs.get(tabId);
+  if (!tab) return;
+  showMenu(anchor, [
+    { label: "CRLF", active: tab.lineEnding === "crlf", onClick: () => changeTabLineEnding(tabId, "crlf") },
+    { label: "LF", active: tab.lineEnding === "lf" || tab.lineEnding === "mixed", onClick: () => changeTabLineEnding(tabId, "lf") },
+  ]);
+}
+
+function showEncodingMenu(anchor: HTMLElement, tabId: string): void {
+  const tab = state.tabs.get(tabId);
+  if (!tab) return;
+  showMenu(anchor, FILE_ENCODINGS.map((enc) => ({
+    label: fileEncodingLabel(enc as FileEncoding),
+    active: tab.encoding === enc,
+    onClick: () => changeTabEncoding(tabId, enc),
+  })));
 }
 
 function buildGitSummary(gitStatus: import("../services/state").GitStatus): string {
@@ -82,9 +161,8 @@ function renderStatusBar() {
     statusLeftEl.textContent = leftParts.join("  ·  ");
   }
 
-  statusRightEl.textContent = "";
   statusRightEl.replaceChildren();
-  hideEncodingMenu();
+  hideMenu();
 
   if (!tab) {
     return;
@@ -99,14 +177,11 @@ function renderStatusBar() {
     line = posLine.number;
     col = cursor - posLine.from + 1;
   }
-  const ext = getFileExtension(tab.filePath).toUpperCase();
-  const endingLabel = lineEndingLabel(tab.lineEnding);
-  const parts = [`Ln ${line}, Col ${col}`, ext || "TXT"];
+  const parts: string[] = [`Ln ${line}, Col ${col}`];
   if (tab.largeFile && tab.fullSize !== undefined) {
     const mb = (tab.fullSize / 1024 / 1024).toFixed(2);
     parts.push(tab.loadedFull ? `大文件 (${mb} MB)` : `大文件未完整加载 (${mb} MB)`);
   }
-  if (endingLabel) parts.push(endingLabel);
 
   const diagnostics = getLspDiagnostics(tab.filePath);
   const errors = diagnostics.filter((d) => d.severity === 1).length;
@@ -127,16 +202,19 @@ function renderStatusBar() {
     statusRightEl.appendChild(span);
   }
 
-  // 编码指示器：点击弹出切换菜单
-  const encodingSpan = document.createElement("span");
-  encodingSpan.className = "ide__status-encoding";
-  encodingSpan.textContent = fileEncodingLabel(tab.encoding);
-  encodingSpan.title = "点击切换文件编码";
-  encodingSpan.addEventListener("click", (e) => {
-    e.stopPropagation();
-    showEncodingMenu(encodingSpan);
+  // 交互指示器：语言 / 缩进 / 行尾 / 编码
+  appendIndicator(statusRightEl, getLanguageLabel(tab.filePath), "选择语言模式", (el) => {
+    showLanguageMenu(el, tab.filePath);
   });
-  statusRightEl.appendChild(encodingSpan);
+  appendIndicator(statusRightEl, indentLabel(), "切换缩进设置", (el) => {
+    showIndentMenu(el);
+  });
+  appendIndicator(statusRightEl, lineEndingLabel(tab.lineEnding) || "LF", "切换行尾序列", (el) => {
+    showLineEndingMenu(el, tab.id);
+  });
+  appendIndicator(statusRightEl, fileEncodingLabel(tab.encoding), "切换文件编码", (el) => {
+    showEncodingMenu(el, tab.id);
+  });
 }
 
 export function initStatusBar(): void {
@@ -144,8 +222,8 @@ export function initStatusBar(): void {
   renderStatusBar();
 
   document.addEventListener("click", (e) => {
-    if (encodingMenu && !encodingMenu.contains(e.target as Node)) {
-      hideEncodingMenu();
+    if (menu && !menu.contains(e.target as Node)) {
+      hideMenu();
     }
   });
 }

@@ -50,6 +50,8 @@ export interface IdeSettings {
   theme: "dark" | "light";
   fontSize: number;
   tabSize: number;
+  /** 缩进使用空格（false = 制表符） */
+  insertSpaces?: boolean;
   /** 是否开启自动保存（编辑停止后延时保存、失焦兜底保存） */
   autoSave?: boolean;
   /** 自定义语言服务器配置，key 为语言 ID（如 typescript / python）；未配置的语言使用内置映射 */
@@ -226,6 +228,7 @@ export const state = {
     theme: "dark" as "dark" | "light",
     fontSize: 13,
     tabSize: 2,
+    insertSpaces: true,
     autoSave: true,
   } as IdeSettings,
 
@@ -262,6 +265,11 @@ export const state = {
   outlineSymbols: [] as OutlineSymbol[],
   outlineFilePath: "" as string,
   outlineVersion: 0,
+
+  /** 文件级语言模式覆盖（filePath → languageId，如 "typescript" / "plaintext"） */
+  fileLanguageOverrides: {} as Record<string, string>,
+  /** 自增版本号：语言模式等编辑器重建信号变化时 +1，触发编辑器按新配置重建 */
+  editorRecreateVersion: 0,
 
   promptResolve: null as ((value: string | null) => void) | null,
 
@@ -391,6 +399,62 @@ function syncWorkspaceRootsToMain(): void {
   } catch {
     // 主进程可能未就绪，忽略
   }
+}
+
+/** 扩展名 → 语言 ID（与 LSP 语言服务器映射一致；md 等无 LSP 的语言不进此表） */
+export const EXT_TO_LANGUAGE_ID: Record<string, string> = {
+  ts: "typescript",
+  tsx: "typescript",
+  js: "javascript",
+  jsx: "javascript",
+  json: "json",
+  css: "css",
+  scss: "scss",
+  less: "less",
+  html: "html",
+  htm: "html",
+  py: "python",
+};
+
+/** 状态栏语言模式菜单：语言 ID → 显示名 */
+export const LANGUAGE_MODES: { id: string; label: string }[] = [
+  { id: "typescript", label: "TypeScript" },
+  { id: "javascript", label: "JavaScript" },
+  { id: "json", label: "JSON" },
+  { id: "css", label: "CSS" },
+  { id: "scss", label: "SCSS" },
+  { id: "less", label: "LESS" },
+  { id: "html", label: "HTML" },
+  { id: "markdown", label: "Markdown" },
+  { id: "python", label: "Python" },
+  { id: "plaintext", label: "纯文本" },
+];
+
+function extOf(filePath: string): string {
+  const name = filePath.replace(/\\/g, "/").split("/").pop() || "";
+  const idx = name.lastIndexOf(".");
+  return idx > 0 ? name.slice(idx + 1).toLowerCase() : "";
+}
+
+function languageLabelOf(languageId: string): string {
+  return LANGUAGE_MODES.find((m) => m.id === languageId)?.label || languageId;
+}
+
+/** 获取文件的当前语言模式显示名（优先文件级覆盖，其次按扩展名推导） */
+export function getLanguageLabel(filePath: string): string {
+  const override = state.fileLanguageOverrides[filePath];
+  if (override) return languageLabelOf(override);
+  const id = EXT_TO_LANGUAGE_ID[extOf(filePath)];
+  if (id) return languageLabelOf(id);
+  const ext = extOf(filePath);
+  return ext ? ext.toUpperCase() : "纯文本";
+}
+
+/** 获取文件的当前语言 ID（覆盖优先；纯文本返回 null） */
+export function getLanguageIdForFile(filePath: string): string | null {
+  const override = state.fileLanguageOverrides[filePath];
+  if (override) return override === "plaintext" ? null : override;
+  return EXT_TO_LANGUAGE_ID[extOf(filePath)] || null;
 }
 
 export function setRoots(roots: WorkspaceRoot[]): void {

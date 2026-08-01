@@ -3,7 +3,7 @@ import { autocompletion, type Completion, type CompletionContext, type Completio
 import { hoverTooltip, keymap, ViewPlugin, EditorView, type ViewUpdate } from "@codemirror/view";
 import { StateEffect, StateField, EditorState, type Extension, type Text } from "@codemirror/state";
 import { getLspClient, removeLspClient, type LspClient, type LspDiagnostic, type LspRange } from "../services/lsp-client";
-import { state, subscribe, notify, setLspDiagnostics, getLspDiagnostics, getRootForPath, type IdeSearchResult, type OutlineSymbol } from "../services/state";
+import { state, subscribe, notify, setLspDiagnostics, getLspDiagnostics, getRootForPath, getLanguageIdForFile, EXT_TO_LANGUAGE_ID, type IdeSearchResult, type OutlineSymbol } from "../services/state";
 import { getFileExtension, openFileAt, readFile, writeFile, encodeLineEndings } from "../services/file-service";
 import { showReferencesResults } from "./file-tree";
 
@@ -15,30 +15,15 @@ subscribe(() => {
   lastLspRootsKey = key;
   for (const id of prevIds) {
     if (!state.roots.some((r) => r.id === id)) {
-      for (const languageId of Object.values(extToLanguageId)) {
+      for (const languageId of Object.values(EXT_TO_LANGUAGE_ID)) {
         removeLspClient(languageId, id);
       }
     }
   }
 });
 
-const extToLanguageId: Record<string, string> = {
-  ts: "typescript",
-  tsx: "typescript",
-  js: "javascript",
-  jsx: "javascript",
-  json: "json",
-  css: "css",
-  scss: "scss",
-  less: "less",
-  html: "html",
-  htm: "html",
-  py: "python",
-};
-
 export function getLanguageId(filePath: string): string | null {
-  const ext = getFileExtension(filePath);
-  return extToLanguageId[ext] || null;
+  return getLanguageIdForFile(filePath);
 }
 
 function filePathToUri(filePath: string): string {
@@ -555,7 +540,7 @@ export async function formatDocument(view?: EditorView): Promise<void> {
   try {
     const result = await sendLspRequest(ctx.client, "textDocument/formatting", {
       textDocument: { uri: filePathToUri(filePath) },
-      options: { tabSize: state.ideSettings.tabSize, insertSpaces: true },
+      options: { tabSize: state.ideSettings.tabSize, insertSpaces: state.ideSettings.insertSpaces !== false },
     });
     const edits = Array.isArray(result) ? (result as LspTextEdit[]) : [];
     if (edits.length === 0) {

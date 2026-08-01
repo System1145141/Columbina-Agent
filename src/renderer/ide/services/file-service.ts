@@ -299,6 +299,19 @@ export function changeTabEncoding(tabId: string, encoding: string): void {
   notify();
 }
 
+/** 切换标签的行尾（CRLF/LF）：标记为已修改，保存时按新行尾写盘 */
+export function changeTabLineEnding(tabId: string, lineEnding: Tab["lineEnding"]): void {
+  const tab = state.tabs.get(tabId);
+  if (!tab || tab.kind === "diff") return;
+  if (tab.lineEnding === lineEnding) return;
+  tab.lineEnding = lineEnding;
+  if (tab.currentContent === tab.initialContent) {
+    tab.modified = true;
+  }
+  state.statusMessage = `行尾已切换为 ${lineEndingLabel(lineEnding)}，保存后生效`;
+  notify();
+}
+
 export async function closeTab(tabId: string): Promise<void> {
   if (state.isClosing) return;
   const tab = state.tabs.get(tabId);

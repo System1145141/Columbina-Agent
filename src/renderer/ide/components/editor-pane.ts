@@ -1,7 +1,7 @@
 import { EditorView, keymap, lineNumbers, WidgetType, Decoration, ViewPlugin, ViewUpdate } from "@codemirror/view";
 import { EditorState, StateEffect, StateField, EditorSelection, type SelectionRange } from "@codemirror/state";
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
-import { foldGutter, foldKeymap } from "@codemirror/language";
+import { foldGutter, foldKeymap, indentUnit } from "@codemirror/language";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
@@ -184,6 +184,9 @@ const inlineChatPlugin = ViewPlugin.fromClass(
 let lastActiveTabId = "";
 let lastTheme = state.ideSettings.theme;
 let lastFontSize = state.ideSettings.fontSize;
+let lastTabSize = state.ideSettings.tabSize;
+let lastInsertSpaces = state.ideSettings.insertSpaces !== false;
+let lastRecreateVersion = 0;
 let currentLspFile = "";
 
 // 自动保存：编辑停止 800ms 后触发，失焦（flushAutoSave）时兜底
@@ -222,6 +225,30 @@ export function flushAutoSave(): void {
 }
 
 function detectLanguage(filePath: string) {
+  const override = state.fileLanguageOverrides[filePath];
+  if (override === "plaintext") return [];
+  if (override) {
+    switch (override) {
+      case "typescript":
+        return javascript({ typescript: true, jsx: true });
+      case "javascript":
+        return javascript({ typescript: false, jsx: true });
+      case "json":
+        return json();
+      case "css":
+      case "scss":
+      case "less":
+        return css();
+      case "html":
+      case "htm":
+        return html();
+      case "markdown":
+      case "md":
+        return markdown();
+      default:
+        return [];
+    }
+  }
   const ext = getFileExtension(filePath);
   switch (ext) {
     case "js":
@@ -375,6 +402,8 @@ function doCreateEditor(initialContent = "", filePath = ""): EditorView | null {
     lineNumbers(),
     isLight ? [] : oneDark,
     editorTheme,
+    EditorState.tabSize.of(state.ideSettings.tabSize),
+    indentUnit.of(state.ideSettings.insertSpaces === false ? "\t" : "  ".repeat(state.ideSettings.tabSize)),
     keymap.of([
       ...searchKeymap,
       ...foldKeymap,
@@ -494,13 +523,21 @@ export function saveCurrentTab(): void {
 
 function onStateChange(): void {
   const activeTab = state.activeTabId ? state.tabs.get(state.activeTabId) : null;
-  const settingsChanged = lastTheme !== state.ideSettings.theme || lastFontSize !== state.ideSettings.fontSize;
+  const settingsChanged =
+    lastTheme !== state.ideSettings.theme ||
+    lastFontSize !== state.ideSettings.fontSize ||
+    lastTabSize !== state.ideSettings.tabSize ||
+    lastInsertSpaces !== (state.ideSettings.insertSpaces !== false) ||
+    lastRecreateVersion !== state.editorRecreateVersion;
 
   if (lastActiveTabId !== state.activeTabId || settingsChanged) {
     saveCurrentEditorToTab(lastActiveTabId);
     lastActiveTabId = state.activeTabId;
     lastTheme = state.ideSettings.theme;
     lastFontSize = state.ideSettings.fontSize;
+    lastTabSize = state.ideSettings.tabSize;
+    lastInsertSpaces = state.ideSettings.insertSpaces !== false;
+    lastRecreateVersion = state.editorRecreateVersion;
 
     if (activeTab) {
       if (activeTab.kind === "diff") {
