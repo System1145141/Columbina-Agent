@@ -230,6 +230,7 @@ export const IPC = {
   IDE_WRITE_FILE: "ide:write-file",       // 写入文件内容（可指定编码）
   IDE_GET_FILE_INFO: "ide:get-file-info", // 获取文件信息
   IDE_SEARCH_FILES: "ide:search-files",   // 项目内文本搜索
+  IDE_LIST_FILES: "ide:list-files",       // 按 glob 模式列出文件
   IDE_TERMINAL_CREATE: "ide:terminal-create", // 创建终端
   IDE_TERMINAL_INPUT: "ide:terminal-input",   // 向终端发送输入
   IDE_TERMINAL_RESIZE: "ide:terminal-resize", // 调整终端大小

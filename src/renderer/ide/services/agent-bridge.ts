@@ -13,15 +13,18 @@ import {
   setAiTaskPlanRunning,
   clearInlineCompletion,
   getRootForPath,
+  getLspDiagnostics,
 } from "./state";
 import { ensureActiveSession } from "./ai-sessions";
 import { previewRenameSymbol, applyRefactorChanges } from "../components/lsp-integration";
-import { showRefactorPreview, type RefactorPreviewChange } from "../components/refactor-preview";
+import { showRefactorPreview, type RefactorPreviewChange, type RefactorPreviewEdit } from "../components/refactor-preview";
 import {
   basename,
   readFile,
   writeFile,
   searchFiles,
+  readDir,
+  listFiles,
   normalizeLineEndings,
   encodeLineEndings,
   detectLineEnding,
@@ -29,9 +32,9 @@ import {
 } from "./file-service";
 import { queryGitStatus, getGitDiff } from "./git-service";
 
-let runCommandInTerminalImpl: ((command: string) => Promise<void>) | null = null;
+let runCommandInTerminalImpl: ((command: string) => Promise<string | null>) | null = null;
 
-export function registerRunCommandInTerminal(fn: (command: string) => Promise<void>): void {
+export function registerRunCommandInTerminal(fn: (command: string) => Promise<string | null>): void {
   runCommandInTerminalImpl = fn;
 }
 
@@ -50,7 +53,7 @@ export function parseActions(content: string): AgentAction[] {
     try {
       const raw = JSON.parse(match[1].trim()) as Record<string, unknown>;
       const type = String(raw.type || "");
-      if (!["read_file", "write_file", "search_files", "run_command", "rename_symbol", "generate_tests", "review_changes", "plugin"].includes(type)) continue;
+      if (!AGENT_TOOLS.some((t) => t.name === type)) continue;
       actions.push({
         id: `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         type: type as AgentAction["type"],
@@ -61,6 +64,17 @@ export function parseActions(content: string): AgentAction[] {
         line: typeof raw.line === "number" ? raw.line : undefined,
         col: typeof raw.col === "number" ? raw.col : undefined,
         newName: typeof raw.newName === "string" ? raw.newName : undefined,
+        edits: Array.isArray(raw.edits)
+          ? (raw.edits as { search: string; replace: string; occurrence?: number }[]).filter(
+              (e) => e && typeof e.search === "string" && typeof e.replace === "string"
+            )
+          : undefined,
+        pattern: typeof raw.pattern === "string" ? raw.pattern : undefined,
+        terminalId: typeof raw.terminalId === "string" ? raw.terminalId : undefined,
+        todoAction: typeof raw.todoAction === "string" ? (raw.todoAction as AgentAction["todoAction"]) : undefined,
+        items: Array.isArray(raw.items) ? raw.items.filter((i): i is string => typeof i === "string") : undefined,
+        index: typeof raw.index === "number" ? raw.index : undefined,
+        done: typeof raw.done === "boolean" ? raw.done : undefined,
         pluginName: typeof raw.pluginName === "string" ? raw.pluginName : undefined,
         pluginParams: typeof raw.pluginParams === "object" && raw.pluginParams !== null ? (raw.pluginParams as Record<string, unknown>) : undefined,
       });
@@ -157,6 +171,8 @@ export async function setAgentModel(modelId: string): Promise<void> {
 }
 
 export function buildToolsPrompt(): string {
+  const baseTools = AGENT_TOOLS.filter((t) => t.name !== "plugin");
+  const lines = baseTools.map((t, i) => `${i + 1}. ${t.name}: ${t.description}`);
   const pluginToolLines: string[] = [];
   for (const tool of state.pluginTools) {
     const paramsDesc = Object.entries(tool.parameters || {})
@@ -164,31 +180,17 @@ export function buildToolsPrompt(): string {
       .join(", ");
     pluginToolLines.push(`- ${tool.name}: ${tool.description}\n   { "type": "plugin", "pluginName": "${tool.name}", "pluginParams": { ${paramsDesc ? `${paramsDesc}` : ""} } }`);
   }
+  if (pluginToolLines.length > 0) {
+    lines.push(`${baseTools.length + 1}. plugin: 调用插件提供的工具\n${pluginToolLines.join("\n")}`);
+  }
 
-  return `\n\n你可以使用以下工具来操作项目代码。当需要读取、修改、搜索文件或运行命令时，在回复末尾插入一个或多个 <action>{...}</action> JSON 标记。每个 action 都需要用户确认后才会执行，执行结果会再次发给你。\n\n可用工具：\n1. read_file: 读取文件内容\n   { "type": "read_file", "filePath": "相对或绝对路径" }\n2. write_file: 写入或覆盖文件（危险操作，会保存快照以便撤销）\n   { "type": "write_file", "filePath": "路径", "content": "完整文件内容" }\n3. search_files: 在项目文件夹中搜索文本\n   { "type": "search_files", "query": "搜索关键词" }\n4. run_command: 在集成终端中运行 shell 命令\n   { "type": "run_command", "command": "要执行的命令" }\n5. rename_symbol: 跨文件重命名符号（基于 LSP 引用分析，所有引用文件同步更新；会生成 diff 预览，需用户确认后应用，可整体撤销）\n   { "type": "rename_symbol", "filePath": "符号所在文件路径", "line": "符号所在行号(从1开始)", "col": "符号所在列号(从1开始)", "newName": "新名称" }\n6. generate_tests: 为指定文件生成单元测试（返回文件内容、项目测试框架检测结果与运行命令，请基于此生成测试代码后用 write_file 写入）\n   { "type": "generate_tests", "filePath": "目标文件路径（省略则用当前打开文件）" }\n7. review_changes: 审查当前 Git 变更（收集所有工作区未提交/已暂存/未跟踪文件的 diff 与内容，按严重程度输出问题清单）\n   { "type": "review_changes" }${pluginToolLines.length > 0 ? "\n8. plugin: 调用插件提供的工具\n" + pluginToolLines.join("\n") : ""}\n\n注意：\n- 不要一次输出过多内容；优先分析再行动。\n- 写文件前最好先读取目标文件。\n- 回复中除了 action 标记外，可以用自然语言向用户说明你的计划。`;
+  return `\n\n你可以使用以下工具来操作项目代码。当需要读取、修改、搜索文件或运行命令时，在回复末尾插入一个或多个 <action>{...}</action> JSON 标记。每个 action 都需要用户确认后才会执行，执行结果会再次发给你。\n\n可用工具：\n${lines.join("\n")}\n\n注意：\n- 不要一次输出过多内容；优先分析再行动。\n- 写文件前最好先读取目标文件。\n- 回复中除了 action 标记外，可以用自然语言向用户说明你的计划。`;
 }
 
 export function formatActionLabel(action: AgentAction): string {
-  switch (action.type) {
-    case "read_file":
-      return `读取文件: ${action.filePath || ""}`;
-    case "write_file":
-      return `写入文件: ${action.filePath || ""}`;
-    case "search_files":
-      return `搜索文件: ${action.query || ""}`;
-    case "run_command":
-      return `运行命令: ${action.command || ""}`;
-    case "rename_symbol":
-      return `重命名符号: ${action.newName || ""}（${action.filePath || ""}:${action.line || "?"}:${action.col || "?"}）`;
-    case "generate_tests":
-      return `生成测试: ${action.filePath || "当前文件"}`;
-    case "review_changes":
-      return `审查 Git 变更`;
-    case "plugin":
-      return `插件工具: ${action.pluginName || ""}`;
-    default:
-      return "未知操作";
-  }
+  const tool = AGENT_TOOLS.find((t) => t.name === action.type);
+  if (tool) return tool.formatLabel(action);
+  return "未知操作";
 }
 
 const MAX_SNAPSHOTS = 50;
@@ -301,142 +303,458 @@ export async function collectGitChangesForReview(): Promise<string> {
     : joined;
 }
 
-export async function executeAction(action: AgentAction): Promise<AgentActionResult> {
-  switch (action.type) {
-    case "read_file": {
-      if (!action.filePath) return { actionId: action.id, ok: false, error: "缺少 filePath" };
-      try {
-        const raw = await readFile(action.filePath);
-        return { actionId: action.id, ok: true, output: normalizeLineEndings(raw) };
-      } catch (err) {
-        return { actionId: action.id, ok: false, error: `读取失败: ${String(err)}` };
-      }
-    }
-    case "write_file": {
-      if (!action.filePath) return { actionId: action.id, ok: false, error: "缺少 filePath" };
-      await saveSnapshot(action.filePath);
-      const lineEnding = state.fileSnapshots.get(action.filePath)?.lineEnding || "lf";
-      const output = encodeLineEndings(action.content || "", lineEnding);
-      const result = await writeFile(action.filePath, output);
-      if (result.ok) {
-        const tab = state.tabs.get(action.filePath);
-        if (tab) {
-          tab.initialContent = normalizeLineEndings(output);
-          tab.currentContent = tab.initialContent;
-          tab.modified = false;
-          tab.lineEnding = lineEnding;
-          if (state.activeTabId === action.filePath && state.editorView) {
-            state.editorView.dispatch({
-              changes: { from: 0, to: state.editorView.state.doc.length, insert: tab.currentContent },
-            });
-          }
-        }
-        notify();
-        return { actionId: action.id, ok: true, output: `已写入 ${action.filePath}` };
-      }
-      return { actionId: action.id, ok: false, error: result.error || "写入失败" };
-    }
-    case "search_files": {
-      if (!action.query) return { actionId: action.id, ok: false, error: "缺少 query" };
-      if (state.roots.length === 0) return { actionId: action.id, ok: false, error: "当前没有打开项目文件夹" };
-      try {
-        const allResults: { root: string; results: import("./state").IdeSearchResult[] }[] = [];
-        for (const root of state.roots) {
-          const results = await searchFiles(root.path, action.query, { maxResults: 20 });
-          if (results.length > 0) allResults.push({ root: root.name, results });
-        }
-        if (allResults.length === 0) return { actionId: action.id, ok: true, output: "未找到匹配结果" };
-        const lines: string[] = [];
-        for (const group of allResults) {
-          lines.push(`[${group.root}]`);
-          for (const r of group.results) {
-            lines.push(`  ${r.filePath}:${r.line}:${r.column}  ${r.text.trim()}`);
-          }
-        }
-        return { actionId: action.id, ok: true, output: lines.join("\n") };
-      } catch (err) {
-        return { actionId: action.id, ok: false, error: `搜索失败: ${String(err)}` };
-      }
-    }
-    case "run_command": {
-      if (!action.command) return { actionId: action.id, ok: false, error: "缺少 command" };
-      try {
-        if (runCommandInTerminalImpl) {
-          await runCommandInTerminalImpl(action.command);
-        }
-        return { actionId: action.id, ok: true, output: `已在终端执行: ${action.command}` };
-      } catch (err) {
-        return { actionId: action.id, ok: false, error: `运行失败: ${String(err)}` };
-      }
-    }
-    case "rename_symbol": {
-      if (!action.filePath || !action.newName) {
-        return { actionId: action.id, ok: false, error: "缺少 filePath / newName" };
-      }
-      const line = typeof action.line === "number" ? action.line : 1;
-      const col = typeof action.col === "number" ? action.col : 1;
-      try {
-        const changes = await previewRenameSymbol(action.filePath, line, col, action.newName);
-        if (changes.size === 0) {
-          return { actionId: action.id, ok: false, error: "未找到可重命名的符号（语言服务器未启动、无法解析或文件未打开）" };
-        }
-        const preview: RefactorPreviewChange[] = Array.from(changes.entries()).map(([p, edits]) => ({ filePath: p, edits }));
-        const confirmed = await showRefactorPreview(preview, `重命名符号为 ${action.newName}`);
-        if (!confirmed) {
-          return { actionId: action.id, ok: false, output: "用户已取消重命名" };
-        }
-        const res = await applyRefactorChanges(changes, `重命名符号为 ${action.newName}`);
-        if (res.ok) {
-          return { actionId: action.id, ok: true, output: `已重命名 ${res.files.length} 个文件:\n${res.files.join("\n")}` };
-        }
-        return { actionId: action.id, ok: false, error: "部分文件应用失败，请查看控制台" };
-      } catch (err) {
-        return { actionId: action.id, ok: false, error: `重命名失败: ${String(err)}` };
-      }
-    }
-    case "generate_tests": {
-      let target = action.filePath;
-      if (!target) {
-        target = state.activeTabId || "";
-        if (!target) {
-          return { actionId: action.id, ok: false, error: "请指定要生成测试的文件路径（或先打开一个文件）" };
-        }
-      }
-      try {
-        const root = getRootForPath(target);
-        const rootPath = root?.path || "";
-        const raw = await readFile(target);
-        const framework = await detectTestFramework(rootPath);
-        return {
-          actionId: action.id,
-          ok: true,
-          output: `目标文件: ${target}\n\n${framework}\n\n文件内容:\n\`\`\`\n${normalizeLineEndings(raw)}\n\`\`\`\n\n请基于上述内容与测试框架生成单元测试代码（覆盖核心逻辑与边界情况），然后用 write_file 工具写入合适的测试文件，并给出运行命令。`,
-        };
-      } catch (err) {
-        return { actionId: action.id, ok: false, error: `读取文件失败: ${String(err)}` };
-      }
-    }
-    case "review_changes": {
-      try {
-        const collected = await collectGitChangesForReview();
-        return { actionId: action.id, ok: true, output: collected };
-      } catch (err) {
-        return { actionId: action.id, ok: false, error: `收集 Git 变更失败: ${String(err)}` };
-      }
-    }
-    case "plugin": {
-      if (!action.pluginName) return { actionId: action.id, ok: false, error: "缺少 pluginName" };
-      try {
-        const { invokePluginTool } = await import("../plugins/host");
-        const result = await invokePluginTool(action.pluginName, action.pluginParams || {});
-        return { actionId: action.id, ok: true, output: typeof result === "string" ? result : JSON.stringify(result, null, 2) };
-      } catch (err) {
-        return { actionId: action.id, ok: false, error: `插件调用失败: ${String(err)}` };
-      }
-    }
-    default:
-      return { actionId: action.id, ok: false, error: "未知操作类型" };
+// ── 工具注册表：新增 Agent 工具只需注册一项（名称/描述/执行函数/标签）──
+
+export interface AgentTool {
+  name: AgentAction["type"];
+  description: string;
+  formatLabel: (action: AgentAction) => string;
+  execute: (action: AgentAction) => Promise<AgentActionResult>;
+}
+
+async function executeReadFile(action: AgentAction): Promise<AgentActionResult> {
+  if (!action.filePath) return { actionId: action.id, ok: false, error: "缺少 filePath" };
+  try {
+    const raw = await readFile(action.filePath);
+    return { actionId: action.id, ok: true, output: normalizeLineEndings(raw) };
+  } catch (err) {
+    return { actionId: action.id, ok: false, error: `读取失败: ${String(err)}` };
   }
+}
+
+async function executeWriteFile(action: AgentAction): Promise<AgentActionResult> {
+  if (!action.filePath) return { actionId: action.id, ok: false, error: "缺少 filePath" };
+  await saveSnapshot(action.filePath);
+  const lineEnding = state.fileSnapshots.get(action.filePath)?.lineEnding || "lf";
+  const output = encodeLineEndings(action.content || "", lineEnding);
+  const result = await writeFile(action.filePath, output);
+  if (result.ok) {
+    const tab = state.tabs.get(action.filePath);
+    if (tab) {
+      tab.initialContent = normalizeLineEndings(output);
+      tab.currentContent = tab.initialContent;
+      tab.modified = false;
+      tab.lineEnding = lineEnding;
+      if (state.activeTabId === action.filePath && state.editorView) {
+        state.editorView.dispatch({
+          changes: { from: 0, to: state.editorView.state.doc.length, insert: tab.currentContent },
+        });
+      }
+    }
+    notify();
+    return { actionId: action.id, ok: true, output: `已写入 ${action.filePath}` };
+  }
+  return { actionId: action.id, ok: false, error: result.error || "写入失败" };
+}
+
+async function executeSearchFiles(action: AgentAction): Promise<AgentActionResult> {
+  if (!action.query) return { actionId: action.id, ok: false, error: "缺少 query" };
+  if (state.roots.length === 0) return { actionId: action.id, ok: false, error: "当前没有打开项目文件夹" };
+  try {
+    const allResults: { root: string; results: import("./state").IdeSearchResult[] }[] = [];
+    for (const root of state.roots) {
+      const results = await searchFiles(root.path, action.query, { maxResults: 20 });
+      if (results.length > 0) allResults.push({ root: root.name, results });
+    }
+    if (allResults.length === 0) return { actionId: action.id, ok: true, output: "未找到匹配结果" };
+    const lines: string[] = [];
+    for (const group of allResults) {
+      lines.push(`[${group.root}]`);
+      for (const r of group.results) {
+        lines.push(`  ${r.filePath}:${r.line}:${r.column}  ${r.text.trim()}`);
+      }
+    }
+    return { actionId: action.id, ok: true, output: lines.join("\n") };
+  } catch (err) {
+    return { actionId: action.id, ok: false, error: `搜索失败: ${String(err)}` };
+  }
+}
+
+async function executeRunCommand(action: AgentAction): Promise<AgentActionResult> {
+  if (!action.command) return { actionId: action.id, ok: false, error: "缺少 command" };
+  try {
+    const terminalId = runCommandInTerminalImpl ? await runCommandInTerminalImpl(action.command) : null;
+    const suffix = terminalId ? `（终端 id: ${terminalId}）` : "";
+    return { actionId: action.id, ok: true, output: `已在终端执行: ${action.command}${suffix}` };
+  } catch (err) {
+    return { actionId: action.id, ok: false, error: `运行失败: ${String(err)}` };
+  }
+}
+
+async function executeRenameSymbol(action: AgentAction): Promise<AgentActionResult> {
+  if (!action.filePath || !action.newName) {
+    return { actionId: action.id, ok: false, error: "缺少 filePath / newName" };
+  }
+  const line = typeof action.line === "number" ? action.line : 1;
+  const col = typeof action.col === "number" ? action.col : 1;
+  try {
+    const changes = await previewRenameSymbol(action.filePath, line, col, action.newName);
+    if (changes.size === 0) {
+      return { actionId: action.id, ok: false, error: "未找到可重命名的符号（语言服务器未启动、无法解析或文件未打开）" };
+    }
+    const preview: RefactorPreviewChange[] = Array.from(changes.entries()).map(([p, edits]) => ({ filePath: p, edits }));
+    const confirmed = await showRefactorPreview(preview, `重命名符号为 ${action.newName}`);
+    if (!confirmed) {
+      return { actionId: action.id, ok: false, output: "用户已取消重命名" };
+    }
+    const res = await applyRefactorChanges(changes, `重命名符号为 ${action.newName}`);
+    if (res.ok) {
+      return { actionId: action.id, ok: true, output: `已重命名 ${res.files.length} 个文件:\n${res.files.join("\n")}` };
+    }
+    return { actionId: action.id, ok: false, error: "部分文件应用失败，请查看控制台" };
+  } catch (err) {
+    return { actionId: action.id, ok: false, error: `重命名失败: ${String(err)}` };
+  }
+}
+
+async function executeGenerateTests(action: AgentAction): Promise<AgentActionResult> {
+  let target = action.filePath;
+  if (!target) {
+    target = state.activeTabId || "";
+    if (!target) {
+      return { actionId: action.id, ok: false, error: "请指定要生成测试的文件路径（或先打开一个文件）" };
+    }
+  }
+  try {
+    const root = getRootForPath(target);
+    const rootPath = root?.path || "";
+    const raw = await readFile(target);
+    const framework = await detectTestFramework(rootPath);
+    return {
+      actionId: action.id,
+      ok: true,
+      output: `目标文件: ${target}\n\n${framework}\n\n文件内容:\n\`\`\`\n${normalizeLineEndings(raw)}\n\`\`\`\n\n请基于上述内容与测试框架生成单元测试代码（覆盖核心逻辑与边界情况），然后用 write_file 工具写入合适的测试文件，并给出运行命令。`,
+    };
+  } catch (err) {
+    return { actionId: action.id, ok: false, error: `读取文件失败: ${String(err)}` };
+  }
+}
+
+async function executeReviewChanges(action: AgentAction): Promise<AgentActionResult> {
+  try {
+    const collected = await collectGitChangesForReview();
+    return { actionId: action.id, ok: true, output: collected };
+  } catch (err) {
+    return { actionId: action.id, ok: false, error: `收集 Git 变更失败: ${String(err)}` };
+  }
+}
+
+async function executePlugin(action: AgentAction): Promise<AgentActionResult> {
+  if (!action.pluginName) return { actionId: action.id, ok: false, error: "缺少 pluginName" };
+  try {
+    const { invokePluginTool } = await import("../plugins/host");
+    const result = await invokePluginTool(action.pluginName, action.pluginParams || {});
+    return { actionId: action.id, ok: true, output: typeof result === "string" ? result : JSON.stringify(result, null, 2) };
+  } catch (err) {
+    return { actionId: action.id, ok: false, error: `插件调用失败: ${String(err)}` };
+  }
+}
+
+// ── 阶段 A+B 新增工具：文件管理 / 精确编辑 / 诊断 / 进程 / 待办 ──
+
+/** 把字符串偏移转为（0 基行, 0 基列） */
+function offsetToPos(text: string, offset: number): { line: number; character: number } {
+  let line = 0;
+  let character = 0;
+  for (let i = 0; i < offset; i++) {
+    if (text[i] === "\n") {
+      line++;
+      character = 0;
+    } else {
+      character++;
+    }
+  }
+  return { line, character };
+}
+
+async function executeListDir(action: AgentAction): Promise<AgentActionResult> {
+  const target =
+    action.filePath ||
+    (state.roots.find((r) => r.id === state.activeRootId)?.path || state.roots[0]?.path || "");
+  if (!target) return { actionId: action.id, ok: false, error: "缺少目录路径（或没有打开项目文件夹）" };
+  try {
+    const entries = await readDir(target);
+    if (entries.length === 0) return { actionId: action.id, ok: true, output: `${target}（空目录）` };
+    const lines = entries.map((e) => `${e.isDirectory ? "[目录]" : "[文件]"} ${e.name}`);
+    return { actionId: action.id, ok: true, output: `${target}:\n${lines.join("\n")}` };
+  } catch (err) {
+    return { actionId: action.id, ok: false, error: `读取目录失败: ${String(err)}` };
+  }
+}
+
+async function executeListFiles(action: AgentAction): Promise<AgentActionResult> {
+  const pattern = action.pattern || "**/*";
+  const root = action.filePath ? getRootForPath(action.filePath) : state.roots.find((r) => r.id === state.activeRootId) || state.roots[0];
+  if (!root) return { actionId: action.id, ok: false, error: "没有打开项目文件夹" };
+  try {
+    const files = await listFiles(root.path, pattern);
+    if (files.length === 0) return { actionId: action.id, ok: true, output: `没有匹配 ${pattern} 的文件` };
+    return { actionId: action.id, ok: true, output: `匹配 ${pattern}（共 ${files.length} 个文件）：\n${files.map((f) => `  ${root.path}/${f}`).join("\n")}` };
+  } catch (err) {
+    return { actionId: action.id, ok: false, error: `列出文件失败: ${String(err)}` };
+  }
+}
+
+async function executeEditFile(action: AgentAction): Promise<AgentActionResult> {
+  if (!action.filePath) return { actionId: action.id, ok: false, error: "缺少 filePath" };
+  if (!action.edits || action.edits.length === 0) return { actionId: action.id, ok: false, error: "缺少 edits（search/replace 块）" };
+  const tab = state.tabs.get(action.filePath);
+  const isDiffTab = tab?.kind === "diff";
+  let originalText: string;
+  let content: string;
+  let lineEnding: "lf" | "crlf";
+  if (tab && !isDiffTab) {
+    originalText = tab.currentContent;
+    content = tab.currentContent;
+    lineEnding = tab.lineEnding;
+  } else {
+    try {
+      const raw = await readFile(action.filePath);
+      originalText = raw;
+      content = normalizeLineEndings(raw);
+      lineEnding = detectLineEnding(raw);
+    } catch (err) {
+      return { actionId: action.id, ok: false, error: `读取文件失败: ${String(err)}` };
+    }
+  }
+
+  const previewEdits: RefactorPreviewEdit[] = [];
+  let result = content;
+  for (const edit of action.edits) {
+    if (!edit.search) continue;
+    const matches: number[] = [];
+    let idx = result.indexOf(edit.search);
+    while (idx !== -1) {
+      matches.push(idx);
+      idx = result.indexOf(edit.search, idx + 1);
+    }
+    if (matches.length === 0) {
+      return { actionId: action.id, ok: false, error: `未找到匹配文本: ${edit.search.slice(0, 50)}` };
+    }
+    const targets =
+      typeof edit.occurrence === "number" && edit.occurrence >= 1
+        ? (edit.occurrence <= matches.length ? matches.slice(edit.occurrence - 1, edit.occurrence) : [])
+        : matches;
+    if (targets.length === 0) {
+      return { actionId: action.id, ok: false, error: `第 ${edit.occurrence} 处匹配不存在（共 ${matches.length} 处）` };
+    }
+    for (const m of [...targets].reverse()) {
+      previewEdits.push({
+        range: { start: offsetToPos(result, m), end: offsetToPos(result, m + edit.search.length) },
+        newText: edit.replace,
+      });
+      result = result.slice(0, m) + edit.replace + result.slice(m + edit.search.length);
+    }
+  }
+
+  const confirmed = await showRefactorPreview([{ filePath: action.filePath, edits: previewEdits }], `编辑 ${basename(action.filePath)}`);
+  if (!confirmed) return { actionId: action.id, ok: false, output: "用户已取消编辑" };
+
+  const output = encodeLineEndings(result, lineEnding);
+  const writeResult = await writeFile(action.filePath, output);
+  if (!writeResult.ok) return { actionId: action.id, ok: false, error: writeResult.error || "写入失败" };
+
+  if (tab && !isDiffTab) {
+    tab.initialContent = result;
+    tab.currentContent = result;
+    tab.modified = false;
+    tab.lineEnding = lineEnding;
+    if (state.activeTabId === action.filePath && state.editorView) {
+      state.editorView.dispatch({ changes: { from: 0, to: state.editorView.state.doc.length, insert: result } });
+    }
+  }
+  state.refactorUndoStack.push({ label: `编辑 ${basename(action.filePath)}`, snapshots: [{ filePath: action.filePath, content: originalText, lineEnding }] });
+  if (state.refactorUndoStack.length > 20) state.refactorUndoStack.shift();
+  notify();
+  return { actionId: action.id, ok: true, output: `已应用 ${previewEdits.length} 处编辑到 ${action.filePath}（可用「撤销上次重构」回滚）` };
+}
+
+async function executeDeleteFile(action: AgentAction): Promise<AgentActionResult> {
+  if (!action.filePath) return { actionId: action.id, ok: false, error: "缺少 filePath" };
+  if (!confirm(`确定删除文件 ${action.filePath} 吗？删除后可撤销（恢复文件内容）。`)) {
+    return { actionId: action.id, ok: false, output: "用户已取消删除" };
+  }
+  let snapshot: FileSnapshot;
+  try {
+    const raw = await readFile(action.filePath);
+    snapshot = { filePath: action.filePath, content: normalizeLineEndings(raw), lineEnding: detectLineEnding(raw) };
+  } catch {
+    return { actionId: action.id, ok: false, error: `文件不存在或无法读取: ${action.filePath}` };
+  }
+  const result = await window.ide?.delete(action.filePath);
+  if (!result?.ok) return { actionId: action.id, ok: false, error: `删除失败: ${result?.error || ""}` };
+  if (state.tabs.has(action.filePath)) {
+    state.tabs.delete(action.filePath);
+    if (state.activeTabId === action.filePath) state.activeTabId = "";
+    notify();
+  }
+  state.refactorUndoStack.push({ label: `删除文件 ${action.filePath}`, snapshots: [snapshot] });
+  if (state.refactorUndoStack.length > 20) state.refactorUndoStack.shift();
+  return { actionId: action.id, ok: true, output: `已删除 ${action.filePath}（可用「撤销上次重构」恢复）` };
+}
+
+async function executeGetDiagnostics(action: AgentAction): Promise<AgentActionResult> {
+  const target = action.filePath || state.activeTabId || "";
+  if (!target) return { actionId: action.id, ok: false, error: "未指定文件（filePath 或先打开一个文件）" };
+  const diags = getLspDiagnostics(target);
+  if (!diags || diags.length === 0) {
+    return { actionId: action.id, ok: true, output: "该文件当前没有 LSP 诊断（语言服务器可能未启动）" };
+  }
+  const lines = diags.map((d) => {
+    const sev = d.severity === 1 ? "错误" : d.severity === 2 ? "警告" : d.severity === 3 ? "信息" : "提示";
+    return `  [${sev}] ${d.message}（行 ${d.range.start.line + 1}:${d.range.start.character + 1}）`;
+  });
+  return { actionId: action.id, ok: true, output: `${target} 共 ${diags.length} 条诊断：\n${lines.join("\n")}` };
+}
+
+async function executeCheckCommandStatus(action: AgentAction): Promise<AgentActionResult> {
+  const terminalId = action.terminalId || Object.keys(state.agentTerminals).pop() || "";
+  if (!terminalId) return { actionId: action.id, ok: false, error: "没有可查询的终端（请先执行 run_command）" };
+  const t = state.agentTerminals[terminalId];
+  if (!t) return { actionId: action.id, ok: true, output: `终端 ${terminalId} 不在 Agent 追踪中（可能是手动打开的终端）` };
+  const tail = t.lastOutput.slice(-2000);
+  return {
+    actionId: action.id,
+    ok: true,
+    output: `终端 ${terminalId} 状态: ${t.running ? "运行中" : "已退出"}\n最近输出:\n${tail || "(无输出)"}`,
+  };
+}
+
+async function executeStopCommand(action: AgentAction): Promise<AgentActionResult> {
+  const terminalId = action.terminalId || Object.keys(state.agentTerminals).pop() || "";
+  if (!terminalId) return { actionId: action.id, ok: false, error: "没有可终止的终端" };
+  window.ide?.killTerminal(terminalId);
+  const t = state.agentTerminals[terminalId];
+  if (t) t.running = false;
+  return { actionId: action.id, ok: true, output: `已终止终端 ${terminalId}` };
+}
+
+async function executeTodo(action: AgentAction): Promise<AgentActionResult> {
+  const act = action.todoAction || "replace";
+  if (act === "clear") {
+    state.aiTodos = [];
+    notify();
+    return { actionId: action.id, ok: true, output: "已清空待办清单" };
+  }
+  if (act === "mark") {
+    const idx = typeof action.index === "number" ? action.index - 1 : -1;
+    if (idx < 0 || idx >= state.aiTodos.length) {
+      return { actionId: action.id, ok: false, error: `待办序号无效（当前共 ${state.aiTodos.length} 项）` };
+    }
+    state.aiTodos[idx].done = action.done !== false;
+    notify();
+    return { actionId: action.id, ok: true, output: `已更新第 ${action.index} 项: ${state.aiTodos[idx].done ? "完成" : "未完成"}` };
+  }
+  const items = action.items || [];
+  state.aiTodos = items.map((text, i) => ({ id: `t-${Date.now()}-${i}`, text, done: false }));
+  notify();
+  return { actionId: action.id, ok: true, output: `已设置 ${items.length} 项待办：\n${items.map((t, i) => `  ${i + 1}. ${t}`).join("\n")}` };
+}
+
+/** 内置 Agent 工具注册表（plugin 工具动态注册，编号单独追加） */
+export const AGENT_TOOLS: AgentTool[] = [
+  {
+    name: "read_file",
+    description: "读取文件内容\n   { \"type\": \"read_file\", \"filePath\": \"相对或绝对路径\" }",
+    formatLabel: (a) => `读取文件: ${a.filePath || ""}`,
+    execute: executeReadFile,
+  },
+  {
+    name: "write_file",
+    description: "写入或覆盖文件（危险操作，会保存快照以便撤销）\n   { \"type\": \"write_file\", \"filePath\": \"路径\", \"content\": \"完整文件内容\" }",
+    formatLabel: (a) => `写入文件: ${a.filePath || ""}`,
+    execute: executeWriteFile,
+  },
+  {
+    name: "search_files",
+    description: "在项目文件夹中搜索文本\n   { \"type\": \"search_files\", \"query\": \"搜索关键词\" }",
+    formatLabel: (a) => `搜索文件: ${a.query || ""}`,
+    execute: executeSearchFiles,
+  },
+  {
+    name: "run_command",
+    description: "在集成终端中运行 shell 命令（会返回终端 id，可用 check_command_status 查看输出、stop_command 终止）\n   { \"type\": \"run_command\", \"command\": \"要执行的命令\" }",
+    formatLabel: (a) => `运行命令: ${a.command || ""}`,
+    execute: executeRunCommand,
+  },
+  {
+    name: "rename_symbol",
+    description: "跨文件重命名符号（基于 LSP 引用分析，所有引用文件同步更新；会生成 diff 预览，需用户确认后应用，可整体撤销）\n   { \"type\": \"rename_symbol\", \"filePath\": \"符号所在文件路径\", \"line\": \"符号所在行号(从1开始)\", \"col\": \"符号所在列号(从1开始)\", \"newName\": \"新名称\" }",
+    formatLabel: (a) => `重命名符号: ${a.newName || ""}（${a.filePath || ""}:${a.line || "?"}:${a.col || "?"}）`,
+    execute: executeRenameSymbol,
+  },
+  {
+    name: "generate_tests",
+    description: "为指定文件生成单元测试（返回文件内容、项目测试框架检测结果与运行命令，请基于此生成测试代码后用 write_file 写入）\n   { \"type\": \"generate_tests\", \"filePath\": \"目标文件路径（省略则用当前打开文件）\" }",
+    formatLabel: (a) => `生成测试: ${a.filePath || "当前文件"}`,
+    execute: executeGenerateTests,
+  },
+  {
+    name: "review_changes",
+    description: "审查当前 Git 变更（收集所有工作区未提交/已暂存/未跟踪文件的 diff 与内容，按严重程度输出问题清单）\n   { \"type\": \"review_changes\" }",
+    formatLabel: () => "审查 Git 变更",
+    execute: executeReviewChanges,
+  },
+  {
+    name: "list_dir",
+    description: "列出目录内容（文件/文件夹）\n   { \"type\": \"list_dir\", \"filePath\": \"目录路径（省略则用当前工作区根目录）\" }",
+    formatLabel: (a) => `列出目录: ${a.filePath || "当前根目录"}`,
+    execute: executeListDir,
+  },
+  {
+    name: "list_files",
+    description: "按 glob 模式列出项目文件（支持 **/*.ts、src/** 等；返回相对 root 的路径列表）\n   { \"type\": \"list_files\", \"pattern\": \"src/**/*.ts\", \"filePath\": \"定位 root 的文件路径（可选）\" }",
+    formatLabel: (a) => `列出文件: ${a.pattern || "**/*"}`,
+    execute: executeListFiles,
+  },
+  {
+    name: "edit_file",
+    description: "对文件做精确文本替换（比 write_file 更安全：逐处 search→replace，会生成 diff 预览需确认，可整体撤销）\n   { \"type\": \"edit_file\", \"filePath\": \"文件路径\", \"edits\": [{ \"search\": \"旧文本\", \"replace\": \"新文本\", \"occurrence\": 2 }] }（occurrence 可选，缺省替换所有出现）",
+    formatLabel: (a) => `编辑文件: ${a.filePath || ""}`,
+    execute: executeEditFile,
+  },
+  {
+    name: "delete_file",
+    description: "删除文件（危险操作，删除前确认，会保存快照可撤销恢复）\n   { \"type\": \"delete_file\", \"filePath\": \"文件路径\" }",
+    formatLabel: (a) => `删除文件: ${a.filePath || ""}`,
+    execute: executeDeleteFile,
+  },
+  {
+    name: "get_diagnostics",
+    description: "获取当前文件或指定文件的 LSP 诊断（错误/警告列表）\n   { \"type\": \"get_diagnostics\", \"filePath\": \"文件路径（省略则用当前打开文件）\" }",
+    formatLabel: (a) => `获取诊断: ${a.filePath || "当前文件"}`,
+    execute: executeGetDiagnostics,
+  },
+  {
+    name: "check_command_status",
+    description: "查询 run_command 执行终端的运行状态与最近输出\n   { \"type\": \"check_command_status\", \"terminalId\": \"run_command 返回的终端 id（可选，缺省查最近一个）\" }",
+    formatLabel: () => "查询命令状态",
+    execute: executeCheckCommandStatus,
+  },
+  {
+    name: "stop_command",
+    description: "终止 run_command 启动的终端任务\n   { \"type\": \"stop_command\", \"terminalId\": \"终端 id（可选，缺省终止最近一个）\" }",
+    formatLabel: () => "终止命令",
+    execute: executeStopCommand,
+  },
+  {
+    name: "todo",
+    description: "维护待办清单（显示在 AI 面板）：replace 全量替换 / mark 标记完成 / clear 清空\n   { \"type\": \"todo\", \"todoAction\": \"replace\", \"items\": [\"步骤1\", \"步骤2\"] }\n   { \"type\": \"todo\", \"todoAction\": \"mark\", \"index\": 1, \"done\": true }",
+    formatLabel: (a) => `待办清单: ${a.todoAction || "replace"}`,
+    execute: executeTodo,
+  },
+  {
+    name: "plugin",
+    description: "调用插件提供的工具",
+    formatLabel: (a) => `插件工具: ${a.pluginName || ""}`,
+    execute: executePlugin,
+  },
+];
+
+export async function executeAction(action: AgentAction): Promise<AgentActionResult> {
+  const tool = AGENT_TOOLS.find((t) => t.name === action.type);
+  if (!tool) return { actionId: action.id, ok: false, error: "未知操作类型" };
+  return tool.execute(action);
 }
 
 export function requestActionConfirmation(): Promise<boolean> {

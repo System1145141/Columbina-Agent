@@ -169,6 +169,7 @@ const ideApi = {
   getFileInfo: (filePath: string) => ipcRenderer.invoke(IPC.IDE_GET_FILE_INFO, filePath),
   searchFiles: (folderPath: string, query: string, options?: { caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean; maxResults?: number }) =>
     ipcRenderer.invoke(IPC.IDE_SEARCH_FILES, folderPath, query, options),
+  listFiles: (rootPath: string, pattern: string) => ipcRenderer.invoke(IPC.IDE_LIST_FILES, rootPath, pattern) as Promise<string[]>,
   move: (sourcePath: string, targetDir: string) => ipcRenderer.invoke(IPC.IDE_MOVE, sourcePath, targetDir) as Promise<{ ok: boolean; error?: string }>,
   getMemoryContext: (query: string) => ipcRenderer.invoke(IPC.IDE_GET_MEMORY_CONTEXT, query) as Promise<string>,
   loadPersona: (identityId: string, lang?: string) =>

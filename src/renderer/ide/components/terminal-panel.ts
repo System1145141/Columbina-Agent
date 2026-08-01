@@ -188,16 +188,20 @@ function toggleTerminalPanel() {
   else showTerminalPanel();
 }
 
-async function runCommandInTerminal(command: string): Promise<void> {
+async function runCommandInTerminal(command: string): Promise<string | null> {
   state.terminalVisible = true;
   terminalPanelEl.style.display = "flex";
+  let tab: TerminalTab | null = null;
   if (terminalTabs.size === 0) {
-    const tab = await createTerminalTab(getActiveRootPath() || undefined);
-    if (tab) window.ide?.terminalInput(tab.id, command + "\r");
-    return;
+    tab = await createTerminalTab(getActiveRootPath() || undefined);
+  } else {
+    tab = activeTerminalId ? terminalTabs.get(activeTerminalId) ?? null : null;
   }
-  const tab = activeTerminalId ? terminalTabs.get(activeTerminalId) : undefined;
-  if (tab) window.ide?.terminalInput(tab.id, command + "\r");
+  if (!tab) return null;
+  window.ide?.terminalInput(tab.id, command + "\r");
+  // 记录为 Agent 追踪的终端（供 check_command_status / stop_command 使用）
+  state.agentTerminals[tab.id] = { running: true, lastOutput: state.agentTerminals[tab.id]?.lastOutput || "" };
+  return tab.id;
 }
 
 /** 在指定目录新建一个集成终端（供文件树右键菜单调用） */
@@ -218,10 +222,16 @@ export function initTerminalPanel(): void {
   // 全局订阅：所有终端的输出与退出事件按 id 分发到对应标签
   window.ide?.onTerminalData(({ id, data }) => {
     terminalTabs.get(id)?.term.write(data);
+    const t = state.agentTerminals[id];
+    if (t) {
+      t.lastOutput = (t.lastOutput + data).slice(-8000);
+    }
   });
   window.ide?.onTerminalExit(({ id }) => {
     const tab = terminalTabs.get(id);
     if (tab) tab.term.writeln("\r\n[进程已退出]");
+    const t = state.agentTerminals[id];
+    if (t) t.running = false;
   });
 
   window.addEventListener("resize", () => {

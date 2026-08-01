@@ -98,7 +98,23 @@ export interface AguiBaseEvent {
 
 export interface AgentAction {
   id: string;
-  type: "read_file" | "write_file" | "search_files" | "run_command" | "rename_symbol" | "plugin";
+  type:
+    | "read_file"
+    | "write_file"
+    | "search_files"
+    | "run_command"
+    | "rename_symbol"
+    | "generate_tests"
+    | "review_changes"
+    | "edit_file"
+    | "delete_file"
+    | "list_dir"
+    | "list_files"
+    | "get_diagnostics"
+    | "check_command_status"
+    | "stop_command"
+    | "todo"
+    | "plugin";
   filePath?: string;
   content?: string;
   query?: string;
@@ -107,6 +123,17 @@ export interface AgentAction {
   line?: number;
   col?: number;
   newName?: string;
+  /** edit_file：多块精确替换（occurrence 1 基，缺省替换全部） */
+  edits?: { search: string; replace: string; occurrence?: number }[];
+  /** list_files：glob 模式（相对 root） */
+  pattern?: string;
+  /** check_command_status / stop_command：终端 id */
+  terminalId?: string;
+  /** todo：动作与数据 */
+  todoAction?: "replace" | "mark" | "clear";
+  items?: string[];
+  index?: number;
+  done?: boolean;
   pluginName?: string;
   pluginParams?: Record<string, unknown>;
   confirmed?: boolean;
@@ -268,6 +295,10 @@ export const state = {
   aiEventUnsub: null as (() => void) | null,
   aiCurrentPlan: null as AiTaskPlan | null,
   aiTaskPlanRunning: false,
+  /** Agent 的待办清单（todo 工具），AI 面板展示 */
+  aiTodos: [] as { id: string; text: string; done: boolean }[],
+  /** 终端运行状态（check_command_status / stop_command 工具）：id → 运行状态与最近输出 */
+  agentTerminals: {} as Record<string, { running: boolean; lastOutput: string }>,
   fileSnapshots: new Map<string, FileSnapshot>(),
   /** 跨文件重构的整体撤销栈（FIFO，上限 20 组） */
   refactorUndoStack: [] as RefactorUndoGroup[],
@@ -656,6 +687,7 @@ declare global {
         query: string,
         options?: { caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean; maxResults?: number }
       ) => Promise<IdeSearchResult[]>;
+      listFiles: (rootPath: string, pattern: string) => Promise<string[]>;
       move: (sourcePath: string, targetDir: string) => Promise<{ ok: boolean; error?: string }>;
       getMemoryContext: (query: string) => Promise<string>;
       loadPersona: (identityId: string, lang?: string) => Promise<{ identityName: string; persona: string; toneRules: string }>;

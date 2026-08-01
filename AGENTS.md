@@ -22,18 +22,28 @@
 - 多会话管理：新建 / 复制 / 重命名 / 删除 / 清空；会话随工作区持久化（每会话 200 条消息、总数上限 30 个，超限淘汰最久未更新者），重开 IDE 自动恢复；无题会话自动以首条消息命名；Agent 运行中禁止切换会话。
 - 面板显示 Agent 思考过程与操作结果，操作确认卡片逐条展示，可撤销。
 
-**Agent 工具集（8 种，全部需用户确认后才执行）**
+**Agent 工具集（16 种，全部需用户确认后才执行）**
 
 | 工具 | 能力 |
 |------|------|
 | read_file | 读取文件 |
 | write_file | 写入/覆盖文件（危险操作，自动保存快照可撤销） |
-| search_files | 项目内搜索 |
-| run_command | 在集成终端运行 shell 命令 |
+| edit_file | 精确文本替换（search→replace 多块、可指定出现次数，diff 预览 + 可整体撤销） |
+| delete_file | 删除文件（确认 + 快照，可撤销恢复） |
+| list_dir | 列出目录内容 |
+| list_files | 按 glob 模式列出文件（支持 `**/*.ts`，主进程遍历） |
+| search_files | 项目内文本搜索 |
+| get_diagnostics | 获取文件 LSP 诊断（错误/警告列表） |
+| run_command | 在集成终端运行命令（返回终端 id） |
+| check_command_status | 查询终端任务运行状态与最近输出 |
+| stop_command | 终止终端任务 |
+| todo | 维护待办清单（replace / mark / clear，AI 面板展示卡片） |
 | rename_symbol | 跨文件重命名符号（基于 LSP 引用分析） |
 | generate_tests | 生成单元测试（自动检测项目测试框架） |
 | review_changes | 审查当前 Git 变更（收集各工作区 diff） |
 | plugin | 调用插件提供的工具 |
+
+- 工具实现改为**注册表驱动**：`AGENT_TOOLS` 注册表（name / description / formatLabel / execute），`executeAction` 查表执行、`buildToolsPrompt` 与 `formatActionLabel` 自动生成——新增工具只需注册一项，无需改动解析与提示词拼接。
 
 **任务规划与多轮执行**
 - 复杂需求先输出任务计划（3-8 步），用户可确认、修改或取消；每完成一步 Agent 自动进入下一步，直到任务完成。

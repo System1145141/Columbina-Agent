@@ -88,6 +88,11 @@ export async function readDir(dirPath: string): Promise<IdeDirEntry[]> {
   return (await window.ide!.readDir(dirPath)) || [];
 }
 
+/** 按 glob 模式列出 root 下的相对路径文件（如 src/**\/*.ts，上限 200） */
+export async function listFiles(rootPath: string, pattern: string): Promise<string[]> {
+  return (await window.ide!.listFiles(rootPath, pattern)) || [];
+}
+
 export async function readFile(filePath: string): Promise<string> {
   return window.ide!.readFile(filePath);
 }

@@ -3552,6 +3552,69 @@ ipcMain.handle(IPC.IDE_SEARCH_FILES, async (_event, folderPath: unknown, query: 
   return results;
 });
 
+/** 简单的 glob → 正则转换（支持 ** 任意层级、* 文件名片段、? 单字符；按相对路径匹配） */
+function globToRegex(glob: string): RegExp {
+  let re = "";
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === "*") {
+      if (glob[i + 1] === "*") {
+        i++;
+        re += "(?:.*/)?";
+      } else {
+        re += "[^/]*";
+      }
+    } else if (c === "?") {
+      re += "[^/]";
+    } else if ("\\^$.[]{}|+".includes(c)) {
+      re += "\\" + c;
+    } else {
+      re += c;
+    }
+  }
+  return new RegExp(`^${re}$`);
+}
+
+const IDE_LIST_FILES_MAX = 200;
+
+function listFilesMatching(dirPath: string, regex: RegExp, baseRel: string, out: string[]): void {
+  if (out.length >= IDE_LIST_FILES_MAX) return;
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dirPath, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (out.length >= IDE_LIST_FILES_MAX) break;
+    if (entry.name.startsWith(".")) continue;
+    const rel = baseRel ? `${baseRel}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      if (IDE_SEARCH_IGNORE_DIRS.has(entry.name)) continue;
+      listFilesMatching(path.join(dirPath, entry.name), regex, rel, out);
+    } else if (entry.isFile() && regex.test(rel)) {
+      out.push(rel);
+    }
+  }
+}
+
+ipcMain.handle(IPC.IDE_LIST_FILES, async (_event, rootPath: unknown, pattern: unknown) => {
+  if (typeof rootPath !== "string" || typeof pattern !== "string" || pattern.length === 0) return [];
+  let regex: RegExp;
+  try {
+    regex = globToRegex(pattern);
+  } catch {
+    return [];
+  }
+  const out: string[] = [];
+  try {
+    listFilesMatching(rootPath, regex, "", out);
+  } catch {
+    // 忽略遍历错误
+  }
+  return out;
+});
+
 const ideTerminals = new Map<string, pty.IPty>();
 
 // 主进程维护的工作区 roots 集合，用于文件操作 IPC 的路径校验

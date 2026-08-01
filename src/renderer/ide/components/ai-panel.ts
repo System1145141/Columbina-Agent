@@ -332,6 +332,29 @@ function renderAiPlan() {
   aiMessagesEl.parentElement?.insertBefore(card, aiMessagesEl);
 }
 
+function renderAiTodos() {
+  const existing = document.getElementById("ai-todo-card");
+  if (existing) existing.remove();
+  if (state.aiTodos.length === 0) return;
+  const card = document.createElement("div");
+  card.id = "ai-todo-card";
+  card.className = "ide__ai-plan-card";
+  const header = document.createElement("div");
+  header.className = "ide__ai-plan-header";
+  header.textContent = `待办清单（${state.aiTodos.filter((t) => t.done).length}/${state.aiTodos.length}）`;
+  card.appendChild(header);
+  const list = document.createElement("div");
+  list.className = "ide__ai-plan-steps";
+  for (const todo of state.aiTodos) {
+    const item = document.createElement("div");
+    item.className = "ide__ai-plan-step" + (todo.done ? " is-done" : "");
+    item.textContent = `${todo.done ? "✓" : "○"} ${todo.text}`;
+    list.appendChild(item);
+  }
+  card.appendChild(list);
+  aiMessagesEl.parentElement?.insertBefore(card, aiMessagesEl);
+}
+
 /** 记录上次填充模型下拉时的身份，身份变化时重填 */
 let lastModelIdentity = "";
 
@@ -366,6 +389,7 @@ function updateAiPanel() {
   }
   renderSessionButton();
   renderAiMessages();
+  renderAiTodos();
   renderAiPlan();
 }
 
