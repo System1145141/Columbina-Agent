@@ -22,6 +22,7 @@ import {
   changeEditorFontSize,
   toggleAiPanel,
   toggleAutoSave,
+  toggleOutlinePanel,
 } from "../services/layout";
 import { saveWorkspace, openWorkspace } from "../services/workspace-service";
 
@@ -127,6 +128,13 @@ function getBaseCommands(): CommandItem[] {
       icon: "⚠",
       shortcut: "Ctrl+Shift+M",
       run: () => toggleProblemsPanel(),
+    },
+    {
+      id: "toggle-outline",
+      label: "切换大纲",
+      icon: "☰",
+      shortcut: "Ctrl+Shift+O",
+      run: () => toggleOutlinePanel(),
     },
     {
       id: "toggle-terminal",

@@ -90,11 +90,13 @@ export function showSearchPanel(): void {
   state.searchVisible = true;
   state.gitPanelVisible = false;
   state.problemsVisible = false;
+  state.outlineVisible = false;
   sidebarTitleEl.textContent = "搜索";
   treeRootEl.style.display = "none";
   searchPanelEl.style.display = "flex";
   gitPanelEl.style.display = "none";
   problemsPanelEl.style.display = "none";
+  outlinePanelEl.style.display = "none";
   document.getElementById("search-input")?.focus();
   notify();
 }
@@ -117,11 +119,13 @@ export function showProblemsPanel(): void {
   state.problemsVisible = true;
   state.searchVisible = false;
   state.gitPanelVisible = false;
+  state.outlineVisible = false;
   sidebarTitleEl.textContent = "问题";
   treeRootEl.style.display = "none";
   searchPanelEl.style.display = "none";
   gitPanelEl.style.display = "none";
   problemsPanelEl.style.display = "flex";
+  outlinePanelEl.style.display = "none";
   notify();
 }
 
@@ -140,15 +144,49 @@ export function toggleProblemsPanel(): void {
   else showProblemsPanel();
 }
 
+const outlinePanelEl = document.getElementById("outline-panel") as HTMLElement;
+
+export function showOutlinePanel(): void {
+  state.outlineVisible = true;
+  state.searchVisible = false;
+  state.gitPanelVisible = false;
+  state.problemsVisible = false;
+  sidebarTitleEl.textContent = "大纲";
+  treeRootEl.style.display = "none";
+  searchPanelEl.style.display = "none";
+  gitPanelEl.style.display = "none";
+  problemsPanelEl.style.display = "none";
+  outlinePanelEl.style.display = "flex";
+  notify();
+}
+
+export function hideOutlinePanel(): void {
+  state.outlineVisible = false;
+  sidebarTitleEl.textContent = "资源管理器";
+  treeRootEl.style.display = "block";
+  searchPanelEl.style.display = "none";
+  gitPanelEl.style.display = "none";
+  problemsPanelEl.style.display = "none";
+  outlinePanelEl.style.display = "none";
+  notify();
+}
+
+export function toggleOutlinePanel(): void {
+  if (state.outlineVisible) hideOutlinePanel();
+  else showOutlinePanel();
+}
+
 export function showGitPanel(): void {
   state.gitPanelVisible = true;
   state.searchVisible = false;
   state.problemsVisible = false;
+  state.outlineVisible = false;
   sidebarTitleEl.textContent = "源代码管理";
   treeRootEl.style.display = "none";
   searchPanelEl.style.display = "none";
   gitPanelEl.style.display = "flex";
   problemsPanelEl.style.display = "none";
+  outlinePanelEl.style.display = "none";
   notify();
 }
 

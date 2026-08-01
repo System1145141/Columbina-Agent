@@ -3,7 +3,7 @@ import { autocompletion, type Completion, type CompletionContext, type Completio
 import { hoverTooltip, keymap, ViewPlugin, EditorView, type ViewUpdate } from "@codemirror/view";
 import { StateEffect, StateField, EditorState, type Extension, type Text } from "@codemirror/state";
 import { getLspClient, removeLspClient, type LspClient, type LspDiagnostic, type LspRange } from "../services/lsp-client";
-import { state, subscribe, notify, setLspDiagnostics, getLspDiagnostics, getRootForPath, type IdeSearchResult } from "../services/state";
+import { state, subscribe, notify, setLspDiagnostics, getLspDiagnostics, getRootForPath, type IdeSearchResult, type OutlineSymbol } from "../services/state";
 import { getFileExtension, openFileAt, readFile, writeFile, encodeLineEndings } from "../services/file-service";
 import { showReferencesResults } from "./file-tree";
 
@@ -655,4 +655,76 @@ export function notifyLspClose(filePath: string): void {
   if (!ctx) return;
   ctx.client.textDocumentDidClose(filePath);
   lspVersions.delete(filePath);
+}
+
+// ── 大纲 / 符号列表 ──
+
+function parseSymbolItem(item: unknown): OutlineSymbol | null {
+  if (!item || typeof item !== "object") return null;
+  const rec = item as Record<string, unknown>;
+  if (typeof rec.name !== "string") return null;
+
+  // DocumentSymbol：selectionRange 定位到名称
+  const selRange = rec.selectionRange as { start?: { line?: number; character?: number } } | undefined;
+  if (selRange?.start && typeof selRange.start.line === "number") {
+    const children = Array.isArray(rec.children) ? rec.children.map(parseSymbolItem).filter((s): s is OutlineSymbol => !!s) : [];
+    return {
+      name: rec.name,
+      detail: typeof rec.detail === "string" ? rec.detail : undefined,
+      kind: typeof rec.kind === "number" ? rec.kind : 0,
+      line: selRange.start.line + 1,
+      col: (selRange.start.character ?? 0) + 1,
+      children,
+    };
+  }
+
+  // SymbolInformation：location.range 定位
+  const loc = rec.location as { range?: { start?: { line?: number; character?: number } } } | undefined;
+  if (loc?.range?.start && typeof loc.range.start.line === "number") {
+    return {
+      name: rec.name,
+      detail: undefined,
+      kind: typeof rec.kind === "number" ? rec.kind : 0,
+      line: loc.range.start.line + 1,
+      col: (loc.range.start.character ?? 0) + 1,
+      children: [],
+    };
+  }
+
+  return null;
+}
+
+function parseDocumentSymbols(result: unknown): OutlineSymbol[] {
+  if (!Array.isArray(result)) return [];
+  return result.map(parseSymbolItem).filter((s): s is OutlineSymbol => !!s);
+}
+
+/** 请求 documentSymbol 并更新大纲状态；失败时清空（如无 LSP/语言不支持） */
+export async function refreshOutline(filePath: string): Promise<void> {
+  const ctx = getLspContext(filePath);
+  if (!ctx) {
+    state.outlineFilePath = filePath;
+    state.outlineSymbols = [];
+    state.outlineVersion++;
+    notify();
+    return;
+  }
+  try {
+    // 确保语言服务器已启动（首次打开文件时服务器可能还在启动中）
+    const started = await ctx.client.start();
+    if (!started.ok) throw new Error(started.error || "启动语言服务器失败");
+    const result = await sendLspRequest(ctx.client, "textDocument/documentSymbol", {
+      textDocument: { uri: filePathToUri(filePath) },
+    });
+    state.outlineFilePath = filePath;
+    state.outlineSymbols = parseDocumentSymbols(result);
+    state.outlineVersion++;
+    notify();
+  } catch (err) {
+    console.error("[LSP] documentSymbol failed:", err);
+    state.outlineFilePath = filePath;
+    state.outlineSymbols = [];
+    state.outlineVersion++;
+    notify();
+  }
 }

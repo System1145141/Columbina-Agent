@@ -769,10 +769,11 @@ src/main/
    - 验收：打开 GBK 中文文件不乱码；切换编码后保存，磁盘字节符合目标编码。
    - 实现：新增 `IDE_READ_FILE_ENCODED` 通道与 `src/main/file-encoding.ts`（BOM → UTF-16 零字节启发式 → UTF-8 严格校验 → GB18030 兜底，依赖 iconv-lite）；`IDE_WRITE_FILE` 支持可选 `encoding` 参数；Tab 增加 `encoding` 字段；状态栏新增编码指示器与切换菜单；外部变更重载与大文件完整加载也会重新探测编码。
 
-2. **大纲 / 符号列表**
+2. **大纲 / 符号列表** ✅ 已完成
    - 复用 LSP `textDocument/documentSymbol`，在侧边栏新增「大纲」视图（与文件树/搜索/Git 面板并列切换）。
    - 展示当前文件类、函数、变量符号树，点击跳转定位；文档变更后防抖刷新。
    - 验收：打开 TS/JS 文件能看到符号树并可点击跳转。
+   - 实现：`refreshOutline`（lsp-integration，自动启动语言服务器，支持 DocumentSymbol/SymbolInformation 两种响应并构建符号树）；新增 `outline-panel.ts` 组件与 `outlineVisible/outlineSymbols/outlineVersion` 状态；侧边栏 ☰ 按钮与命令面板「切换大纲」（Ctrl+Shift+O）可开关；标签切换立即刷新、编辑停止 350ms 防抖刷新；点击符号定位光标（跨标签自动打开文件）。
 
 3. **全局替换完善**
    - 搜索面板补齐「替换」输入框与「替换全部 / 逐个替换」流程，替换前逐条 diff 预览确认。

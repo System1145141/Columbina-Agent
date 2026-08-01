@@ -33,6 +33,7 @@
           <div class="ide__sidebar-actions">
             <button type="button" class="ide__sidebar-action" id="search-toggle-btn" title="在文件夹中搜索 (Ctrl+Shift+F)">🔍</button>
             <button type="button" class="ide__sidebar-action" id="problems-toggle-btn" title="问题面板 (Ctrl+Shift+M)">⚠</button>
+            <button type="button" class="ide__sidebar-action" id="outline-toggle-btn" title="大纲 (Ctrl+Shift+O)">☰</button>
             <button type="button" class="ide__sidebar-action" id="git-toggle-btn" title="源代码管理">🌿</button>
           </div>
         </div>
@@ -54,6 +55,13 @@
             <button type="button" class="ide__problems-clear" id="problems-clear-btn" title="清空所有问题" aria-label="清空所有问题">×</button>
           </div>
           <div class="ide__problems-list" id="problems-list"></div>
+        </div>
+        <div class="ide__outline" id="outline-panel" style="display: none;">
+          <div class="ide__outline-header">
+            <span>大纲</span>
+            <span class="ide__outline-file" id="outline-file" title=""></span>
+          </div>
+          <div class="ide__outline-list" id="outline-list"></div>
         </div>
         <div class="ide__git" id="git-panel" style="display: none;">
           <div class="ide__git-header">

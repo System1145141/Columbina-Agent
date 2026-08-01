@@ -388,6 +388,93 @@ html, body, .ide {
   white-space: nowrap;
 }
 
+/* 大纲面板 */
+.ide__outline {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ide__outline-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid #3e3e42;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.ide__outline-file {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 400;
+  color: #858585;
+  text-align: right;
+}
+
+.ide__outline-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+  color: #cccccc;
+  font-size: 13px;
+}
+
+.ide__outline-group {
+  display: block;
+}
+
+.ide__outline-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.ide__outline-row:hover {
+  background: #2a2d2e;
+}
+
+.ide__outline-glyph {
+  flex-shrink: 0;
+  width: 16px;
+  font-size: 11px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.ide__outline-glyph--class { color: #4ec9b0; }
+.ide__outline-glyph--func { color: #dcdcaa; }
+.ide__outline-glyph--var { color: #9cdcfe; }
+.ide__outline-glyph--module { color: #c586c0; }
+.ide__outline-glyph--enum { color: #ce9178; }
+.ide__outline-glyph--other { color: #858585; }
+
+.ide__outline-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ide__outline-detail {
+  color: #858585;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+}
+
 /* Git panel */
 .ide__git {
   flex: 1;
@@ -2601,6 +2688,23 @@ html, body, .ide {
 
 .ide.ide--light .ide__context-menu-item:hover {
   background: #f0f0f0;
+}
+
+.ide.ide--light .ide__outline-header {
+  color: #333333;
+  border-color: #e5e5e5;
+}
+
+.ide.ide--light .ide__outline-list {
+  color: #333333;
+}
+
+.ide.ide--light .ide__outline-row:hover {
+  background: #f0f0f0;
+}
+
+.ide.ide--light .ide__outline-detail {
+  color: #888888;
 }
 
 .ide.ide--light .ide__context-menu-item--danger {

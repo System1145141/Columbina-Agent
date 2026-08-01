@@ -1,5 +1,5 @@
 import { state } from "./services/state";
-import { loadIdeSettings, toggleSearchPanel, toggleTerminalPanel, changeEditorFontSize } from "./services/layout";
+import { loadIdeSettings, toggleSearchPanel, toggleTerminalPanel, changeEditorFontSize, toggleOutlinePanel } from "./services/layout";
 import { restoreWorkspace, saveWorkspaceSync } from "./services/workspace-service";
 import { initFileWatcher } from "./services/file-service";
 import { initStatusBar } from "./components/status-bar";
@@ -11,6 +11,7 @@ import { initAiPanel } from "./components/ai-panel";
 import { initTerminalPanel } from "./components/terminal-panel";
 import { initGitPanel } from "./components/git-panel";
 import { initProblemsPanel } from "./components/problems-panel";
+import { initOutlinePanel } from "./components/outline-panel";
 import { initializePlugins } from "./plugins/manager";
 
 function initWindowControls(): void {
@@ -29,6 +30,16 @@ function initGlobalShortcuts(): void {
     if (isMod && e.shiftKey && e.key === "F") {
       e.preventDefault();
       toggleSearchPanel();
+      return;
+    }
+    if (isMod && e.shiftKey && e.key === "M") {
+      e.preventDefault();
+      toggleProblemsPanel();
+      return;
+    }
+    if (isMod && e.shiftKey && e.key === "O") {
+      e.preventDefault();
+      toggleOutlinePanel();
       return;
     }
     if (isMod && e.key === "`") {
@@ -62,6 +73,7 @@ function init(): void {
   initTerminalPanel();
   initGitPanel();
   initProblemsPanel();
+  initOutlinePanel();
 
   void loadIdeSettings();
   void restoreWorkspace();

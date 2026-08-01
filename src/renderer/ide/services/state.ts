@@ -184,6 +184,17 @@ export interface ProjectIndexEntry {
   keywords: string[];
 }
 
+/** LSP documentSymbol 转换后的大纲符号节点（行/列为 1 基） */
+export interface OutlineSymbol {
+  name: string;
+  detail?: string;
+  /** LSP SymbolKind 数值 */
+  kind: number;
+  line: number;
+  col: number;
+  children: OutlineSymbol[];
+}
+
 export interface CommandItem {
   id: string;
   label: string;
@@ -237,10 +248,16 @@ export const state = {
 
   searchVisible: false,
   problemsVisible: false,
+  outlineVisible: false,
   commandPaletteVisible: false,
   commandItems: [] as CommandItem[],
   commandSelectedIndex: -1,
   fileCommandItems: [] as CommandItem[],
+
+  /** 大纲面板：当前文件的符号树与版本号（版本号变化时面板重渲染） */
+  outlineSymbols: [] as OutlineSymbol[],
+  outlineFilePath: "" as string,
+  outlineVersion: 0,
 
   promptResolve: null as ((value: string | null) => void) | null,
 
