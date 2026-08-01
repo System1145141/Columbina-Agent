@@ -11,7 +11,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import { defaultKeymap, indentWithTab } from "@codemirror/commands";
 import { state, subscribe, notify, type InlineChatState } from "../services/state";
 import { saveTab, getFileExtension, loadFullFile } from "../services/file-service";
-import { callAgentStream } from "../services/agent-bridge";
+import { callAgentStream, buildPersonaPrompt } from "../services/agent-bridge";
 import {
   lspExtension,
   notifyLspOpen,
@@ -769,7 +769,8 @@ async function runInlineChat(instruction: string) {
   try {
     const filePath = state.activeTabId ? state.tabs.get(state.activeTabId)?.filePath : "";
     const context = filePath ? `当前文件: ${filePath}` : "";
-    const prompt = `${context ? context + "\n\n" : ""}你是一名资深编程助手，正在 IDE 中帮助用户修改选中的代码。
+    const persona = await buildPersonaPrompt(instruction);
+    const prompt = `${persona ? persona + "\n\n---\n\n" : ""}${context ? context + "\n\n" : ""}你是一名资深编程助手，正在 IDE 中帮助用户修改选中的代码。
 
 用户指令: ${instruction}
 

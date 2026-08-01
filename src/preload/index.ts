@@ -171,6 +171,8 @@ const ideApi = {
     ipcRenderer.invoke(IPC.IDE_SEARCH_FILES, folderPath, query, options),
   move: (sourcePath: string, targetDir: string) => ipcRenderer.invoke(IPC.IDE_MOVE, sourcePath, targetDir) as Promise<{ ok: boolean; error?: string }>,
   getMemoryContext: (query: string) => ipcRenderer.invoke(IPC.IDE_GET_MEMORY_CONTEXT, query) as Promise<string>,
+  loadPersona: (identityId: string, lang?: string) =>
+    ipcRenderer.invoke(IPC.IDE_LOAD_PERSONA, identityId, lang) as Promise<{ identityName: string; persona: string; toneRules: string }>,
   createFile: (dirPath: string, fileName: string) => ipcRenderer.invoke(IPC.IDE_CREATE_FILE, dirPath, fileName) as Promise<{ ok: boolean; path?: string; error?: string }>,
   createDir: (dirPath: string, dirName: string) => ipcRenderer.invoke(IPC.IDE_CREATE_DIR, dirPath, dirName) as Promise<{ ok: boolean; path?: string; error?: string }>,
   delete: (targetPath: string) => ipcRenderer.invoke(IPC.IDE_DELETE, targetPath) as Promise<{ ok: boolean; error?: string }>,

@@ -1916,6 +1916,24 @@ function buildSystemPrompt(styleFile: string, identityId?: string, lang = "cn"):
 }
 
 /**
+ * IDE 专用人格段：复用 loadPromptFile 组装 identity + soul + canon_quotes + 默认风格。
+ * 与聊天模式的 buildSystemPrompt 不同：不含 system.md（其聊天规则/todo_write/文档工具
+ * 指引与 IDE 编程场景冲突），语气规则由渲染进程单独注入。
+ */
+function buildIdePersonaPrompt(identityId: string, lang = "cn"): string {
+  const parts: string[] = [];
+  const identity = loadPromptFile("identity.md", identityId, lang);
+  if (identity) parts.push(identity);
+  const soul = loadPromptFile("soul.md", identityId, lang);
+  if (soul) parts.push(soul);
+  const canon = loadPromptFile("canon_quotes.md", identityId, lang);
+  if (canon) parts.push(canon);
+  const style = loadPromptFile("styles/01_default.md", identityId, lang);
+  if (style) parts.push(style);
+  return parts.join("\n\n---\n\n");
+}
+
+/**
  * /命令拦截：命中 /skill-id（且 skill 存在+启用）则返回 system 激活段
  * （正文注入 system，user message 原样，不污染 memory，见 spec 6.3）。
  * 命中但 skill 不存在/未启用 → 改写该 user 消息为提示，返回 ""。
@@ -3198,6 +3216,16 @@ ipcMain.handle(IPC.IDE_GET_MEMORY_CONTEXT, async (_event, query: unknown) => {
     console.error("[Columbina IDE] buildMemoryContext failed:", err?.message || err);
     return "";
   }
+});
+
+ipcMain.handle(IPC.IDE_LOAD_PERSONA, async (_event, identityId: unknown, lang: unknown) => {
+  const id = typeof identityId === "string" ? identityId : "columbina";
+  const promptLang = typeof lang === "string" ? lang : "cn";
+  const identityName = id === "sandrone" ? "桑多涅" : "哥伦比娅";
+  // 人格核心：身份 + 灵魂 + 原作台词 + 默认风格（不含 system.md 的聊天规则与 markdown 禁令）
+  const persona = buildIdePersonaPrompt(id, promptLang);
+  const toneRules = loadPromptFile("tone-rules.md", undefined, promptLang);
+  return { identityName, persona, toneRules };
 });
 
 ipcMain.handle(IPC.IDE_CREATE_FILE, async (_event, dirPath: unknown, fileName: unknown) => {

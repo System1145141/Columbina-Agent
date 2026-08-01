@@ -46,6 +46,7 @@ export async function loadIdeSettings(): Promise<void> {
             : state.ideSettings.tabSize,
           insertSpaces: typeof saved.insertSpaces === "boolean" ? saved.insertSpaces : state.ideSettings.insertSpaces,
           autoSave: typeof saved.autoSave === "boolean" ? saved.autoSave : state.ideSettings.autoSave,
+          agentIdentity: saved.agentIdentity === "sandrone" ? "sandrone" : "columbina",
           languageServers: saved.languageServers && typeof saved.languageServers === "object"
             ? saved.languageServers
             : state.ideSettings.languageServers,
@@ -85,6 +86,13 @@ export function changeEditorFontSize(delta: number): void {
 
 export function toggleAutoSave(): Promise<void> {
   return saveIdeSettings({ autoSave: !state.ideSettings.autoSave });
+}
+
+/** 循环切换 Agent 人格身份：哥伦比娅 ⇄ 桑多涅 */
+export function toggleAgentIdentity(): Promise<void> {
+  const next: "columbina" | "sandrone" = state.ideSettings.agentIdentity === "sandrone" ? "columbina" : "sandrone";
+  state.statusMessage = next === "sandrone" ? "Agent 身份切换为：桑多涅" : "Agent 身份切换为：哥伦比娅";
+  return saveIdeSettings({ agentIdentity: next });
 }
 
 export function showSearchPanel(): void {

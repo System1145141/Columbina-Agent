@@ -23,6 +23,7 @@ import {
   toggleAiPanel,
   toggleAutoSave,
   toggleOutlinePanel,
+  toggleAgentIdentity,
 } from "../services/layout";
 import { saveWorkspace, openWorkspace } from "../services/workspace-service";
 import { getRecentFiles } from "../services/recent-files";
@@ -148,6 +149,12 @@ function getBaseCommands(): CommandItem[] {
         toggleAiPanel();
         void runAgentTurn("请审查当前 Git 变更文件（未提交的改动），按严重程度（高/中/低）输出问题清单，并给出修复建议。", "git");
       },
+    },
+    {
+      id: "toggle-agent-identity",
+      label: "切换 Agent 身份",
+      icon: "🎭",
+      run: () => void toggleAgentIdentity(),
     },
     {
       id: "toggle-search",

@@ -56,6 +56,8 @@ export interface IdeSettings {
   autoSave?: boolean;
   /** 自定义语言服务器配置，key 为语言 ID（如 typescript / python）；未配置的语言使用内置映射 */
   languageServers?: Record<string, LanguageServerConfig>;
+  /** Agent 人格身份：columbina（哥伦比娅）/ sandrone（桑多涅） */
+  agentIdentity?: "columbina" | "sandrone";
 }
 
 export interface WorkspaceRoot {
@@ -249,6 +251,7 @@ export const state = {
     tabSize: 2,
     insertSpaces: true,
     autoSave: true,
+    agentIdentity: "columbina" as "columbina" | "sandrone",
   } as IdeSettings,
 
   draggedTabId: "",
@@ -653,6 +656,7 @@ declare global {
       ) => Promise<IdeSearchResult[]>;
       move: (sourcePath: string, targetDir: string) => Promise<{ ok: boolean; error?: string }>;
       getMemoryContext: (query: string) => Promise<string>;
+      loadPersona: (identityId: string, lang?: string) => Promise<{ identityName: string; persona: string; toneRules: string }>;
       createFile: (dirPath: string, fileName: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
       createDir: (dirPath: string, dirName: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
       delete: (targetPath: string) => Promise<{ ok: boolean; error?: string }>;

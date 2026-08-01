@@ -75,6 +75,39 @@ export function stripActions(content: string): string {
   return content.replace(/<action>[\s\S]*?<\/action>/g, "").trim();
 }
 
+/** 按身份缓存的人格包（避免每次对话重复 IPC） */
+const personaCache = new Map<string, { identityName: string; persona: string; toneRules: string }>();
+
+/**
+ * 构建人格提示词段：加载哥伦比娅/桑多涅的 identity + soul + 原作台词 + 风格 + 语气规则。
+ * - 用户输入以 [Dev] 开头时不注入（开发者模式，与聊天模式约定一致）；
+ * - 加载失败时返回空串，退化为纯编程助手。
+ */
+export async function buildPersonaPrompt(userText: string): Promise<string> {
+  if (userText.trim().startsWith("[Dev]")) return "";
+  const identity: "columbina" | "sandrone" = state.ideSettings.agentIdentity || "columbina";
+  let pkg = personaCache.get(identity);
+  if (!pkg) {
+    try {
+      const loaded = await window.ide?.loadPersona(identity, "cn");
+      if (loaded && loaded.persona) {
+        pkg = loaded;
+        personaCache.set(identity, pkg);
+      }
+    } catch {
+      // 人格加载失败不阻塞对话
+    }
+  }
+  if (!pkg || !pkg.persona) return "";
+  return (
+    `## 角色设定：${pkg.identityName}\n\n` +
+    `你以「${pkg.identityName}」的身份回应，同时兼任用户的编程助手。` +
+    `保持她的性格、语气与说话方式；但在处理代码任务时，回答要专业、可靠、不遗漏关键信息。\n\n` +
+    pkg.persona +
+    (pkg.toneRules ? `\n\n---\n\n## 语气规则（必须遵守）\n${pkg.toneRules}` : "")
+  );
+}
+
 export function buildToolsPrompt(): string {
   const pluginToolLines: string[] = [];
   for (const tool of state.pluginTools) {
@@ -549,7 +582,8 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
   try {
     let round = 0;
     const initialContext = await buildAiContext(scope, userText);
-    let prompt = `你是一名资深的编程助手，正在帮助用户在 IDE 中工作。请根据以下上下文回答用户问题。${buildToolsPrompt()}\n\n${initialContext}\n\n用户问题:\n${userText}`;
+    const persona = await buildPersonaPrompt(userText);
+    let prompt = `${persona ? persona + "\n\n---\n\n" : ""}你是一名资深的编程助手，正在帮助用户在 IDE 中工作。请根据以下上下文回答用户问题。${buildToolsPrompt()}\n\n${initialContext}\n\n用户问题:\n${userText}`;
 
     while (round < maxRounds) {
       if (isCancelled?.()) break;
@@ -681,7 +715,8 @@ ${scope === "project" ? "当前项目上下文将单独提供。" : ""}
 
 export async function generateTaskPlan(goal: string, scope: AiContextScope): Promise<AiTaskPlan | null> {
   const context = scope === "project" ? await buildAiContext("project", goal) : await buildAiContext("file", goal);
-  const prompt = `${buildTaskPlanPrompt(goal, scope)}\n\n${context}`;
+  const persona = await buildPersonaPrompt(goal);
+  const prompt = `${persona ? persona + "\n\n---\n\n" : ""}${buildTaskPlanPrompt(goal, scope)}\n\n${context}`;
   const { content } = await callAgentStream(prompt);
   const parsed = parseTaskPlan(content);
   if (!parsed || !parsed.steps || parsed.steps.length === 0) return null;

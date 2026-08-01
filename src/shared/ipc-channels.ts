@@ -238,6 +238,7 @@ export const IPC = {
   IDE_TERMINAL_EXIT: "ide:terminal-exit",     // 主进程 → 渲染进程：终端退出
   IDE_MOVE: "ide:move",                       // 移动文件/文件夹到目标目录
   IDE_GET_MEMORY_CONTEXT: "ide:get-memory-context", // 获取 L0/L1/L2 记忆上下文
+  IDE_LOAD_PERSONA: "ide:load-persona",       // 加载 Agent 人格提示词（身份 + 语气规则）
   IDE_CREATE_FILE: "ide:create-file",         // 新建文件
   IDE_CREATE_DIR: "ide:create-dir",           // 新建文件夹
   IDE_DELETE: "ide:delete",                   // 删除文件/文件夹
