@@ -13,7 +13,7 @@ import {
   findReferences,
   formatDocument,
 } from "./lsp-integration";
-import { runAgentPlan } from "../services/agent-bridge";
+import { runAgentPlan, undoLastRefactor } from "../services/agent-bridge";
 import {
   toggleSearchPanel,
   toggleProblemsPanel,
@@ -121,6 +121,12 @@ function getBaseCommands(): CommandItem[] {
         toggleAiPanel();
         await runAgentPlan(goal.trim(), "project");
       },
+    },
+    {
+      id: "undo-last-refactor",
+      label: "撤销上次重构",
+      icon: "↩",
+      run: () => void undoLastRefactor(),
     },
     {
       id: "toggle-search",

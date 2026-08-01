@@ -14,6 +14,8 @@ import {
   clearInlineCompletion,
 } from "./state";
 import { ensureActiveSession } from "./ai-sessions";
+import { previewRenameSymbol, applyRefactorChanges } from "../components/lsp-integration";
+import { showRefactorPreview, type RefactorPreviewChange } from "../components/refactor-preview";
 import {
   basename,
   readFile,
@@ -77,7 +79,7 @@ export function buildToolsPrompt(): string {
     pluginToolLines.push(`- ${tool.name}: ${tool.description}\n   { "type": "plugin", "pluginName": "${tool.name}", "pluginParams": { ${paramsDesc ? `${paramsDesc}` : ""} } }`);
   }
 
-  return `\n\n你可以使用以下工具来操作项目代码。当需要读取、修改、搜索文件或运行命令时，在回复末尾插入一个或多个 <action>{...}</action> JSON 标记。每个 action 都需要用户确认后才会执行，执行结果会再次发给你。\n\n可用工具：\n1. read_file: 读取文件内容\n   { "type": "read_file", "filePath": "相对或绝对路径" }\n2. write_file: 写入或覆盖文件（危险操作，会保存快照以便撤销）\n   { "type": "write_file", "filePath": "路径", "content": "完整文件内容" }\n3. search_files: 在项目文件夹中搜索文本\n   { "type": "search_files", "query": "搜索关键词" }\n4. run_command: 在集成终端中运行 shell 命令\n   { "type": "run_command", "command": "要执行的命令" }${pluginToolLines.length > 0 ? "\n5. plugin: 调用插件提供的工具\n" + pluginToolLines.join("\n") : ""}\n\n注意：\n- 不要一次输出过多内容；优先分析再行动。\n- 写文件前最好先读取目标文件。\n- 回复中除了 action 标记外，可以用自然语言向用户说明你的计划。`;
+  return `\n\n你可以使用以下工具来操作项目代码。当需要读取、修改、搜索文件或运行命令时，在回复末尾插入一个或多个 <action>{...}</action> JSON 标记。每个 action 都需要用户确认后才会执行，执行结果会再次发给你。\n\n可用工具：\n1. read_file: 读取文件内容\n   { "type": "read_file", "filePath": "相对或绝对路径" }\n2. write_file: 写入或覆盖文件（危险操作，会保存快照以便撤销）\n   { "type": "write_file", "filePath": "路径", "content": "完整文件内容" }\n3. search_files: 在项目文件夹中搜索文本\n   { "type": "search_files", "query": "搜索关键词" }\n4. run_command: 在集成终端中运行 shell 命令\n   { "type": "run_command", "command": "要执行的命令" }\n5. rename_symbol: 跨文件重命名符号（基于 LSP 引用分析，所有引用文件同步更新；会生成 diff 预览，需用户确认后应用，可整体撤销）\n   { "type": "rename_symbol", "filePath": "符号所在文件路径", "line": "符号所在行号(从1开始)", "col": "符号所在列号(从1开始)", "newName": "新名称" }${pluginToolLines.length > 0 ? "\n6. plugin: 调用插件提供的工具\n" + pluginToolLines.join("\n") : ""}\n\n注意：\n- 不要一次输出过多内容；优先分析再行动。\n- 写文件前最好先读取目标文件。\n- 回复中除了 action 标记外，可以用自然语言向用户说明你的计划。`;
 }
 
 export function formatActionLabel(action: AgentAction): string {
@@ -90,6 +92,8 @@ export function formatActionLabel(action: AgentAction): string {
       return `搜索文件: ${action.query || ""}`;
     case "run_command":
       return `运行命令: ${action.command || ""}`;
+    case "rename_symbol":
+      return `重命名符号: ${action.newName || ""}（${action.filePath || ""}:${action.line || "?"}:${action.col || "?"}）`;
     case "plugin":
       return `插件工具: ${action.pluginName || ""}`;
     default:
@@ -187,6 +191,31 @@ export async function executeAction(action: AgentAction): Promise<AgentActionRes
         return { actionId: action.id, ok: false, error: `运行失败: ${String(err)}` };
       }
     }
+    case "rename_symbol": {
+      if (!action.filePath || !action.newName) {
+        return { actionId: action.id, ok: false, error: "缺少 filePath / newName" };
+      }
+      const line = typeof action.line === "number" ? action.line : 1;
+      const col = typeof action.col === "number" ? action.col : 1;
+      try {
+        const changes = await previewRenameSymbol(action.filePath, line, col, action.newName);
+        if (changes.size === 0) {
+          return { actionId: action.id, ok: false, error: "未找到可重命名的符号（语言服务器未启动、无法解析或文件未打开）" };
+        }
+        const preview: RefactorPreviewChange[] = Array.from(changes.entries()).map(([p, edits]) => ({ filePath: p, edits }));
+        const confirmed = await showRefactorPreview(preview, `重命名符号为 ${action.newName}`);
+        if (!confirmed) {
+          return { actionId: action.id, ok: false, output: "用户已取消重命名" };
+        }
+        const res = await applyRefactorChanges(changes, `重命名符号为 ${action.newName}`);
+        if (res.ok) {
+          return { actionId: action.id, ok: true, output: `已重命名 ${res.files.length} 个文件:\n${res.files.join("\n")}` };
+        }
+        return { actionId: action.id, ok: false, error: "部分文件应用失败，请查看控制台" };
+      } catch (err) {
+        return { actionId: action.id, ok: false, error: `重命名失败: ${String(err)}` };
+      }
+    }
     case "plugin": {
       if (!action.pluginName) return { actionId: action.id, ok: false, error: "缺少 pluginName" };
       try {
@@ -253,6 +282,48 @@ export async function undoLastWrite(): Promise<void> {
   } catch (err) {
     alert(`撤销失败: ${String(err)}`);
   }
+}
+
+/** 撤销最近一次跨文件重构（整体回滚所有快照文件） */
+export async function undoLastRefactor(): Promise<boolean> {
+  const group = state.refactorUndoStack[state.refactorUndoStack.length - 1];
+  if (!group) return false;
+  if (!confirm(`撤销重构「${group.label}」？将恢复 ${group.snapshots.length} 个文件到重构前状态`)) return false;
+  state.refactorUndoStack.pop();
+
+  let failed = 0;
+  for (const snap of group.snapshots) {
+    try {
+      const output = encodeLineEndings(snap.content, snap.lineEnding);
+      const result = await writeFile(snap.filePath, output);
+      if (!result.ok) {
+        failed++;
+        continue;
+      }
+      const tab = state.tabs.get(snap.filePath);
+      if (tab) {
+        tab.initialContent = snap.content;
+        tab.currentContent = snap.content;
+        tab.modified = false;
+        tab.lineEnding = snap.lineEnding;
+        if (state.activeTabId === snap.filePath && state.editorView) {
+          state.editorView.dispatch({
+            changes: { from: 0, to: state.editorView.state.doc.length, insert: tab.currentContent },
+          });
+        }
+      }
+    } catch (err) {
+      failed++;
+    }
+  }
+  notify();
+  state.aiMessages.push({
+    id: `s-${Date.now()}`,
+    role: "model",
+    content: failed > 0 ? `撤销重构「${group.label}」部分失败（${failed} 个文件）` : `已撤销重构「${group.label}」`,
+  });
+  notify();
+  return failed === 0;
 }
 
 export async function buildAiContext(scope: AiContextScope, query?: string): Promise<string> {

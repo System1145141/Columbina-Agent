@@ -3,9 +3,10 @@ import { autocompletion, type Completion, type CompletionContext, type Completio
 import { hoverTooltip, keymap, ViewPlugin, EditorView, type ViewUpdate } from "@codemirror/view";
 import { StateEffect, StateField, EditorState, type Extension, type Text } from "@codemirror/state";
 import { getLspClient, removeLspClient, type LspClient, type LspDiagnostic, type LspRange } from "../services/lsp-client";
-import { state, subscribe, notify, setLspDiagnostics, getLspDiagnostics, getRootForPath, getLanguageIdForFile, EXT_TO_LANGUAGE_ID, type IdeSearchResult, type OutlineSymbol } from "../services/state";
-import { getFileExtension, openFileAt, readFile, writeFile, encodeLineEndings } from "../services/file-service";
+import { state, subscribe, notify, setLspDiagnostics, getLspDiagnostics, getRootForPath, getLanguageIdForFile, EXT_TO_LANGUAGE_ID, type IdeSearchResult, type OutlineSymbol, type FileSnapshot } from "../services/state";
+import { getFileExtension, openFileAt, readFile, writeFile, encodeLineEndings, detectLineEnding } from "../services/file-service";
 import { showReferencesResults } from "./file-tree";
+import { showRefactorPreview, type RefactorPreviewChange } from "./refactor-preview";
 
 let lastLspRootsKey = "";
 subscribe(() => {
@@ -417,68 +418,126 @@ export async function goToDefinition(view?: EditorView, pos?: number): Promise<v
   }
 }
 
+/** 计算符号重命名的 WorkspaceEdit（不应用），供预览；失败返回空 Map */
+export async function previewRenameSymbol(
+  filePath: string,
+  line: number,
+  col: number,
+  newName: string
+): Promise<Map<string, import("./refactor-preview").RefactorPreviewEdit[]>> {
+  const ctx = getLspContext(filePath);
+  if (!ctx) return new Map();
+  try {
+    const started = await ctx.client.start();
+    if (!started.ok) return new Map();
+    const result = (await sendLspRequest(ctx.client, "textDocument/rename", {
+      textDocument: { uri: filePathToUri(filePath) },
+      position: { line: Math.max(0, line - 1), character: Math.max(0, col - 1) },
+      newName,
+    })) as LspWorkspaceEdit | null;
+    if (!result) return new Map();
+    return collectWorkspaceChanges(result);
+  } catch (err) {
+    console.error("[LSP] previewRenameSymbol failed:", err);
+    return new Map();
+  }
+}
+
+/**
+ * 应用跨文件重构（WorkspaceEdit）：
+ * - 已打开文件：应用到编辑器/标签内容并按行尾写盘；
+ * - 未打开文件：直接读原始内容应用后写回；
+ * - 写盘前为每个文件保存快照，整体压入 refactorUndoStack 支持一键撤销。
+ */
+export async function applyRefactorChanges(
+  changes: Map<string, LspTextEdit[]>,
+  label: string
+): Promise<{ ok: boolean; files: string[] }> {
+  const files: string[] = [];
+  const snapshots: FileSnapshot[] = [];
+  let anyFailed = false;
+
+  for (const [targetPath, edits] of changes) {
+    const tab = state.tabs.get(targetPath);
+    const isDiffTab = tab?.kind === "diff";
+    let originalText: string;
+    let resultText: string;
+
+    if (tab && !isDiffTab) {
+      originalText = tab.currentContent;
+      if (targetPath === state.activeTabId && state.editorView) {
+        applyTextEditsToView(state.editorView, edits);
+        resultText = state.editorView.state.doc.toString();
+      } else {
+        resultText = applyTextEditsToText(tab.currentContent, edits);
+        notifyLspChange(targetPath, resultText);
+      }
+      tab.currentContent = resultText;
+    } else {
+      try {
+        originalText = await readFile(targetPath);
+        resultText = applyTextEditsToRawText(originalText, edits);
+      } catch (err) {
+        console.error(`[LSP] refactor read failed for ${targetPath}:`, err);
+        anyFailed = true;
+        continue;
+      }
+    }
+
+    snapshots.push({
+      filePath: targetPath,
+      content: originalText,
+      lineEnding: tab ? tab.lineEnding : detectLineEnding(originalText),
+    });
+
+    if (tab && !isDiffTab) {
+      const output = encodeLineEndings(resultText, tab.lineEnding);
+      const writeResult = await writeFile(targetPath, output);
+      if (writeResult.ok) {
+        tab.initialContent = resultText;
+        tab.modified = false;
+      } else {
+        console.error(`[LSP] refactor write failed for ${targetPath}:`, writeResult.error);
+        anyFailed = true;
+      }
+    } else {
+      const writeResult = await writeFile(targetPath, resultText);
+      if (!writeResult.ok) {
+        console.error(`[LSP] refactor write failed for ${targetPath}:`, writeResult.error);
+        anyFailed = true;
+      }
+    }
+    files.push(targetPath);
+    notify();
+  }
+
+  if (snapshots.length > 0) {
+    state.refactorUndoStack.push({ label, snapshots });
+    if (state.refactorUndoStack.length > 20) state.refactorUndoStack.shift();
+  }
+  return { ok: !anyFailed && files.length > 0, files };
+}
+
 export async function renameSymbol(view: EditorView, newName: string): Promise<void> {
   const filePath = editorFilePaths.get(view);
   if (!filePath) return;
-  const ctx = getLspContext(filePath);
-  if (!ctx) return;
-
   const lspPos = cmPosToLsp(view.state.doc, view.state.selection.main.head);
-  try {
-    const result = (await sendLspRequest(ctx.client, "textDocument/rename", {
-      textDocument: { uri: filePathToUri(filePath) },
-      position: lspPos,
-      newName,
-    })) as LspWorkspaceEdit | null;
-    if (!result) {
-      showStatusMessage("重命名失败: 语言服务器返回空结果");
-      return;
-    }
 
-    const changes = collectWorkspaceChanges(result);
-    if (changes.size === 0) {
-      showStatusMessage("未找到可重命名的符号");
-      return;
-    }
-
-    for (const [targetPath, edits] of changes) {
-      const tab = state.tabs.get(targetPath);
-      if (tab && targetPath === state.activeTabId && state.editorView) {
-        applyTextEditsToView(state.editorView, edits);
-        tab.currentContent = state.editorView.state.doc.toString();
-      } else if (tab) {
-        tab.currentContent = applyTextEditsToText(tab.currentContent, edits);
-        notifyLspChange(targetPath, tab.currentContent);
-      } else {
-        try {
-          const content = await readFile(targetPath);
-          const updated = applyTextEditsToRawText(content, edits);
-          const writeResult = await writeFile(targetPath, updated);
-          if (!writeResult.ok) {
-            console.error(`[LSP] rename write failed for ${targetPath}:`, writeResult.error);
-          }
-        } catch (err) {
-          console.error(`[LSP] rename failed for ${targetPath}:`, err);
-        }
-        continue;
-      }
-      // 已打开文件统一写盘，保持与未打开文件行为一致
-      const output = encodeLineEndings(tab.currentContent, tab.lineEnding);
-      const writeResult = await writeFile(targetPath, output);
-      if (writeResult.ok) {
-        tab.initialContent = tab.currentContent;
-        tab.modified = false;
-      } else {
-        console.error(`[LSP] rename write failed for ${targetPath}:`, writeResult.error);
-      }
-      notify();
-    }
-
-    showStatusMessage(`已重命名为 ${newName}`);
-  } catch (err) {
-    console.error("[LSP] renameSymbol failed:", err);
-    showStatusMessage(`重命名失败: ${err instanceof Error ? err.message : String(err)}`);
+  const changes = await previewRenameSymbol(filePath, lspPos.line + 1, lspPos.character + 1, newName);
+  if (changes.size === 0) {
+    showStatusMessage("未找到可重命名的符号（语言服务器未启动或无法解析）");
+    return;
   }
+
+  const preview: RefactorPreviewChange[] = Array.from(changes.entries()).map(([p, edits]) => ({ filePath: p, edits }));
+  const confirmed = await showRefactorPreview(preview, `重命名符号为 ${newName}`);
+  if (!confirmed) {
+    showStatusMessage("已取消重命名");
+    return;
+  }
+
+  const res = await applyRefactorChanges(changes, `重命名符号为 ${newName}`);
+  showStatusMessage(res.ok ? `已重命名 ${res.files.length} 个文件` : "重命名失败，请查看控制台");
 }
 
 export async function findReferences(view?: EditorView): Promise<void> {

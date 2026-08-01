@@ -96,11 +96,15 @@ export interface AguiBaseEvent {
 
 export interface AgentAction {
   id: string;
-  type: "read_file" | "write_file" | "search_files" | "run_command" | "plugin";
+  type: "read_file" | "write_file" | "search_files" | "run_command" | "rename_symbol" | "plugin";
   filePath?: string;
   content?: string;
   query?: string;
   command?: string;
+  /** rename_symbol：符号位置（1 基）与新名称 */
+  line?: number;
+  col?: number;
+  newName?: string;
   pluginName?: string;
   pluginParams?: Record<string, unknown>;
   confirmed?: boolean;
@@ -118,6 +122,12 @@ export interface FileSnapshot {
   filePath: string;
   content: string;
   lineEnding: Tab["lineEnding"];
+}
+
+/** 一次跨文件重构（如符号重命名）的整体撤销快照组 */
+export interface RefactorUndoGroup {
+  label: string;
+  snapshots: FileSnapshot[];
 }
 
 export interface InlineChatSuggestion {
@@ -254,6 +264,8 @@ export const state = {
   aiCurrentPlan: null as AiTaskPlan | null,
   aiTaskPlanRunning: false,
   fileSnapshots: new Map<string, FileSnapshot>(),
+  /** 跨文件重构的整体撤销栈（FIFO，上限 20 组） */
+  refactorUndoStack: [] as RefactorUndoGroup[],
   inlineCompletion: {
     active: false,
     text: "",

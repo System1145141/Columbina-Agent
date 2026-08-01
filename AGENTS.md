@@ -800,9 +800,16 @@ src/main/
 - 安全：Agent 运行中禁止切换会话（防止流式消息写入错误会话）；切换会话时重置任务规划等执行期状态。
 - 体验：无题会话收到首条消息后自动以消息内容命名；会话按钮显示当前会话名。
 
-6. **跨文件重构**
+6. **跨文件重构** ✅ 已完成
    - Agent 基于 LSP 引用分析执行符号重命名、提取函数、移动文件，批量生成 WorkspaceEdit。
    - 所有变更以 diff 呈现，用户确认后应用，可整体撤销。
+   - 实现：
+     - `previewRenameSymbol`（lsp-integration，`textDocument/rename` 计算 WorkspaceEdit 但不应用，先 `client.start()` 确保语言服务器就绪，返回按文件分组的 `Map<string, LspTextEdit[]>`）。
+     - 新增 `refactor-preview.ts` 预览弹窗：异步读取各文件当前内容（已打开文件直接用编辑器内容），按文件分组展示每处 `行:列 旧文本→新文本`，确认后才应用；复用 `ide__replace-modal` 样式。
+     - `applyRefactorChanges`：已打开文件用 `applyTextEditsToView`/`applyTextEditsToText` 更新编辑器并按行尾写盘（`notifyLspChange` 同步 LSP）；未打开文件读原始内容应用后写回；每个文件写盘前保存 `FileSnapshot`（含 lineEnding），整体压入 `refactorUndoStack`（上限 20 组）。
+     - Agent 新增 `rename_symbol` 工具：`executeAction` 校验参数 → 预览 → 用户确认 → 应用；`buildToolsPrompt` 添加工具 5 说明；`formatActionLabel` 显示 `重命名符号: 新名称（文件:行:列）`。
+     - 命令面板新增「撤销上次重构」（`undoLastRefactor`）：从撤销栈弹出最近一组快照，恢复全部文件到重构前状态（写盘 + 同步标签/编辑器 + 推送 AI 消息），失败文件数会反馈。
+     - 原 F2 `renameSymbol` 同步升级为「预览确认 → 应用」流程。
 
 7. **测试生成**
    - 自动检测项目测试框架（Jest / Vitest / Mocha），为当前函数/文件生成单元测试并给出运行命令。
