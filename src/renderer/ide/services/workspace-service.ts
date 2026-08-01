@@ -9,6 +9,7 @@ import {
   createWorkspaceRoot,
   type WorkspaceRoot,
   type AiMessage,
+  type AiSession,
 } from "./state";
 import { openFile, basename, unwatchAllOpenTabs } from "./file-service";
 import { showAiPanel, hideAiPanel, showSearchPanel, hideSearchPanel, showGitPanel, hideGitPanel } from "./layout";
@@ -30,6 +31,8 @@ interface WorkspaceData {
   panels?: WorkspacePanelState;
   bounds?: { x: number; y: number; width: number; height: number };
   aiMessages?: AiMessage[];
+  aiSessions?: AiSession[];
+  activeAiSessionId?: string;
 }
 
 /** 每个工作区最多持久化的 Agent 会话消息条数 */
@@ -63,6 +66,15 @@ function collectWorkspaceState(): Record<string, unknown> {
       searchVisible: state.searchVisible,
       gitVisible: state.gitPanelVisible,
     },
+    aiSessions: state.aiSessions.map((s) => ({
+      id: s.id,
+      title: s.title,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+      messages: s.messages.slice(-MAX_PERSISTED_AI_MESSAGES),
+    })),
+    activeAiSessionId: state.activeAiSessionId,
+    // 兼容旧版本 IDE 读取：仅保留当前会话消息
     aiMessages: state.aiMessages.slice(-MAX_PERSISTED_AI_MESSAGES),
   };
 }
@@ -124,9 +136,40 @@ async function applyWorkspace(data: WorkspaceData, filePath?: string): Promise<v
   }
 
   // 恢复该工作区的 Agent 会话历史；任务规划为执行期状态，切换工作区时重置
-  state.aiMessages = Array.isArray(data.aiMessages) ? (data.aiMessages as AiMessage[]) : [];
   state.aiCurrentPlan = null;
   state.aiTaskPlanRunning = false;
+  if (Array.isArray(data.aiSessions) && data.aiSessions.length > 0) {
+    state.aiSessions = (data.aiSessions as AiSession[]).map((s) => ({
+      id: s.id,
+      title: s.title || "会话",
+      createdAt: typeof s.createdAt === "number" ? s.createdAt : 0,
+      updatedAt: typeof s.updatedAt === "number" ? s.updatedAt : 0,
+      messages: Array.isArray(s.messages) ? s.messages : [],
+    }));
+    const activeId =
+      typeof data.activeAiSessionId === "string" && state.aiSessions.some((s) => s.id === data.activeAiSessionId)
+        ? data.activeAiSessionId
+        : state.aiSessions[0]?.id || "";
+    state.activeAiSessionId = activeId;
+    const active = state.aiSessions.find((s) => s.id === activeId) || state.aiSessions[0];
+    state.aiMessages = active ? active.messages : [];
+  } else {
+    // 旧版本数据只有 aiMessages：迁移为默认会话
+    state.aiSessions = [];
+    state.activeAiSessionId = "";
+    state.aiMessages = Array.isArray(data.aiMessages) ? (data.aiMessages as AiMessage[]) : [];
+    if (state.aiMessages.length > 0) {
+      const legacy: AiSession = {
+        id: "s_default",
+        title: "会话 1",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        messages: state.aiMessages,
+      };
+      state.aiSessions = [legacy];
+      state.activeAiSessionId = legacy.id;
+    }
+  }
 
   applyPanels(data.panels);
   notify();

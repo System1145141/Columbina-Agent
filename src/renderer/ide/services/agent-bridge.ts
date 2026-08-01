@@ -13,6 +13,7 @@ import {
   setAiTaskPlanRunning,
   clearInlineCompletion,
 } from "./state";
+import { ensureActiveSession } from "./ai-sessions";
 import {
   basename,
   readFile,
@@ -336,6 +337,7 @@ export async function callAgentStream(prompt: string): Promise<{ content: string
 
 export async function runAgentTurn(userText: string, scope: AiContextScope, maxRounds = 5, isCancelled?: () => boolean) {
   const userMsgId = `u-${Date.now()}`;
+  ensureActiveSession(userText);
   state.aiMessages.push({ id: userMsgId, role: "user", content: userText });
   notify();
 
@@ -500,6 +502,7 @@ export async function generateTaskPlan(goal: string, scope: AiContextScope): Pro
 
 export async function runAgentPlan(goal: string, scope: AiContextScope) {
   const userMsgId = `u-${Date.now()}`;
+  ensureActiveSession(`任务: ${goal}`);
   state.aiMessages.push({ id: userMsgId, role: "user", content: `[任务规划] ${goal}` });
   notify();
 

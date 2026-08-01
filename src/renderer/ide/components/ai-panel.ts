@@ -1,4 +1,4 @@
-import { state, subscribe } from "../services/state";
+import { state, subscribe, notify } from "../services/state";
 import {
   runAgentTurn,
   runAgentPlan,
@@ -9,6 +9,17 @@ import {
   formatActionLabel,
 } from "../services/agent-bridge";
 import { toggleAiPanel, hideAiPanel } from "../services/layout";
+import {
+  getActiveSession,
+  getSessionsByRecent,
+  createSession,
+  duplicateSession,
+  switchToSession,
+  renameSession,
+  deleteSession,
+  clearActiveSession,
+} from "../services/ai-sessions";
+import { showPromptDialog } from "./file-tree";
 
 const aiToggleBtn = document.getElementById("ai-toggle-btn") as HTMLButtonElement;
 const aiPanelEl = document.getElementById("ai-panel") as HTMLElement;
@@ -18,8 +29,131 @@ const aiInputEl = document.getElementById("ai-input") as HTMLTextAreaElement;
 const aiSendBtn = document.getElementById("ai-send-btn") as HTMLButtonElement;
 const aiContextSelectEl = document.getElementById("ai-context-select") as HTMLSelectElement;
 const aiUndoBtn = document.getElementById("ai-undo-btn") as HTMLButtonElement;
+const aiSessionBtn = document.getElementById("ai-session-btn") as HTMLButtonElement;
 const aiInputAreaEl = document.querySelector(".ide__ai-input-area") as HTMLElement;
 let aiPlanModeCb: HTMLInputElement | null = null;
+
+// ── 会话管理（切换 / 新建 / 复制 / 重命名 / 删除） ──
+let sessionMenu: HTMLElement | null = null;
+
+function renderSessionButton(): void {
+  const session = getActiveSession();
+  const title = session?.title || "会话";
+  aiSessionBtn.textContent = `▾ ${title.length > 12 ? title.slice(0, 12) + "…" : title}`;
+  aiSessionBtn.disabled = state.aiRunning;
+  aiSessionBtn.title = state.aiRunning ? "Agent 运行中不可切换会话" : "会话管理（切换 / 新建 / 复制 / 重命名 / 删除）";
+}
+
+function hideSessionMenu(): void {
+  if (sessionMenu) {
+    sessionMenu.remove();
+    sessionMenu = null;
+  }
+}
+
+function relativeTime(ts: number): string {
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return "刚刚";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
+  return `${Math.floor(diff / 86_400_000)} 天前`;
+}
+
+function buildMenuAction(label: string, title: string, onClick: () => void): HTMLButtonElement {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "ide__ai-session-action";
+  btn.textContent = label;
+  btn.title = title;
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    hideSessionMenu();
+    onClick();
+  });
+  return btn;
+}
+
+function toggleSessionMenu(): void {
+  if (state.aiRunning) return;
+  if (sessionMenu) {
+    hideSessionMenu();
+    return;
+  }
+
+  const menuEl = document.createElement("div");
+  menuEl.className = "ide__ai-session-menu";
+
+  // 操作区
+  const actions = document.createElement("div");
+  actions.className = "ide__ai-session-actions";
+  actions.appendChild(buildMenuAction("＋ 新建", "新建会话", () => createSession()));
+  actions.appendChild(buildMenuAction("⧉ 复制", "复制当前会话为副本", () => {
+    const copy = duplicateSession();
+    if (copy) state.statusMessage = `已复制会话: ${copy.title}`;
+    notify();
+  }));
+  actions.appendChild(buildMenuAction("✎ 重命名", "重命名当前会话", () => {
+    void (async () => {
+      const current = getActiveSession();
+      const name = await showPromptDialog("会话名称", current?.title || "");
+      if (name !== null && current) renameSession(current.id, name);
+    })();
+  }));
+  actions.appendChild(buildMenuAction("🗑 清空", "清空当前会话消息", () => {
+    if (confirm("确定清空当前会话的全部消息？")) clearActiveSession();
+  }));
+  menuEl.appendChild(actions);
+
+  // 会话列表（按最近更新排序）
+  const list = document.createElement("div");
+  list.className = "ide__ai-session-list";
+  const sessions = getSessionsByRecent();
+  if (sessions.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "ide__ai-session-empty";
+    empty.textContent = "暂无会话，发送消息将自动创建";
+    list.appendChild(empty);
+  }
+  for (const s of sessions) {
+    const row = document.createElement("div");
+    row.className = "ide__ai-session-item" + (s.id === state.activeAiSessionId ? " is-active" : "");
+    row.title = s.title;
+
+    const title = document.createElement("span");
+    title.className = "ide__ai-session-item-title";
+    title.textContent = s.title;
+
+    const meta = document.createElement("span");
+    meta.className = "ide__ai-session-item-meta";
+    meta.textContent = `${s.messages.length} 条 · ${relativeTime(s.updatedAt)}`;
+
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "ide__ai-session-item-del";
+    del.textContent = "×";
+    del.title = "删除会话";
+    del.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (confirm(`删除会话「${s.title}」？`)) {
+        deleteSession(s.id);
+      }
+    });
+
+    row.append(title, meta, del);
+    row.addEventListener("click", () => {
+      if (state.aiRunning) return;
+      switchToSession(s.id);
+    });
+    list.appendChild(row);
+  }
+  menuEl.appendChild(list);
+
+  document.body.appendChild(menuEl);
+  const rect = aiSessionBtn.getBoundingClientRect();
+  menuEl.style.top = `${rect.bottom + 4}px`;
+  menuEl.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
+  sessionMenu = menuEl;
+}
 
 function renderAiMessages() {
   aiMessagesEl.innerHTML = "";
@@ -196,9 +330,11 @@ function renderAiPlan() {
 }
 
 function updateAiPanel() {
+  if (!state.aiPanelVisible) hideSessionMenu();
   aiPanelEl.style.display = state.aiPanelVisible ? "flex" : "none";
   aiSendBtn.disabled = state.aiRunning;
   aiUndoBtn.disabled = state.fileSnapshots.size === 0;
+  renderSessionButton();
   renderAiMessages();
   renderAiPlan();
 }
@@ -222,7 +358,16 @@ export function initAiPanel(): void {
 
   aiToggleBtn.addEventListener("click", () => toggleAiPanel());
   aiCloseBtn.addEventListener("click", () => hideAiPanel());
+  aiSessionBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleSessionMenu();
+  });
   aiSendBtn.addEventListener("click", () => void sendAiMessage());
+  document.addEventListener("click", (e) => {
+    if (sessionMenu && !sessionMenu.contains(e.target as Node)) {
+      hideSessionMenu();
+    }
+  });
   aiInputEl.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();

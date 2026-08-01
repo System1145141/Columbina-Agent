@@ -76,6 +76,15 @@ export interface AiMessage {
   actionResults?: AgentActionResult[];
 }
 
+/** Agent 会话：一个可切换/复制/重命名的独立对话上下文 */
+export interface AiSession {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  messages: AiMessage[];
+}
+
 export interface AguiBaseEvent {
   type: string;
   delta?: string;
@@ -236,6 +245,9 @@ export const state = {
 
   aiPanelVisible: false,
   aiMessages: [] as AiMessage[],
+  /** 多会话：所有 Agent 会话（切换/复制/重命名/删除）；aiMessages 恒为当前会话的消息数组 */
+  aiSessions: [] as AiSession[],
+  activeAiSessionId: "" as string,
   aiRunning: false,
   aiCurrentMessageId: "",
   aiEventUnsub: null as (() => void) | null,
