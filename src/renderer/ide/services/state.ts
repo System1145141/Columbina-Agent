@@ -153,6 +153,8 @@ export interface AgentAction {
   pluginParams?: Record<string, unknown>;
   confirmed?: boolean;
   rejected?: boolean;
+  /** 原生 tool-call 确认桥已把关（跳过执行函数内部的二次确认弹窗） */
+  agentConfirmed?: boolean;
 }
 
 export interface AgentActionResult {
@@ -693,6 +695,8 @@ declare global {
       readFileEncoded: (filePath: string) => Promise<{ content: string; encoding: string }>;
       readFileChunk: (filePath: string, offset: number, length: number) => Promise<{ content: string; totalSize: number; isEnd: boolean }>;
       writeFile: (filePath: string, content: string, encoding?: string) => Promise<{ ok: boolean; error?: string }>;
+      onAgentToolConfirm: (callback: (payload: { requestId: string; toolId: string; toolName: string; args: Record<string, unknown> }) => void) => () => void;
+      agentToolConfirmResult: (payload: { requestId: string; allowed: boolean; result?: { ok: boolean; output?: string; error?: string } }) => Promise<{ ok: boolean }>;
       watchFile: (filePath: string) => Promise<void>;
       unwatchFile: (filePath: string) => void;
       onFileChanged: (callback: (payload: { filePath: string; deleted: boolean }) => void) => () => void;

@@ -53,6 +53,8 @@ export interface ColumbinaRunOptions {
   timeoutMs: number;
   /** 可选：本次 run 的工具集合。未传时使用当前所有已启用工具。 */
   tools?: ToolDefinition[];
+  /** 可选：工具确认桥。声明 needsConfirm 的工具在执行前经此向用户确认（IDE 写操作确认卡片）。 */
+  toolApprovalHandler?: ToolApprovalHandler;
 }
 
 /** FC 循环最终结果（供桥层做副作用用）。 */
@@ -61,6 +63,19 @@ export interface ColumbinaRunResult {
   toolResults: ToolCallResult[];
   totalUsage?: { input: number; output: number };
 }
+
+/** 确认桥请求：IDE 写操作等在 FC 循环内先经此向渲染层发起用户确认。 */
+export interface ToolApprovalRequest {
+  toolId: string;
+  toolName: string;
+  toolDescription: string;
+  args: Record<string, unknown>;
+}
+
+/** 确认桥：返回 allowed + （确认后）执行结果文本。由调用方（agui-bridge）注入。 */
+export type ToolApprovalHandler = (
+  req: ToolApprovalRequest,
+) => Promise<{ allowed: boolean; output?: string }>;
 
 /** 把 ToolRegistry 里的工具转成统一 ToolSpec（与 wire 格式解耦）。 */
 function buildToolSpecs(tools: ToolDefinition[] = toolRegistry.getEnabledTools()): ToolSpec[] {
@@ -244,7 +259,7 @@ async function runFcLoopWithEvents(
 
       const execResults: ToolExecutionResult[] = [];
       for (const tc of chat.toolCalls) {
-        const toolCallId = tc.id || `${tc.name}-${Date.now()}`;
+        const toolCallId = tc.id || `${tc.name}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         // 工具可能来自 options.tools（IDE 注入的只读工具，不在全局注册表），优先从 runTools 解析
         const displayTool = runTools.find((t) => t.id === tc.name);
         // 工具调用开始事件（toolCallName 用显示名，找不到工具则用 id 兜底）
@@ -268,6 +283,17 @@ async function runFcLoopWithEvents(
         if (!tool || !tool.enabled) {
           output = "[错误] 工具不可用: " + tc.name;
           console.warn(LOG_PREFIX, output);
+        } else if (options.toolApprovalHandler && (tool as ToolDefinition & { needsConfirm?: boolean }).needsConfirm) {
+          // 确认桥：IDE 写操作先弹确认卡片，用户确认后由渲染层执行并返回结果。
+          // 确认桥存在时跳过 checkPermission 档位判断（用户逐次点击即最强权限门禁）。
+          const res = await options.toolApprovalHandler({
+            toolId: tc.name,
+            toolName: tool.name,
+            toolDescription: tool.description,
+            args,
+          });
+          output = res.allowed ? res.output || "(已执行)" : "[已拒绝] 用户拒绝了此操作";
+          console.log(LOG_PREFIX, "确认桥 [" + tc.name + "]:", res.allowed ? "已确认" : "已拒绝");
         } else {
           const risk: ToolRiskLevel = (tool as ToolDefinition & { risk?: ToolRiskLevel }).risk || "safe";
           const perm = await checkPermission({

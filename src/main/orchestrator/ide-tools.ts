@@ -288,3 +288,246 @@ export function buildIdeReadOnlyTools(roots: string[]): ToolDefinition[] {
     },
   ];
 }
+
+/**
+ * 需用户确认的工具集（写操作/命令/重构等）。
+ * 这些工具不直接执行：FC 循环会先经确认桥（toolApprovalHandler）向渲染层弹确认卡片，
+ * 确认后由渲染层执行既有逻辑（快照撤销 / 标签同步 / LSP / 终端 / todo 等）并返回结果文本。
+ * 参数 schema 的字段名与渲染层 AgentAction 对齐（filePath/content/command/edits/...）。
+ */
+export function buildIdeConfirmedTools(): ToolDefinition[] {
+  const confirmed: Omit<ToolDefinition, "execute">[] = [
+    {
+      id: "write_file",
+      name: "写入文件",
+      description:
+        "写入或覆盖文件内容（危险操作，会保存快照以便撤销）。\n\n" +
+        "参数：filePath（必填，目标文件路径，相对或工作区内绝对路径），content（必填，完整文件内容）。",
+      enabled: true,
+      risk: "fs-write",
+      needsConfirm: true,
+      inputSchema: {
+        type: "object",
+        properties: {
+          filePath: { type: "string", description: "目标文件路径" },
+          content: { type: "string", description: "完整文件内容" },
+        },
+        required: ["filePath", "content"],
+      },
+    },
+    {
+      id: "edit_file",
+      name: "编辑文件",
+      description:
+        "对文件做精确文本替换（比 write_file 更安全：逐处 search→replace，会生成 diff 预览供确认，可整体撤销）。\n\n" +
+        "参数：filePath（必填），edits（必填，数组）：[{ search: 旧文本, replace: 新文本, occurrence?: 第几处(1基，缺省全部) }]。",
+      enabled: true,
+      risk: "fs-write",
+      needsConfirm: true,
+      inputSchema: {
+        type: "object",
+        properties: {
+          filePath: { type: "string", description: "目标文件路径" },
+          edits: {
+            type: "array",
+            description: "search/replace 替换块",
+            items: {
+              type: "object",
+              properties: {
+                search: { type: "string", description: "要查找的旧文本" },
+                replace: { type: "string", description: "替换成的新文本" },
+                occurrence: { type: "number", description: "替换第几处匹配（1 基），缺省替换全部" },
+              },
+              required: ["search", "replace"],
+            },
+          },
+        },
+        required: ["filePath", "edits"],
+      },
+    },
+    {
+      id: "delete_file",
+      name: "删除文件",
+      description:
+        "删除文件（危险操作，删除前确认，会保存快照可撤销恢复）。\n\n" +
+        "参数：filePath（必填，目标文件路径）。",
+      enabled: true,
+      risk: "fs-write",
+      needsConfirm: true,
+      inputSchema: {
+        type: "object",
+        properties: {
+          filePath: { type: "string", description: "要删除的文件路径" },
+        },
+        required: ["filePath"],
+      },
+    },
+    {
+      id: "run_command",
+      name: "运行命令",
+      description:
+        "在集成终端中运行 shell 命令（返回终端 id，可用 check_command_status 查看输出、stop_command 终止）。\n\n" +
+        "参数：command（必填，要执行的命令）。",
+      enabled: true,
+      risk: "shell",
+      needsConfirm: true,
+      inputSchema: {
+        type: "object",
+        properties: {
+          command: { type: "string", description: "要执行的 shell 命令" },
+        },
+        required: ["command"],
+      },
+    },
+    {
+      id: "rename_symbol",
+      name: "重命名符号",
+      description:
+        "跨文件重命名符号（基于 LSP 引用分析，所有引用文件同步更新；会生成 diff 预览，确认后应用，可整体撤销）。\n\n" +
+        "参数：filePath（必填，符号所在文件），line（必填，行号 1 基），col（必填，列号 1 基），newName（必填，新名称）。",
+      enabled: true,
+      risk: "fs-write",
+      needsConfirm: true,
+      inputSchema: {
+        type: "object",
+        properties: {
+          filePath: { type: "string", description: "符号所在文件路径" },
+          line: { type: "number", description: "符号所在行号（1 基）" },
+          col: { type: "number", description: "符号所在列号（1 基）" },
+          newName: { type: "string", description: "新名称" },
+        },
+        required: ["filePath", "line", "col", "newName"],
+      },
+    },
+    {
+      id: "generate_tests",
+      name: "生成测试",
+      description:
+        "为指定文件生成单元测试（返回文件内容、项目测试框架检测结果与运行命令，基于此生成测试代码后用 write_file 写入）。\n\n" +
+        "参数：filePath（可选，目标文件路径，省略用当前打开文件）。",
+      enabled: true,
+      risk: "safe",
+      needsConfirm: true,
+      inputSchema: {
+        type: "object",
+        properties: {
+          filePath: { type: "string", description: "目标文件路径" },
+        },
+      },
+    },
+    {
+      id: "review_changes",
+      name: "审查 Git 变更",
+      description:
+        "审查当前 Git 变更（收集所有工作区未提交/已暂存/未跟踪文件的 diff 与内容，按严重程度输出问题清单）。\n\n" +
+        "无参数。",
+      enabled: true,
+      risk: "safe",
+      needsConfirm: true,
+      inputSchema: {
+        type: "object",
+        properties: {},
+      },
+    },
+    {
+      id: "get_diagnostics",
+      name: "获取诊断",
+      description:
+        "获取当前文件或指定文件的 LSP 诊断（错误/警告列表）。\n\n" +
+        "参数：filePath（可选，省略用当前打开文件）。",
+      enabled: true,
+      risk: "safe",
+      needsConfirm: true,
+      inputSchema: {
+        type: "object",
+        properties: {
+          filePath: { type: "string", description: "文件路径" },
+        },
+      },
+    },
+    {
+      id: "check_command_status",
+      name: "查询命令状态",
+      description:
+        "查询 run_command 执行终端的运行状态与最近输出。\n\n" +
+        "参数：terminalId（可选，缺省查最近一个）。",
+      enabled: true,
+      risk: "safe",
+      needsConfirm: true,
+      inputSchema: {
+        type: "object",
+        properties: {
+          terminalId: { type: "string", description: "终端 id" },
+        },
+      },
+    },
+    {
+      id: "stop_command",
+      name: "终止命令",
+      description:
+        "终止 run_command 启动的终端任务。\n\n" +
+        "参数：terminalId（可选，缺省终止最近一个）。",
+      enabled: true,
+      risk: "shell",
+      needsConfirm: true,
+      inputSchema: {
+        type: "object",
+        properties: {
+          terminalId: { type: "string", description: "终端 id" },
+        },
+      },
+    },
+    {
+      id: "todo",
+      name: "待办清单",
+      description:
+        "维护待办清单（显示在 AI 面板）：todoAction=replace 全量替换（items），mark 标记完成（index/done），clear 清空。\n\n" +
+        "参数：todoAction（必填，replace/mark/clear），items（replace 用），index（mark 用，1 基），done（mark 用）。",
+      enabled: true,
+      risk: "safe",
+      needsConfirm: true,
+      inputSchema: {
+        type: "object",
+        properties: {
+          todoAction: { type: "string", description: "replace / mark / clear", enum: ["replace", "mark", "clear"] },
+          items: { type: "array", description: "replace 模式的待办项", items: { type: "string" } },
+          index: { type: "number", description: "mark 模式的序号（1 基）" },
+          done: { type: "boolean", description: "mark 模式是否完成" },
+        },
+        required: ["todoAction"],
+      },
+    },
+    {
+      id: "plugin",
+      name: "插件工具",
+      description:
+        "调用插件提供的工具。\n\n" +
+        "参数：pluginName（必填，插件工具名），pluginParams（可选，插件工具参数对象）。",
+      enabled: true,
+      risk: "safe",
+      needsConfirm: true,
+      inputSchema: {
+        type: "object",
+        properties: {
+          pluginName: { type: "string", description: "插件工具名" },
+          pluginParams: {
+            type: "object",
+            description: "插件工具参数",
+            properties: {},
+          },
+        },
+        required: ["pluginName"],
+      },
+    },
+  ];
+  // execute 仅兜底：确认桥存在时不会被调用；缺少确认桥时明确报错
+  return confirmed.map((t) => ({
+    ...t,
+    execute: async () => "[错误] 该工具需要确认桥（toolApprovalHandler）才能执行",
+  }));
+}
+
+/** IDE 模式完整工具集：只读工具自动执行 + 需确认工具经确认桥把关。 */
+export function buildIdeTools(roots: string[]): ToolDefinition[] {
+  return [...buildIdeReadOnlyTools(roots), ...buildIdeConfirmedTools()];
+}

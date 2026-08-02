@@ -72,7 +72,7 @@ contextBridge.exposeInMainWorld("chat", chatApi);
 // AG-UI 事件流：发起一次 agent run，通过 onEvent 回调收 AG-UI 标准事件，
 // 返回 Promise<{success,error}> 表示整轮结束。onEvent 返回的取消订阅函数用于停止监听。
 const aguiApi = {
-  run: (input: { messages: unknown[]; style: string; sessionId?: string; identityId?: string; modelId?: string; attachments?: { name: string; text: string }[] }) =>
+  run: (input: { messages: unknown[]; style: string; sessionId?: string; identityId?: string; modelId?: string; attachments?: { name: string; text: string }[]; ideTools?: { roots: string[]; confirmed?: boolean } }) =>
     ipcRenderer.invoke(IPC.AGUI_RUN, input) as Promise<{ success: boolean; error?: string }>,
   onEvent: (callback: (event: unknown) => void) => {
     const listener = (_e: unknown, event: unknown) => {
@@ -159,6 +159,14 @@ const ideApi = {
   readFileChunk: (filePath: string, offset: number, length: number) =>
     ipcRenderer.invoke(IPC.IDE_READ_FILE_CHUNK, filePath, offset, length) as Promise<{ content: string; totalSize: number; isEnd: boolean }>,
   writeFile: (filePath: string, content: string, encoding?: string) => ipcRenderer.invoke(IPC.IDE_WRITE_FILE, filePath, content, encoding),
+  // 原生工具确认桥：主进程 FC 循环内 needsConfirm 工具执行前 → 渲染层弹确认卡片
+  onAgentToolConfirm: (callback: (payload: { requestId: string; toolId: string; toolName: string; args: Record<string, unknown> }) => void) => {
+    const listener = (_e: unknown, payload: { requestId: string; toolId: string; toolName: string; args: Record<string, unknown> }) => callback(payload);
+    ipcRenderer.on(IPC.IDE_AGENT_TOOL_CONFIRM_REQUEST, listener);
+    return () => ipcRenderer.off(IPC.IDE_AGENT_TOOL_CONFIRM_REQUEST, listener);
+  },
+  agentToolConfirmResult: (payload: { requestId: string; allowed: boolean; result?: { ok: boolean; output?: string; error?: string } }) =>
+    ipcRenderer.invoke(IPC.IDE_AGENT_TOOL_CONFIRM_RESOLVE, payload),
   watchFile: (filePath: string) => ipcRenderer.invoke(IPC.IDE_WATCH_FILE, filePath) as Promise<void>,
   unwatchFile: (filePath: string) => ipcRenderer.send(IPC.IDE_UNWATCH_FILE, filePath),
   onFileChanged: (callback: (payload: { filePath: string; deleted: boolean }) => void) => {

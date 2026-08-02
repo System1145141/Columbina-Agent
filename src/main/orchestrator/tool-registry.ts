@@ -18,6 +18,8 @@ export interface ToolDefinition {
   enabled: boolean;     // 用户是否启用（对应设置面板的开关）
   // 危险等级：决定该工具在哪些权限档位下可调用；不填默认 "safe"
   risk?: ToolRiskLevel;
+  /** 需经确认桥（toolApprovalHandler）由用户确认后才执行；确认桥存在时跳过 checkPermission 档位判断 */
+  needsConfirm?: boolean;
   // MCP 兼容字段：参数 schema，后续接 MCP 时直接复用
   inputSchema: {
     type: "object";

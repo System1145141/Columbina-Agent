@@ -11,6 +11,9 @@ import {
   setAgentModel,
   stripActions,
   stripRecallTags,
+  executeAction,
+  nativeArgsToAction,
+  formatNativeToolLabel,
 } from "../services/agent-bridge";
 import { toggleAiPanel, hideAiPanel } from "../services/layout";
 import {
@@ -183,10 +186,11 @@ function resetStream(): void {
   streamToolEls.clear();
 }
 
-/** 生成工具调用行 DOM（⏳ 运行中 / ✓ 完成 / ✗ 失败） */
-function createToolCallEl(tc: { name: string; status: string; resultPreview?: string }): HTMLElement {
+/** 生成工具调用行 DOM（⏳ 运行中 / ✓ 完成 / ✗ 失败）；data-toolcall 用于重渲染后按 id 定位 */
+function createToolCallEl(tc: { id: string; name: string; status: string; resultPreview?: string }): HTMLElement {
   const item = document.createElement("div");
   item.className = "ide__ai-toolcall" + (tc.status === "running" ? " is-running" : tc.status === "error" ? " is-error" : " is-done");
+  item.dataset.toolcall = tc.id;
   item.textContent = `${tc.status === "running" ? "⏳" : tc.status === "error" ? "✗" : "✓"} ${tc.name}`;
   if (tc.resultPreview) {
     const preview = document.createElement("span");
@@ -197,10 +201,24 @@ function createToolCallEl(tc: { name: string; status: string; resultPreview?: st
   return item;
 }
 
+function findToolCallEl(id: string): HTMLElement | null {
+  if (!id) return null;
+  let el: HTMLElement | null = null;
+  if (streamRowEl) {
+    el = streamRowEl.querySelector(`.ide__ai-toolcall[data-toolcall="${CSS.escape(id)}"]`) as HTMLElement | null;
+  }
+  return el ?? streamToolEls.get(id) ?? null;
+}
+
 function ensureToolCallsContainer(): HTMLElement | null {
-  // 流式 DOM 可能被 renderAiMessages 整体重建：缓存容器若已脱离文档则重新创建
+  // 流式 DOM 可能被 renderAiMessages 整体重建：缓存容器若已脱离文档则复用行内已有容器或重建
   if (streamToolCallsEl && streamToolCallsEl.isConnected) return streamToolCallsEl;
   if (!streamRowEl) return null;
+  const existing = streamRowEl.querySelector(".ide__ai-toolcalls") as HTMLElement | null;
+  if (existing) {
+    streamToolCallsEl = existing;
+    return existing;
+  }
   const container = document.createElement("div");
   container.className = "ide__ai-toolcalls";
   // 顺序：思维链折叠块 → 工具调用 → 正文气泡（思维链在首片段到达时插到 firstChild，正文后续 appendChild 排其后）
@@ -211,6 +229,88 @@ function ensureToolCallsContainer(): HTMLElement | null {
 
 function scrollMessagesToBottom(): void {
   aiMessagesEl.scrollTop = aiMessagesEl.scrollHeight;
+}
+
+// ── 原生 tool-call 确认桥：主进程 needsConfirm 工具执行前弹确认卡片 ──
+let pendingNativeConfirmResolve: ((allowed: boolean) => void) | null = null;
+let nativeConfirmCard: HTMLElement | null = null;
+
+function hideNativeConfirmCard(): void {
+  nativeConfirmCard?.remove();
+  nativeConfirmCard = null;
+}
+
+function resolveNativeToolConfirmation(allowed: boolean): void {
+  if (pendingNativeConfirmResolve) {
+    const r = pendingNativeConfirmResolve;
+    pendingNativeConfirmResolve = null;
+    r(allowed);
+  }
+  hideNativeConfirmCard();
+}
+
+function showNativeConfirmCard(payload: { toolName: string; args: Record<string, unknown> }): void {
+  hideNativeConfirmCard();
+  const card = document.createElement("div");
+  card.className = "ide__ai-native-confirm";
+  const title = document.createElement("div");
+  title.className = "ide__ai-native-confirm-title";
+  title.textContent = "Agent 请求执行以下操作：";
+  const label = document.createElement("div");
+  label.className = "ide__ai-native-confirm-label";
+  label.textContent = formatNativeToolLabel(payload.toolName, payload.args || {});
+  const btns = document.createElement("div");
+  btns.className = "ide__ai-actions-btns";
+  const confirmBtn = document.createElement("button");
+  confirmBtn.type = "button";
+  confirmBtn.className = "ide__ai-action-btn ide__ai-action-btn--confirm";
+  confirmBtn.textContent = "确认执行";
+  confirmBtn.addEventListener("click", () => resolveNativeToolConfirmation(true));
+  const rejectBtn = document.createElement("button");
+  rejectBtn.type = "button";
+  rejectBtn.className = "ide__ai-action-btn ide__ai-action-btn--reject";
+  rejectBtn.textContent = "拒绝";
+  rejectBtn.addEventListener("click", () => resolveNativeToolConfirmation(false));
+  btns.appendChild(confirmBtn);
+  btns.appendChild(rejectBtn);
+  card.appendChild(title);
+  card.appendChild(label);
+  card.appendChild(btns);
+  aiMessagesEl.appendChild(card);
+  nativeConfirmCard = card;
+  scrollMessagesToBottom();
+}
+
+/** 注册确认桥监听：主进程请求 → 弹卡片 → 用户确认后渲染层执行既有逻辑并回传结果 */
+async function setupNativeToolConfirm(): Promise<void> {
+  window.ide?.onAgentToolConfirm(async (payload: { requestId: string; toolId: string; toolName: string; args: Record<string, unknown> }) => {
+    // 竞态兜底：上一张未响应的卡片先拒绝
+    resolveNativeToolConfirmation(false);
+    const allowed = await new Promise<boolean>((resolve) => {
+      pendingNativeConfirmResolve = resolve;
+      showNativeConfirmCard(payload);
+    });
+    hideNativeConfirmCard();
+    if (!allowed) {
+      window.ide?.agentToolConfirmResult({ requestId: payload.requestId, allowed: false });
+      return;
+    }
+    const action = nativeArgsToAction(payload.toolId, payload.args || {});
+    try {
+      const result = await executeAction(action);
+      window.ide?.agentToolConfirmResult({
+        requestId: payload.requestId,
+        allowed: true,
+        result: { ok: result.ok, output: result.output, error: result.error },
+      });
+    } catch (err) {
+      window.ide?.agentToolConfirmResult({
+        requestId: payload.requestId,
+        allowed: true,
+        result: { ok: false, error: err instanceof Error ? err.message : String(err) },
+      });
+    }
+  });
 }
 
 function handleStreamEvent(rawEvent: unknown): void {
@@ -257,10 +357,11 @@ function handleStreamEvent(rawEvent: unknown): void {
       scrollMessagesToBottom();
     }
   } else if (event.type === "TOOL_CALL_START" && isActive) {
-    // 原生 tool-call 开始：主进程自动执行，无需确认；这里流式展示调用过程
+    // 原生 tool-call 开始：读操作主进程自动执行，写操作弹确认卡片；这里流式展示调用过程
     const msg = state.aiMessages.find((m) => m.id === activeStreamMsgId);
     if (!msg) return;
     const id = String(event.toolCallId ?? "");
+    if (findToolCallEl(id)) return; // 重渲染后该行已存在（幂等）
     const call: AiToolCall = { id, name: String(event.toolCallName ?? ""), status: "running" };
     msg.toolCalls = msg.toolCalls || [];
     msg.toolCalls.push(call);
@@ -279,7 +380,7 @@ function handleStreamEvent(rawEvent: unknown): void {
     const output = typeof event.content === "string" ? event.content : "";
     call.status = output.startsWith("[错误]") || output.startsWith("[已拒绝]") ? "error" : "done";
     call.resultPreview = output.slice(0, 120) || undefined;
-    const el = streamToolEls.get(id);
+    const el = findToolCallEl(id);
     if (el) {
       el.className = "ide__ai-toolcall" + (call.status === "error" ? " is-error" : " is-done");
       el.textContent = `${call.status === "error" ? "✗" : "✓"} ${call.name}`;
@@ -292,6 +393,8 @@ function handleStreamEvent(rawEvent: unknown): void {
       scrollMessagesToBottom();
     }
   } else if (event.type === "RUN_FINISHED" || event.type === "RUN_ERROR") {
+    // 终态：清理可能悬挂的确认卡片（主进程侧超时会自动拒绝并继续）
+    resolveNativeToolConfirmation(false);
     resetStream();
   }
 }
@@ -344,7 +447,7 @@ function renderAiMessages() {
       row.appendChild(details);
     }
 
-    // 原生 tool-call 调用记录（read/search/list 等只读操作，主进程自动执行）
+    // 原生 tool-call 调用记录（read/search/list 等只读操作，主进程自动执行；写操作经确认桥）
     if (msg.toolCalls && msg.toolCalls.length > 0) {
       const callsEl = document.createElement("div");
       callsEl.className = "ide__ai-toolcalls";
@@ -639,5 +742,7 @@ export function initAiPanel(): void {
   void refreshModelSelect();
   // 流式渲染：订阅 AG-UI 事件，增量更新当前消息正文与思维链
   window.agui?.onEvent(handleStreamEvent);
+  // 原生 tool-call 确认桥：写操作确认卡片
+  void setupNativeToolConfirm();
   updateAiPanel();
 }

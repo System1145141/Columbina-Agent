@@ -281,6 +281,8 @@ export const IPC = {
   IDE_GET_WORKSPACE_STATE: "ide:get-workspace-state", // 获取当前/上次工作区状态
   IDE_RELOCATE_ROOT: "ide:relocate-root",             // 重新定位缺失的 Root 文件夹
   IDE_SET_WORKSPACE_ROOTS: "ide:set-workspace-roots", // 渲染进程同步工作区 roots（用于主进程路径校验）
+  IDE_AGENT_TOOL_CONFIRM_REQUEST: "ide:agent-tool-confirm-request", // 主进程 → 渲染进程：原生工具确认请求（写操作确认卡片）
+  IDE_AGENT_TOOL_CONFIRM_RESOLVE: "ide:agent-tool-confirm-resolve", // 渲染进程 → 主进程：确认结果 + 执行结果
 
   // call window (voice call)
   CALL_OPEN: "call:open",                 // sidebar → main：打开通话窗口

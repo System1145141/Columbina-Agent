@@ -17,6 +17,7 @@ import {
   ColumbinaAgent,
   type ColumbinaRunOptions,
   type ColumbinaRunResult,
+  type ToolApprovalRequest,
 } from "./orchestrator/columbina-agent";
 import { indexConversationTurn } from "./orchestrator/history-tools";
 import type { RelationshipChannel } from "./relationship/relationship-log";
@@ -35,10 +36,11 @@ export interface AguiRunInput {
   /** 指定使用的模型 ID（模型列表中的 id）。不传时使用全局默认模型。 */
   modelId?: string;
   /**
-   * IDE 模式：以原生 function calling 注入只读文件工具（read_file / search_files / list_dir / list_files）。
+   * IDE 模式：以原生 function calling 注入 IDE 工具。
    * roots 为当前工作区根目录，用于相对路径解析与越界校验。
+   * confirmed 为 false 时仅注入只读工具（自动执行，无确认卡片），用于摘要/规划等后台 run。
    */
-  ideTools?: { roots: string[] };
+  ideTools?: { roots: string[]; confirmed?: boolean };
 }
 
 /** 调用方（index.ts）注入：把输入转成 agent 需要的 options（含 system prompt 拼接）。 */
@@ -56,6 +58,80 @@ export type GetChatWindowFn = () => { webContents: WebContents; isDestroyed(): b
 
 /** 单次对话的活跃订阅（用于取消）。键 = runId。 */
 const activeRuns = new Map<string, Subscription>();
+
+// ── 工具确认桥：FC 循环内 needsConfirm 工具执行前，向发起 run 的窗口弹确认卡片 ──
+interface PendingToolApproval {
+  resolve: (v: { allowed: boolean; output?: string }) => void;
+  timer: NodeJS.Timeout;
+}
+const pendingToolApprovals = new Map<string, PendingToolApproval>();
+const TOOL_APPROVAL_TIMEOUT_MS = 120_000; // 120s 未响应自动拒绝
+
+/** 渲染层确认结果回传（allowed + 确认后的执行结果文本）。 */
+function registerToolApprovalResolveIpc(): void {
+  ipcMain.handle(
+    IPC.IDE_AGENT_TOOL_CONFIRM_RESOLVE,
+    (
+      _event,
+      payload: {
+        requestId?: string;
+        allowed?: boolean;
+        result?: { ok?: boolean; output?: string; error?: string };
+      },
+    ) => {
+      const requestId = payload?.requestId || "";
+      const pending = pendingToolApprovals.get(requestId);
+      if (!pending) return { ok: false };
+      pendingToolApprovals.delete(requestId);
+      clearTimeout(pending.timer);
+      if (payload.allowed) {
+        pending.resolve({
+          allowed: true,
+          output: payload.result?.ok ? payload.result.output : `[执行失败] ${payload.result?.error || "未知错误"}`,
+        });
+      } else {
+        pending.resolve({ allowed: false });
+      }
+      return { ok: true };
+    },
+  );
+}
+
+/** 向发起 run 的窗口发送确认请求并等待结果；窗口销毁/超时自动拒绝。 */
+function requestToolApproval(
+  sender: WebContents,
+  req: ToolApprovalRequest,
+): Promise<{ allowed: boolean; output?: string }> {
+  return new Promise((resolve) => {
+    const requestId = `tool-approve-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    if (sender.isDestroyed()) {
+      resolve({ allowed: false });
+      return;
+    }
+    const timer = setTimeout(() => {
+      pendingToolApprovals.delete(requestId);
+      console.warn("[AgUiBridge] 工具确认超时（" + TOOL_APPROVAL_TIMEOUT_MS + "ms），自动拒绝:", req.toolId);
+      resolve({ allowed: false });
+    }, TOOL_APPROVAL_TIMEOUT_MS);
+    pendingToolApprovals.set(requestId, { resolve, timer });
+    sender.send(IPC.IDE_AGENT_TOOL_CONFIRM_REQUEST, {
+      requestId,
+      toolId: req.toolId,
+      toolName: req.toolName,
+      toolDescription: req.toolDescription,
+      args: req.args,
+    });
+  });
+}
+
+/** 清空所有未响应的确认请求（run 取消/出错时调用，避免悬挂）。 */
+function flushPendingToolApprovals(): void {
+  for (const [, p] of pendingToolApprovals) {
+    clearTimeout(p.timer);
+    p.resolve({ allowed: false });
+  }
+  pendingToolApprovals.clear();
+}
 
 let buildOptionsFn: BuildOptionsFn | null = null;
 let getChatWindowFn: GetChatWindowFn = () => null;
@@ -81,14 +157,17 @@ export function registerAgUiIpc(
       throw new Error("AG-UI 桥未初始化");
     }
     const input = rawInput as AguiRunInput;
+    // 事件转发目标：优先用 invoke 的 sender（发起 run 的窗口），兜底用聊天窗口
+    const sender = event.sender;
     const { options, latestUserText } = await buildOptionsFn(input);
+    // IDE 模式：注入工具确认桥（needsConfirm 工具先经渲染层确认卡片把关）
+    if (input.ideTools) {
+      options.toolApprovalHandler = (req) => requestToolApproval(sender, req);
+    }
 
     const threadId = `thread-${Date.now()}`;
     const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const agent = new ColumbinaAgent({ threadId, description: "Columbina 主聊天" });
-
-    // 事件转发目标：优先用 invoke 的 sender（发起 run 的窗口），兜底用聊天窗口
-    const sender = event.sender;
 
     const send = (baseEvent: unknown): void => {
       const targets: WebContents[] = [];
@@ -161,6 +240,7 @@ export function registerAgUiIpc(
       sub.unsubscribe();
     }
     activeRuns.clear();
+    flushPendingToolApprovals();
     return true;
   });
 }

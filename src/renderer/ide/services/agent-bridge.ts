@@ -304,24 +304,38 @@ export async function setAgentModel(modelId: string): Promise<void> {
   }
 }
 
-/** 已原生化为主进程原生 function calling 的只读工具（自动执行、无需确认，不再走 <action> 文本协议） */
-const NATIVE_TOOLS = new Set(["read_file", "search_files", "list_dir", "list_files"]);
+/** 原生 tool-call 参数 → AgentAction（字段名与主进程工具 schema 对齐） */
+export function nativeArgsToAction(toolId: string, args: Record<string, unknown>): AgentAction {
+  const action: AgentAction = {
+    id: `native-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    type: toolId as AgentAction["type"],
+  };
+  // agentConfirmed：确认桥卡片已把关，跳过执行函数内部的二次确认弹窗
+  return Object.assign(action, args, { agentConfirmed: true }) as AgentAction;
+}
+
+/** 原生工具确认卡片的操作标签（工具展示名 + 关键参数） */
+export function formatNativeToolLabel(toolName: string, args: Record<string, unknown>): string {
+  const p = args.filePath || args.pattern || args.query || args.newName;
+  const cmd = args.command;
+  if (typeof p === "string" && p) return `${toolName}: ${p}`;
+  if (typeof cmd === "string" && cmd) return `${toolName}: ${cmd}`;
+  return toolName;
+}
 
 export function buildToolsPrompt(): string {
-  const baseTools = AGENT_TOOLS.filter((t) => t.name !== "plugin" && !NATIVE_TOOLS.has(t.name));
-  const lines = baseTools.map((t, i) => `${i + 1}. ${t.name}: ${t.description}`);
+  const baseTools = AGENT_TOOLS.filter((t) => t.name !== "plugin");
+  // 描述取首行（去掉 JSON 示例——工具已原生化为 function calling，不再用 <action> 文本协议）
+  const lines = baseTools.map((t, i) => `${i + 1}. ${t.name}: ${t.description.split("\n")[0]}`);
   const pluginToolLines: string[] = [];
   for (const tool of state.pluginTools) {
-    const paramsDesc = Object.entries(tool.parameters || {})
-      .map(([key, p]) => `${key}: ${p.type}`)
-      .join(", ");
-    pluginToolLines.push(`- ${tool.name}: ${tool.description}\n   { "type": "plugin", "pluginName": "${tool.name}", "pluginParams": { ${paramsDesc ? `${paramsDesc}` : ""} } }`);
+    pluginToolLines.push(`- ${tool.name}: ${tool.description}`);
   }
   if (pluginToolLines.length > 0) {
     lines.push(`${baseTools.length + 1}. plugin: 调用插件提供的工具\n${pluginToolLines.join("\n")}`);
   }
 
-  return `\n\n你可以使用以下工具来操作项目代码。其中读取、搜索、列出文件/目录（read_file、search_files、list_dir、list_files）已作为原生工具调用（function calling）直接可用：需要时直接发起工具调用即可，执行结果会自动返回给你，无需用户确认。\n\n需要修改文件、运行命令或执行其他操作时，在回复末尾插入一个或多个 <action>{...}</action> JSON 标记。每个 action 都需要用户确认后才会执行，执行结果会再次发给你。\n\n可用 <action> 工具：\n${lines.join("\n")}\n\n注意：\n- 不要一次输出过多内容；优先分析再行动。\n- 写文件前最好先读取目标文件。\n- 回复中除了 action 标记外，可以用自然语言向用户说明你的计划。`;
+  return `\n\n你可以使用以下工具来操作项目代码（全部为原生工具调用，直接调用即可，无需输出任何标记）：\n${lines.join("\n")}\n\n注意：\n- 写操作（write_file / edit_file / delete_file / run_command / rename_symbol / todo 等）执行前会弹出确认卡片，用户确认后才会真正执行，执行结果会自动返回给你。\n- 写文件前最好先读取目标文件；优先分析再行动，不要一次输出过多内容。`;
 }
 
 export function formatActionLabel(action: AgentAction): string {
@@ -708,7 +722,8 @@ async function executeEditFile(action: AgentAction): Promise<AgentActionResult> 
 
 async function executeDeleteFile(action: AgentAction): Promise<AgentActionResult> {
   if (!action.filePath) return { actionId: action.id, ok: false, error: "缺少 filePath" };
-  if (!confirm(`确定删除文件 ${action.filePath} 吗？删除后可撤销（恢复文件内容）。`)) {
+  // 原生 tool-call 确认桥已把关（agentConfirmed），跳过内部 confirm 避免二次确认
+  if (!action.agentConfirmed && !confirm(`确定删除文件 ${action.filePath} 吗？删除后可撤销（恢复文件内容）。`)) {
     return { actionId: action.id, ok: false, output: "用户已取消删除" };
   }
   let snapshot: FileSnapshot;
@@ -1073,9 +1088,15 @@ export async function callAgentStream(prompt: string): Promise<{ content: string
       messages: [{ role: "user", content: prompt }],
       style: "chat",
       modelId: state.aiModelId || undefined,
-      // IDE 模式：主进程注入原生只读文件工具（read_file / search_files / list_dir / list_files），
-      // 相对路径按当前工作区 roots 解析
-      ideTools: { roots: state.roots.map((r) => r.path) },
+      // IDE 模式：主进程注入原生工具（只读自动执行 + 写操作经确认桥）；tools="none" 时完全不注入
+      ...(opts?.tools === "none"
+        ? {}
+        : {
+            ideTools: {
+              roots: state.roots.map((r) => r.path),
+              confirmed: opts?.tools !== "read",
+            },
+          }),
     }).then((ack) => {
       if (!ack?.success) {
         reject(new Error(ack?.error || "Agent 启动失败"));
@@ -1273,7 +1294,7 @@ export async function generateTaskPlan(goal: string, scope: AiContextScope): Pro
   const context = scope === "project" ? await buildAiContext("project", goal) : await buildAiContext("file", goal);
   const persona = await buildPersonaPrompt(goal);
   const prompt = `${persona ? persona + "\n\n---\n\n" : ""}${buildTaskPlanPrompt(goal, scope)}\n\n${context}`;
-  const { content } = await callAgentStream(prompt);
+  const { content } = await callAgentStream(prompt, { tools: "read" });
   const parsed = parseTaskPlan(content);
   if (!parsed || !parsed.steps || parsed.steps.length === 0) return null;
 
@@ -1453,7 +1474,7 @@ ${suffix}
 
 请只输出要插入的代码:`;
 
-    const { content } = await callAgentStream(prompt);
+    const { content } = await callAgentStream(prompt, { tools: "none" });
     const text = content.trim();
     if (!text) {
       clearInlineCompletion();

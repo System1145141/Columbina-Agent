@@ -2533,6 +2533,36 @@ html, body, .ide {
   gap: 6px;
 }
 
+/* 原生 tool-call 确认卡片（写操作确认桥） */
+.ide__ai-native-confirm {
+  width: 100%;
+  background: #26251f;
+  border: 1px solid #6b5d2e;
+  border-radius: 4px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.ide__ai-native-confirm-title {
+  font-size: 12px;
+  color: #d8c47a;
+  font-weight: 600;
+}
+
+.ide__ai-native-confirm-label {
+  font-size: 12px;
+  color: #e8e8e8;
+  padding: 4px 6px;
+  border-radius: 3px;
+  background: #2d2d30;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ide__ai-actions-title {
   font-size: 12px;
   color: #bbbbbb;
