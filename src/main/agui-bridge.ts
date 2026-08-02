@@ -150,6 +150,8 @@ export function registerAgUiIpc(
 ): void {
   buildOptionsFn = buildOptions;
   getChatWindowFn = getChatWindow;
+  // 工具确认桥的结果回传处理器（渲染层 agentToolConfirmResult → 主进程 resolve）
+  registerToolApprovalResolveIpc();
 
   const onFinished = onRunFinished;
   ipcMain.handle(IPC.AGUI_RUN, async (event: IpcMainInvokeEvent, rawInput: unknown) => {

@@ -292,7 +292,9 @@ async function setupNativeToolConfirm(): Promise<void> {
     });
     hideNativeConfirmCard();
     if (!allowed) {
-      window.ide?.agentToolConfirmResult({ requestId: payload.requestId, allowed: false });
+      window.ide?.agentToolConfirmResult({ requestId: payload.requestId, allowed: false }).catch((err) =>
+        console.error("[IDE] 工具确认回传失败（allowed=false）:", err),
+      );
       return;
     }
     const action = nativeArgsToAction(payload.toolId, payload.args || {});
@@ -302,13 +304,13 @@ async function setupNativeToolConfirm(): Promise<void> {
         requestId: payload.requestId,
         allowed: true,
         result: { ok: result.ok, output: result.output, error: result.error },
-      });
+      }).catch((err) => console.error("[IDE] 工具确认回传失败:", err));
     } catch (err) {
       window.ide?.agentToolConfirmResult({
         requestId: payload.requestId,
         allowed: true,
         result: { ok: false, error: err instanceof Error ? err.message : String(err) },
-      });
+      }).catch((e) => console.error("[IDE] 工具确认回传失败:", e));
     }
   });
 }
