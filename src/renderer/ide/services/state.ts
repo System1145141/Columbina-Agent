@@ -85,6 +85,8 @@ export interface AiSession {
   createdAt: number;
   updatedAt: number;
   messages: AiMessage[];
+  /** 会话历史轮次的 LLM 摘要索引（seq → 索引行）；无索引的轮次保留全文（最近 1-2 轮） */
+  historyIndexes?: Record<number, string>;
 }
 
 export interface AguiBaseEvent {

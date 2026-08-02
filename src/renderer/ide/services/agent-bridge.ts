@@ -90,13 +90,20 @@ export function stripActions(content: string): string {
 }
 
 // ── 会话历史「块索引 + recall」：基于 Reordering Context System 最小验证实现 ──
-// 结构：固定区索引（更早轮次的一句话摘要）→ 待定区（最近一轮完整内容）→ 外部存储（recall 召回）
+// 策略：前 2 轮不优化（全文）；第 3、5、7…（奇数轮）完成后调用一次 LLM，
+// 把旧轮次总结成索引（固定区），最新一轮保留全文（待定区）；偶数轮不优化，
+// 保留最近两轮全文。需要更早轮次细节时模型用 [recall:b轮次号] 召回。
 
 interface HistoryTurn {
   seq: number;
   userMsgId: string;
   userText: string;
   assistantText: string;
+}
+
+/** 任务规划的执行步骤消息（不计入对话轮次计数） */
+function isPlanStepText(text: string): boolean {
+  return /^步骤\s*\d+\/\d+/.test((text || "").trim());
 }
 
 /** 提取回复中的 [recall:b轮次号] 标记（可多个） */
@@ -135,10 +142,59 @@ function buildHistoryTurns(): HistoryTurn[] {
   return turns;
 }
 
-function summarizeTurn(turn: HistoryTurn): string {
-  const userPart = turn.userText.replace(/\s+/g, " ").slice(0, 80);
-  const asstPart = turn.assistantText.replace(/\s+/g, " ").slice(0, 60);
-  return `轮次${turn.seq}: [用户] ${userPart}${asstPart ? ` → [助手] ${asstPart}` : ""}`;
+/** 当前会话的 LLM 摘要索引（seq → 索引行）；不存在时初始化 */
+function getSessionIndexes(): Record<number, string> {
+  const session = state.aiSessions.find((s) => s.id === state.activeAiSessionId);
+  if (!session) return {};
+  if (!session.historyIndexes) session.historyIndexes = {};
+  return session.historyIndexes;
+}
+
+/** 对话轮次数（排除任务规划执行步骤） */
+function countDialogTurns(): number {
+  return state.aiMessages.filter((m) => m.role === "user" && !isPlanStepText(m.content || "")).length;
+}
+
+let summarizeInFlight = false;
+
+/**
+ * 奇数轮（3、5、7…）完成后触发：对「尚无索引的旧轮次」生成 LLM 摘要索引。
+ * 摘要调用直接复用本轮首次调用的完整 prompt 作为前缀（该前缀刚被缓存），
+ * 只在末尾追加摘要指令 —— 前缀部分按命中价计费，仅指令 token 为新增成本。
+ * 偶数轮不触发；摘要失败静默跳过，下一次奇数轮会补上（该轮保持全文）。
+ */
+async function maybeSummarizeHistory(firstPrompt: string): Promise<void> {
+  if (summarizeInFlight) return;
+  summarizeInFlight = true;
+  try {
+    const dialogTurns = countDialogTurns();
+    if (dialogTurns < 3 || dialogTurns % 2 === 0) return;
+    const indexes = getSessionIndexes();
+    const turns = buildHistoryTurns();
+    const toSummarize = turns.filter((t) => !indexes[t.seq]);
+    if (toSummarize.length === 0) return;
+    // 以 firstPrompt 为前缀（缓存命中），仅末尾追加摘要指令；模型从完整上下文中提取各轮内容
+    const summarizePrompt = `${firstPrompt}\n\n【摘要任务】请针对以上对话中的以下轮次各生成一行简短摘要：${toSummarize.map((t) => `轮次${t.seq}`).join("、")}。\n摘要要求：保留用户核心诉求与最终结论；提及关键实体（文件路径、函数/符号名、命令、数字参数）；每行不超过 80 字。\n输出格式（严格每行一条，除此之外不要输出任何内容）：\n轮次<序号>: <摘要>`;
+    try {
+      const { content: sum } = await callAgentStream(summarizePrompt);
+      let updated = 0;
+      for (const line of sum.split("\n")) {
+        const m = line.match(/^轮次(\d+):\s*(.+)$/);
+        if (m) {
+          const n = Number(m[1]);
+          if (toSummarize.some((t) => t.seq === n)) {
+            indexes[n] = `轮次${n}: ${m[2].trim()}`;
+            updated++;
+          }
+        }
+      }
+      if (updated > 0) notify();
+    } catch {
+      // 摘要失败不阻塞对话；该轮保持全文，下次奇数轮再尝试
+    }
+  } finally {
+    summarizeInFlight = false;
+  }
 }
 
 interface HistoryContext {
@@ -147,19 +203,22 @@ interface HistoryContext {
   fullTurns: Map<number, HistoryTurn>;
 }
 
-/** 构建历史上下文：更早轮次进固定区索引（外部存储），最近一轮保留完整内容（待定区） */
+/** 构建历史上下文：有索引的轮次进固定区索引（外部存储），无索引的轮次保留全文（待定区） */
 function buildHistoryContext(excludeMsgId?: string): HistoryContext | null {
+  const indexes = getSessionIndexes();
   const turns = buildHistoryTurns().filter((t) => t.userMsgId !== excludeMsgId);
   if (turns.length === 0) return null;
-  const pending = turns[turns.length - 1];
-  const indexed = turns.slice(0, -1);
+  const indexed = turns.filter((t) => indexes[t.seq]);
+  const pending = turns.filter((t) => !indexes[t.seq]);
   const fullTurns = new Map<number, HistoryTurn>();
-  for (const t of indexed) fullTurns.set(t.seq, t);
+  for (const t of turns) fullTurns.set(t.seq, t);
   const indexText = indexed.length
-    ? `【历史上下文】（此前对话摘要，完整内容已移出，需要细节时用 [recall:b轮次号] 召回）\n${indexed.map(summarizeTurn).join("\n")}`
+    ? `【历史上下文】（此前对话摘要，完整内容已移出，需要细节时用 [recall:b轮次号] 召回）\n${indexed.map((t) => indexes[t.seq]).join("\n")}`
     : "";
-  const pendingText = pending
-    ? `【最近对话（完整内容，可直接使用）】\n轮次${pending.seq}:\n[用户] ${pending.userText}\n[助手] ${pending.assistantText}`
+  const pendingText = pending.length
+    ? `【最近对话（完整内容，可直接使用）】\n${pending
+        .map((t) => `轮次${t.seq}:\n[用户] ${t.userText}\n[助手] ${t.assistantText}`)
+        .join("\n\n---\n\n")}`
     : "";
   return { indexText, pendingText, fullTurns };
 }
@@ -1039,6 +1098,8 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
         .join("\n\n");
     }
     let prompt = `${persona ? persona + "\n\n---\n\n" : ""}${historySection ? historySection + "\n\n---\n\n" : ""}你是一名资深的编程助手，正在帮助用户在 IDE 中工作。请根据以下上下文回答用户问题。${buildToolsPrompt()}\n\n${initialContext}\n\n用户问题:\n${userText}`;
+    // 记录首轮 prompt：摘要调用以它为前缀（前缀缓存命中，见 Reordering Context System 验证）
+    const firstPrompt = prompt;
 
     while (round < maxRounds) {
       if (isCancelled?.()) break;
@@ -1138,6 +1199,9 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
     state.pendingActionResolve = null;
     notify();
   }
+
+  // 奇数轮（3、5、7…）完成后触发历史摘要优化（不阻塞 UI，摘要异步完成）
+  await maybeSummarizeHistory(firstPrompt);
 }
 
 // Task planning

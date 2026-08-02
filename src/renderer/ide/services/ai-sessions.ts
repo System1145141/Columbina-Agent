@@ -89,6 +89,7 @@ export function duplicateSession(sourceId?: string): AiSession | null {
     createdAt: Date.now(),
     updatedAt: Date.now(),
     messages: deepCopyMessages(source.messages),
+    historyIndexes: source.historyIndexes ? { ...source.historyIndexes } : undefined,
   };
   state.aiSessions.unshift(copy);
   trimSessions();
@@ -151,7 +152,10 @@ export function deleteSession(sessionId: string): void {
 /** 清空当前会话消息（会话本身保留） */
 export function clearActiveSession(): void {
   const session = getActiveSession();
-  if (session) session.messages = [];
+  if (session) {
+    session.messages = [];
+    delete session.historyIndexes;
+  }
   state.aiMessages = [];
   state.aiCurrentPlan = null;
   state.aiTaskPlanRunning = false;

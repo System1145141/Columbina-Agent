@@ -72,6 +72,7 @@ function collectWorkspaceState(): Record<string, unknown> {
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
       messages: s.messages.slice(-MAX_PERSISTED_AI_MESSAGES),
+      historyIndexes: s.historyIndexes,
     })),
     activeAiSessionId: state.activeAiSessionId,
     // 兼容旧版本 IDE 读取：仅保留当前会话消息
@@ -145,6 +146,10 @@ async function applyWorkspace(data: WorkspaceData, filePath?: string): Promise<v
       createdAt: typeof s.createdAt === "number" ? s.createdAt : 0,
       updatedAt: typeof s.updatedAt === "number" ? s.updatedAt : 0,
       messages: Array.isArray(s.messages) ? s.messages : [],
+      historyIndexes:
+        s.historyIndexes && typeof s.historyIndexes === "object"
+          ? s.historyIndexes
+          : undefined,
     }));
     const activeId =
       typeof data.activeAiSessionId === "string" && state.aiSessions.some((s) => s.id === data.activeAiSessionId)
