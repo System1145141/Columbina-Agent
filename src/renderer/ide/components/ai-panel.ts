@@ -1,4 +1,4 @@
-import { state, subscribe, notify } from "../services/state";
+import { state, subscribe, notify, type AiMessage } from "../services/state";
 import {
   runAgentTurn,
   runAgentPlan,
@@ -9,6 +9,8 @@ import {
   formatActionLabel,
   loadAgentModels,
   setAgentModel,
+  stripActions,
+  stripRecallTags,
 } from "../services/agent-bridge";
 import { toggleAiPanel, hideAiPanel } from "../services/layout";
 import {
@@ -21,6 +23,7 @@ import {
   deleteSession,
   clearActiveSession,
 } from "../services/ai-sessions";
+import { basename } from "../services/file-service";
 import { showPromptDialog } from "./file-tree";
 
 const aiToggleBtn = document.getElementById("ai-toggle-btn") as HTMLButtonElement;
@@ -158,31 +161,138 @@ function toggleSessionMenu(): void {
   sessionMenu = menuEl;
 }
 
+// ── 流式渲染：订阅 AG-UI 事件，增量更新当前消息（正文 + 思维链）──
+let streamRaw = "";
+let streamReasoning = "";
+let activeStreamMsgId: string | null = null;
+let streamRowEl: HTMLElement | null = null;
+let streamBubbleEl: HTMLElement | null = null;
+let streamThinkingContentEl: HTMLElement | null = null;
+
+function resetStream(): void {
+  streamRaw = "";
+  streamReasoning = "";
+  activeStreamMsgId = null;
+  streamRowEl = null;
+  streamBubbleEl = null;
+  streamThinkingContentEl = null;
+}
+
+function scrollMessagesToBottom(): void {
+  aiMessagesEl.scrollTop = aiMessagesEl.scrollHeight;
+}
+
+function handleStreamEvent(rawEvent: unknown): void {
+  const event = rawEvent as { type?: string; delta?: string };
+  const isActive = Boolean(state.aiCurrentMessageId) && activeStreamMsgId === state.aiCurrentMessageId;
+
+  if (event.type === "TEXT_MESSAGE_CONTENT" && event.delta && isActive) {
+    streamRaw += event.delta;
+    if (streamBubbleEl) {
+      streamBubbleEl.textContent = stripActions(stripRecallTags(streamRaw));
+      scrollMessagesToBottom();
+    }
+  } else if (
+    (event.type === "REASONING_MESSAGE_CONTENT" ||
+      event.type === "REASONING_MESSAGE_CHUNK" ||
+      event.type === "THINKING_TEXT_MESSAGE_CONTENT") &&
+    event.delta &&
+    isActive
+  ) {
+    streamReasoning += event.delta;
+    // 首个思维链片段到达时创建折叠块
+    if (!streamThinkingContentEl && streamRowEl) {
+      const details = document.createElement("details");
+      details.className = "ide__ai-thinking";
+      const summary = document.createElement("summary");
+      summary.textContent = "深度思考";
+      details.appendChild(summary);
+      const content = document.createElement("div");
+      content.className = "ide__ai-thinking-content";
+      details.appendChild(content);
+      streamThinkingContentEl = content;
+      streamRowEl.insertBefore(details, streamRowEl.firstChild);
+    }
+    if (streamThinkingContentEl) {
+      streamThinkingContentEl.textContent = streamReasoning;
+      const msg = state.aiMessages.find((m) => m.id === activeStreamMsgId);
+      if (msg) msg.thinkingContent = streamReasoning;
+      scrollMessagesToBottom();
+    }
+  } else if (event.type === "RUN_FINISHED" || event.type === "RUN_ERROR") {
+    resetStream();
+  }
+}
+
+/** 收集消息中 Agent 涉及的文件（write/edit/delete 标记为已修改） */
+function collectFileTags(msg: AiMessage): { name: string; modified: boolean }[] {
+  const map = new Map<string, boolean>();
+  for (const a of msg.actions || []) {
+    if (!a.filePath) continue;
+    const modified = a.type === "write_file" || a.type === "edit_file" || a.type === "delete_file";
+    const key = basename(a.filePath);
+    map.set(key, (map.get(key) ?? false) || modified);
+  }
+  return [...map.entries()].map(([name, modified]) => ({ name, modified }));
+}
+
 function renderAiMessages() {
   aiMessagesEl.innerHTML = "";
   for (const msg of state.aiMessages) {
     const row = document.createElement("div");
     row.className = `ide__ai-message ide__ai-message--${msg.role}`;
 
-    if (msg.thinking) {
-      const thinking = document.createElement("div");
-      thinking.className = "ide__ai-thinking";
-      thinking.textContent = msg.toolName ? `正在调用 ${msg.toolName}...` : "正在思考...";
-      row.appendChild(thinking);
+    // 用户消息：纯文本 + 分隔线（CSS border），无气泡
+    if (msg.role === "user") {
+      const text = document.createElement("div");
+      text.className = "ide__ai-user-text";
+      text.textContent = msg.content;
+      row.appendChild(text);
+      aiMessagesEl.appendChild(row);
+      continue;
     }
 
-    if (msg.toolName && !msg.thinking) {
-      const tool = document.createElement("div");
-      tool.className = "ide__ai-tool";
-      tool.textContent = `✓ ${msg.toolName}`;
-      row.appendChild(tool);
+    const isStreaming = Boolean(msg.thinking) && msg.id === state.aiCurrentMessageId;
+    if (isStreaming) {
+      activeStreamMsgId = msg.id;
+      streamRowEl = row;
     }
 
+    // 深度思考（可折叠）：流式中首个 reasoning 到达时创建；非流式按已存内容
+    if (!isStreaming && msg.thinkingContent && msg.thinkingContent.trim()) {
+      const details = document.createElement("details");
+      details.className = "ide__ai-thinking";
+      const summary = document.createElement("summary");
+      summary.textContent = "深度思考";
+      details.appendChild(summary);
+      const content = document.createElement("div");
+      content.className = "ide__ai-thinking-content";
+      content.textContent = msg.thinkingContent;
+      details.appendChild(content);
+      row.appendChild(details);
+    }
+
+    // 涉及文件标签
+    const tags = collectFileTags(msg);
+    if (tags.length > 0) {
+      const tagsEl = document.createElement("div");
+      tagsEl.className = "ide__ai-filetags";
+      for (const t of tags) {
+        const chip = document.createElement("span");
+        chip.className = "ide__ai-filetag" + (t.modified ? " is-modified" : "");
+        chip.textContent = t.name;
+        tagsEl.appendChild(chip);
+      }
+      row.appendChild(tagsEl);
+    }
+
+    // 正文
     if (msg.content || !msg.thinking) {
       const bubble = document.createElement("div");
       bubble.className = "ide__ai-bubble";
       bubble.textContent = msg.content;
       row.appendChild(bubble);
+      if (isStreaming) streamBubbleEl = bubble;
     }
 
     if (msg.error) {
@@ -445,5 +555,7 @@ export function initAiPanel(): void {
   }
 
   void refreshModelSelect();
+  // 流式渲染：订阅 AG-UI 事件，增量更新当前消息正文与思维链
+  window.agui?.onEvent(handleStreamEvent);
   updateAiPanel();
 }

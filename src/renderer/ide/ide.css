@@ -2235,62 +2235,87 @@ html, body, .ide {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  padding: 4px 0;
 }
 
+/* 用户消息：纯文本 + 分隔线（无气泡） */
 .ide__ai-message--user {
-  align-items: flex-end;
+  align-items: stretch;
+  border-bottom: 1px solid #3e3e42;
+  margin-bottom: 8px;
+  padding-bottom: 10px;
 }
 
 .ide__ai-message--model {
-  align-items: flex-start;
+  align-items: stretch;
 }
 
-.ide__ai-bubble {
-  max-width: 90%;
-  padding: 8px 10px;
-  border-radius: 6px;
+.ide__ai-user-text {
   font-size: 13px;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+  color: #e8e8e8;
 }
 
-.ide__ai-message--user .ide__ai-bubble {
-  background: #0e639c;
-  color: #ffffff;
-}
-
-.ide__ai-message--model .ide__ai-bubble {
-  background: #3c3c3c;
+/* 正文：无气泡纯文本 */
+.ide__ai-bubble {
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
   color: #cccccc;
 }
 
+/* 深度思考（可折叠） */
 .ide__ai-thinking {
-  color: #858585;
+  border-left: 2px solid #4a4a4f;
+  padding-left: 10px;
+}
+
+.ide__ai-thinking summary {
+  cursor: pointer;
+  user-select: none;
   font-size: 12px;
+  color: #858585;
+  padding: 2px 0;
+  outline: none;
+}
+
+.ide__ai-thinking summary:hover {
+  color: #cccccc;
+}
+
+.ide__ai-thinking-content {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #8a8a8a;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 4px 0 6px;
+}
+
+/* 涉及文件标签 */
+.ide__ai-filetags {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
-.ide__ai-thinking::before {
-  content: "";
-  width: 12px;
-  height: 12px;
-  border: 2px solid #3e3e42;
-  border-top-color: #007acc;
-  border-radius: 50%;
-  animation: ide-ai-spin 1s linear infinite;
-}
-
-@keyframes ide-ai-spin {
-  to { transform: rotate(360deg); }
-}
-
-.ide__ai-tool {
+.ide__ai-filetag {
+  font-size: 11px;
   color: #9cdcfe;
-  font-size: 12px;
-  padding: 4px 0;
+  background: #1f2d3a;
+  border: 1px solid #2d4a63;
+  border-radius: 4px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+.ide__ai-filetag.is-modified {
+  color: #c5e1a5;
+  background: #26301f;
+  border-color: #3d5a2e;
 }
 
 .ide__ai-error {
@@ -2391,9 +2416,14 @@ html, body, .ide {
   color: #000000;
 }
 
-.ide.ide--light .ide__ai-message--model .ide__ai-bubble {
-  background: #eeeeee;
+.ide.ide--light .ide__ai-message--model .ide__ai-bubble,
+.ide.ide--light .ide__ai-message--user .ide__ai-user-text {
+  background: none;
   color: #333333;
+}
+
+.ide.ide--light .ide__ai-message--user {
+  border-bottom-color: #dcdcdc;
 }
 
 .ide.ide--light .ide__ai-input,

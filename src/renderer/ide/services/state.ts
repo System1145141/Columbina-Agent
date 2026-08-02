@@ -72,6 +72,8 @@ export interface AiMessage {
   role: "user" | "model";
   content: string;
   thinking?: boolean;
+  /** 思维链内容（REASONING 事件流式累积；模型不返回 reasoning 时为空） */
+  thinkingContent?: string;
   toolName?: string;
   error?: boolean;
   actions?: AgentAction[];

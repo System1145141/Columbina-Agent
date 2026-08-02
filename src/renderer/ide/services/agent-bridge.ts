@@ -120,7 +120,7 @@ export function parseRecallTags(text: string): Set<number> {
   return ids;
 }
 
-function stripRecallTags(text: string): string {
+export function stripRecallTags(text: string): string {
   return text.replace(/\[recall:[^\]]*\]/gi, "").trim();
 }
 
@@ -1032,9 +1032,10 @@ export async function buildAiContext(scope: AiContextScope, query?: string): Pro
   return parts.join("\n\n");
 }
 
-export async function callAgentStream(prompt: string): Promise<{ content: string }> {
+export async function callAgentStream(prompt: string): Promise<{ content: string; reasoning: string }> {
   return new Promise((resolve, reject) => {
     let content = "";
+    let reasoning = "";
     let resolved = false;
 
     state.aiEventUnsub?.();
@@ -1044,10 +1045,16 @@ export async function callAgentStream(prompt: string): Promise<{ content: string
         case "TEXT_MESSAGE_CONTENT":
           if (event.delta) content += event.delta;
           break;
+        case "REASONING_MESSAGE_CONTENT":
+        case "REASONING_MESSAGE_CHUNK":
+        case "THINKING_TEXT_MESSAGE_CONTENT":
+          // 思维链（DeepSeek reasoning_content 等）：模型不返回时为空
+          if (event.delta) reasoning += event.delta;
+          break;
         case "RUN_FINISHED":
           if (!resolved) {
             resolved = true;
-            resolve({ content });
+            resolve({ content, reasoning });
           }
           break;
         case "RUN_ERROR":
@@ -1109,7 +1116,7 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
       state.aiMessages.push({ id: modelMsgId, role: "model", content: "", thinking: true });
       notify();
 
-      const { content: rawContent } = await callAgentStream(prompt);
+      const { content: rawContent, reasoning } = await callAgentStream(prompt);
       if (isCancelled?.()) {
         const modelMsg = state.aiMessages.find((m) => m.id === modelMsgId);
         if (modelMsg) {
@@ -1135,6 +1142,7 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
           if (modelMsg) {
             modelMsg.content = "";
             modelMsg.thinking = true;
+            modelMsg.thinkingContent = "";
           }
           notify();
           continue;
@@ -1148,6 +1156,7 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
       if (modelMsg) {
         modelMsg.content = cleanContent || (actions.length > 0 ? "我计划执行以下操作:" : "");
         modelMsg.thinking = false;
+        modelMsg.thinkingContent = reasoning || undefined;
         modelMsg.actions = actions.length > 0 ? actions : undefined;
       }
       notify();
