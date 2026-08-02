@@ -4,7 +4,6 @@ import {
   type AgentAction,
   type AgentActionResult,
   type AiContextScope,
-  type AiMessage,
   type AguiBaseEvent,
   type FileSnapshot,
   type AiTaskPlan,
@@ -12,9 +11,12 @@ import {
   setAiCurrentPlan,
   setAiTaskPlanRunning,
   clearInlineCompletion,
+  setInlineCompletion,
+  type Tab,
   getRootForPath,
   getLspDiagnostics,
 } from "./state";
+import type { EditorView } from "@codemirror/view";
 import { ensureActiveSession } from "./ai-sessions";
 import { previewRenameSymbol, applyRefactorChanges } from "../components/lsp-integration";
 import { showRefactorPreview, type RefactorPreviewChange, type RefactorPreviewEdit } from "../components/refactor-preview";
@@ -653,7 +655,7 @@ async function executeEditFile(action: AgentAction): Promise<AgentActionResult> 
   const isDiffTab = tab?.kind === "diff";
   let originalText: string;
   let content: string;
-  let lineEnding: "lf" | "crlf";
+  let lineEnding: Tab["lineEnding"];
   if (tab && !isDiffTab) {
     originalText = tab.currentContent;
     content = tab.currentContent;
@@ -1050,7 +1052,11 @@ export async function buildAiContext(scope: AiContextScope, query?: string): Pro
   return parts.join("\n\n");
 }
 
-export async function callAgentStream(prompt: string): Promise<{ content: string; reasoning: string }> {
+/**
+ * 发起一次 Agent run（流式）。
+ * @param tools "full"（默认，含需确认的写工具）/ "read"（仅只读工具，自动执行无确认卡片）/ "none"（不注入 IDE 工具）
+ */
+export async function callAgentStream(prompt: string, opts?: { tools?: "full" | "read" | "none" }): Promise<{ content: string; reasoning: string }> {
   return new Promise((resolve, reject) => {
     let content = "";
     let reasoning = "";
@@ -1114,6 +1120,10 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
   state.aiRunning = true;
   notify();
 
+  // 记录首轮 prompt：摘要调用以它为前缀（前缀缓存命中，见 Reordering Context System 验证）。
+  // 声明在 try 外：摘要优化在 try/catch/finally 之后执行，需函数级作用域。
+  let firstPrompt = "";
+
   try {
     let round = 0;
     let recallAttempts = 0;
@@ -1132,8 +1142,7 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
         .join("\n\n");
     }
     let prompt = `${persona ? persona + "\n\n---\n\n" : ""}${historySection ? historySection + "\n\n---\n\n" : ""}你是一名资深的编程助手，正在帮助用户在 IDE 中工作。请根据以下上下文回答用户问题。${buildToolsPrompt()}\n\n${initialContext}\n\n用户问题:\n${userText}`;
-    // 记录首轮 prompt：摘要调用以它为前缀（前缀缓存命中，见 Reordering Context System 验证）
-    const firstPrompt = prompt;
+    firstPrompt = prompt;
 
     while (round < maxRounds) {
       if (isCancelled?.()) break;
@@ -1449,7 +1458,6 @@ export function cancelScheduledCompletion(): void {
 export async function triggerInlineCompletion(view: EditorView): Promise<void> {
   const cursor = view.state.selection.main.head;
   const doc = view.state.doc;
-  const line = doc.lineAt(cursor);
   const prefix = doc.sliceString(Math.max(0, cursor - 2000), cursor);
   const suffix = doc.sliceString(cursor, Math.min(doc.length, cursor + 200));
   const filePath = state.activeTabId || "";
