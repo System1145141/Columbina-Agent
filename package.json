@@ -13,7 +13,8 @@
     "dev:ide": "npm run build:main && npm run build:preload && concurrently \"vite --port 5173 --strictPort\" \"cross-env VITE_DEV=1 electron .\"",
     "start": "electron .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "experiment:recall": "node experiments/recall-experiment/run.mjs"
   },
   "engines": {
     "node": ">=24 <25",
