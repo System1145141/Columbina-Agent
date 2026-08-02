@@ -67,6 +67,15 @@ export interface WorkspaceRoot {
   missing?: boolean;
 }
 
+/** 原生 tool-call（function calling）的调用记录：主进程自动执行，渲染层流式展示 */
+export interface AiToolCall {
+  id: string;
+  name: string;
+  status: "running" | "done" | "error";
+  /** 结果摘要（截断后的工具输出预览，持久化时控制体积） */
+  resultPreview?: string;
+}
+
 export interface AiMessage {
   id: string;
   role: "user" | "model";
@@ -75,6 +84,8 @@ export interface AiMessage {
   /** 思维链内容（REASONING 事件流式累积；模型不返回 reasoning 时为空） */
   thinkingContent?: string;
   toolName?: string;
+  /** 本轮原生 tool-call 调用序列（TOOL_CALL_START/RESULT/END 事件流式累积） */
+  toolCalls?: AiToolCall[];
   error?: boolean;
   actions?: AgentAction[];
   actionResults?: AgentActionResult[];

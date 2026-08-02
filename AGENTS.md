@@ -22,8 +22,9 @@
 - 多会话管理：新建 / 复制 / 重命名 / 删除 / 清空；会话随工作区持久化（每会话 200 条消息、总数上限 30 个，超限淘汰最久未更新者），重开 IDE 自动恢复；无题会话自动以首条消息命名；Agent 运行中禁止切换会话。
 - 面板显示 Agent 思考过程与操作结果，操作确认卡片逐条展示，可撤销。
 - **界面为分隔线布局（无气泡）**：用户消息纯文本 + 分隔线；助手消息 =「深度思考」可折叠块（流式累积 AG-UI `REASONING_MESSAGE_CONTENT` 思维链，模型不返回 reasoning 时隐藏）+ 涉及文件标签（write/edit/delete 高亮为已修改）+ 正文；**正文与思维链均流式增量渲染**（订阅 AG-UI 事件逐字更新，`<action>`/`[recall]` 标记实时剥离，不污染显示）。
+- **真实 tool-call 流式**：IDE 模式的读操作（read_file / search_files / list_dir / list_files）已原生化为主进程原生 function calling——渲染层随每次 run 传工作区 roots（`AguiRunInput.ideTools`），主进程 `buildIdeReadOnlyTools` 构建 ToolDefinition（risk=fs-read，默认只读档位自动放行），FC 循环自动执行并把结果回填模型；AI 面板订阅 `TOOL_CALL_START/RESULT/END` 事件流式展示调用过程（⏳ 运行中 → ✓/✗ 结果预览），与 `<action>` 文本协议并存（只读自动执行，写操作仍走确认卡片）。会话消息持久化 `toolCalls` 记录，重开可见。
 
-**Agent 工具集（16 种，全部需用户确认后才执行）**
+**Agent 工具集（16 种；read_file / search_files / list_dir / list_files 为原生只读工具自动执行，其余需用户确认后才执行）**
 
 | 工具 | 能力 |
 |------|------|

@@ -34,6 +34,11 @@ export interface AguiRunInput {
   identityId?: string;
   /** 指定使用的模型 ID（模型列表中的 id）。不传时使用全局默认模型。 */
   modelId?: string;
+  /**
+   * IDE 模式：以原生 function calling 注入只读文件工具（read_file / search_files / list_dir / list_files）。
+   * roots 为当前工作区根目录，用于相对路径解析与越界校验。
+   */
+  ideTools?: { roots: string[] };
 }
 
 /** 调用方（index.ts）注入：把输入转成 agent 需要的 options（含 system prompt 拼接）。 */

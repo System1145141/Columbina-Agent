@@ -1,4 +1,4 @@
-import { state, subscribe, notify, type AiMessage } from "../services/state";
+import { state, subscribe, notify, type AiMessage, type AiToolCall } from "../services/state";
 import {
   runAgentTurn,
   runAgentPlan,
@@ -161,13 +161,16 @@ function toggleSessionMenu(): void {
   sessionMenu = menuEl;
 }
 
-// ── 流式渲染：订阅 AG-UI 事件，增量更新当前消息（正文 + 思维链）──
+// ── 流式渲染：订阅 AG-UI 事件，增量更新当前消息（正文 + 思维链 + 原生 tool-call）──
 let streamRaw = "";
 let streamReasoning = "";
 let activeStreamMsgId: string | null = null;
 let streamRowEl: HTMLElement | null = null;
 let streamBubbleEl: HTMLElement | null = null;
 let streamThinkingContentEl: HTMLElement | null = null;
+let streamToolCallsEl: HTMLElement | null = null;
+/** toolCallId → DOM 行，用于流式更新结果状态 */
+const streamToolEls = new Map<string, HTMLElement>();
 
 function resetStream(): void {
   streamRaw = "";
@@ -176,6 +179,34 @@ function resetStream(): void {
   streamRowEl = null;
   streamBubbleEl = null;
   streamThinkingContentEl = null;
+  streamToolCallsEl = null;
+  streamToolEls.clear();
+}
+
+/** 生成工具调用行 DOM（⏳ 运行中 / ✓ 完成 / ✗ 失败） */
+function createToolCallEl(tc: { name: string; status: string; resultPreview?: string }): HTMLElement {
+  const item = document.createElement("div");
+  item.className = "ide__ai-toolcall" + (tc.status === "running" ? " is-running" : tc.status === "error" ? " is-error" : " is-done");
+  item.textContent = `${tc.status === "running" ? "⏳" : tc.status === "error" ? "✗" : "✓"} ${tc.name}`;
+  if (tc.resultPreview) {
+    const preview = document.createElement("span");
+    preview.className = "ide__ai-toolcall-preview";
+    preview.textContent = `— ${tc.resultPreview}`;
+    item.appendChild(preview);
+  }
+  return item;
+}
+
+function ensureToolCallsContainer(): HTMLElement | null {
+  // 流式 DOM 可能被 renderAiMessages 整体重建：缓存容器若已脱离文档则重新创建
+  if (streamToolCallsEl && streamToolCallsEl.isConnected) return streamToolCallsEl;
+  if (!streamRowEl) return null;
+  const container = document.createElement("div");
+  container.className = "ide__ai-toolcalls";
+  // 顺序：思维链折叠块 → 工具调用 → 正文气泡（思维链在首片段到达时插到 firstChild，正文后续 appendChild 排其后）
+  streamRowEl.appendChild(container);
+  streamToolCallsEl = container;
+  return container;
 }
 
 function scrollMessagesToBottom(): void {
@@ -183,7 +214,13 @@ function scrollMessagesToBottom(): void {
 }
 
 function handleStreamEvent(rawEvent: unknown): void {
-  const event = rawEvent as { type?: string; delta?: string };
+  const event = rawEvent as {
+    type?: string;
+    delta?: string;
+    toolCallId?: string;
+    toolCallName?: string;
+    content?: string;
+  };
   const isActive = Boolean(state.aiCurrentMessageId) && activeStreamMsgId === state.aiCurrentMessageId;
 
   if (event.type === "TEXT_MESSAGE_CONTENT" && event.delta && isActive) {
@@ -217,6 +254,41 @@ function handleStreamEvent(rawEvent: unknown): void {
       streamThinkingContentEl.textContent = streamReasoning;
       const msg = state.aiMessages.find((m) => m.id === activeStreamMsgId);
       if (msg) msg.thinkingContent = streamReasoning;
+      scrollMessagesToBottom();
+    }
+  } else if (event.type === "TOOL_CALL_START" && isActive) {
+    // 原生 tool-call 开始：主进程自动执行，无需确认；这里流式展示调用过程
+    const msg = state.aiMessages.find((m) => m.id === activeStreamMsgId);
+    if (!msg) return;
+    const id = String(event.toolCallId ?? "");
+    const call: AiToolCall = { id, name: String(event.toolCallName ?? ""), status: "running" };
+    msg.toolCalls = msg.toolCalls || [];
+    msg.toolCalls.push(call);
+    const container = ensureToolCallsContainer();
+    if (container) {
+      const el = createToolCallEl(call);
+      container.appendChild(el);
+      streamToolEls.set(id, el);
+      scrollMessagesToBottom();
+    }
+  } else if (event.type === "TOOL_CALL_RESULT" && isActive) {
+    const id = String(event.toolCallId ?? "");
+    const msg = state.aiMessages.find((m) => m.id === activeStreamMsgId);
+    const call = msg?.toolCalls?.find((c) => c.id === id && c.status === "running");
+    if (!call) return;
+    const output = typeof event.content === "string" ? event.content : "";
+    call.status = output.startsWith("[错误]") || output.startsWith("[已拒绝]") ? "error" : "done";
+    call.resultPreview = output.slice(0, 120) || undefined;
+    const el = streamToolEls.get(id);
+    if (el) {
+      el.className = "ide__ai-toolcall" + (call.status === "error" ? " is-error" : " is-done");
+      el.textContent = `${call.status === "error" ? "✗" : "✓"} ${call.name}`;
+      if (call.resultPreview) {
+        const preview = document.createElement("span");
+        preview.className = "ide__ai-toolcall-preview";
+        preview.textContent = `— ${call.resultPreview}`;
+        el.appendChild(preview);
+      }
       scrollMessagesToBottom();
     }
   } else if (event.type === "RUN_FINISHED" || event.type === "RUN_ERROR") {
@@ -270,6 +342,16 @@ function renderAiMessages() {
       content.textContent = msg.thinkingContent;
       details.appendChild(content);
       row.appendChild(details);
+    }
+
+    // 原生 tool-call 调用记录（read/search/list 等只读操作，主进程自动执行）
+    if (msg.toolCalls && msg.toolCalls.length > 0) {
+      const callsEl = document.createElement("div");
+      callsEl.className = "ide__ai-toolcalls";
+      for (const tc of msg.toolCalls) {
+        callsEl.appendChild(createToolCallEl(tc));
+      }
+      row.appendChild(callsEl);
     }
 
     // 涉及文件标签

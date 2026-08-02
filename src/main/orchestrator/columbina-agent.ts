@@ -245,7 +245,8 @@ async function runFcLoopWithEvents(
       const execResults: ToolExecutionResult[] = [];
       for (const tc of chat.toolCalls) {
         const toolCallId = tc.id || `${tc.name}-${Date.now()}`;
-        const displayTool = toolRegistry.getById(tc.name);
+        // 工具可能来自 options.tools（IDE 注入的只读工具，不在全局注册表），优先从 runTools 解析
+        const displayTool = runTools.find((t) => t.id === tc.name);
         // 工具调用开始事件（toolCallName 用显示名，找不到工具则用 id 兜底）
         observer.next({
           type: EventType.TOOL_CALL_START,
@@ -263,7 +264,7 @@ async function runFcLoopWithEvents(
         console.log(LOG_PREFIX, "执行工具:", tc.name, JSON.stringify(args).slice(0, 200));
 
         let output: string;
-        const tool = runnableToolIds.has(tc.name) ? toolRegistry.getById(tc.name) : undefined;
+        const tool = runnableToolIds.has(tc.name) ? runTools.find((t) => t.id === tc.name) : undefined;
         if (!tool || !tool.enabled) {
           output = "[错误] 工具不可用: " + tc.name;
           console.warn(LOG_PREFIX, output);

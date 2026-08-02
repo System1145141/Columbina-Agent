@@ -304,8 +304,11 @@ export async function setAgentModel(modelId: string): Promise<void> {
   }
 }
 
+/** 已原生化为主进程原生 function calling 的只读工具（自动执行、无需确认，不再走 <action> 文本协议） */
+const NATIVE_TOOLS = new Set(["read_file", "search_files", "list_dir", "list_files"]);
+
 export function buildToolsPrompt(): string {
-  const baseTools = AGENT_TOOLS.filter((t) => t.name !== "plugin");
+  const baseTools = AGENT_TOOLS.filter((t) => t.name !== "plugin" && !NATIVE_TOOLS.has(t.name));
   const lines = baseTools.map((t, i) => `${i + 1}. ${t.name}: ${t.description}`);
   const pluginToolLines: string[] = [];
   for (const tool of state.pluginTools) {
@@ -318,7 +321,7 @@ export function buildToolsPrompt(): string {
     lines.push(`${baseTools.length + 1}. plugin: 调用插件提供的工具\n${pluginToolLines.join("\n")}`);
   }
 
-  return `\n\n你可以使用以下工具来操作项目代码。当需要读取、修改、搜索文件或运行命令时，在回复末尾插入一个或多个 <action>{...}</action> JSON 标记。每个 action 都需要用户确认后才会执行，执行结果会再次发给你。\n\n可用工具：\n${lines.join("\n")}\n\n注意：\n- 不要一次输出过多内容；优先分析再行动。\n- 写文件前最好先读取目标文件。\n- 回复中除了 action 标记外，可以用自然语言向用户说明你的计划。`;
+  return `\n\n你可以使用以下工具来操作项目代码。其中读取、搜索、列出文件/目录（read_file、search_files、list_dir、list_files）已作为原生工具调用（function calling）直接可用：需要时直接发起工具调用即可，执行结果会自动返回给你，无需用户确认。\n\n需要修改文件、运行命令或执行其他操作时，在回复末尾插入一个或多个 <action>{...}</action> JSON 标记。每个 action 都需要用户确认后才会执行，执行结果会再次发给你。\n\n可用 <action> 工具：\n${lines.join("\n")}\n\n注意：\n- 不要一次输出过多内容；优先分析再行动。\n- 写文件前最好先读取目标文件。\n- 回复中除了 action 标记外，可以用自然语言向用户说明你的计划。`;
 }
 
 export function formatActionLabel(action: AgentAction): string {
@@ -1070,6 +1073,9 @@ export async function callAgentStream(prompt: string): Promise<{ content: string
       messages: [{ role: "user", content: prompt }],
       style: "chat",
       modelId: state.aiModelId || undefined,
+      // IDE 模式：主进程注入原生只读文件工具（read_file / search_files / list_dir / list_files），
+      // 相对路径按当前工作区 roots 解析
+      ideTools: { roots: state.roots.map((r) => r.path) },
     }).then((ack) => {
       if (!ack?.success) {
         reject(new Error(ack?.error || "Agent 启动失败"));

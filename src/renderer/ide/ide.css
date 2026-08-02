@@ -2318,6 +2318,46 @@ html, body, .ide {
   border-color: #3d5a2e;
 }
 
+/* 原生 tool-call 调用记录（read/search/list 等只读操作） */
+.ide__ai-toolcalls {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0;
+}
+
+.ide__ai-toolcall {
+  font-size: 12px;
+  color: #a5c8ff;
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.ide__ai-toolcall.is-running {
+  color: #a5c8ff;
+}
+
+.ide__ai-toolcall.is-done {
+  color: #8a8a8a;
+}
+
+.ide__ai-toolcall.is-error {
+  color: #f48771;
+}
+
+.ide__ai-toolcall-preview {
+  color: #6b6b6b;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
 .ide__ai-error {
   color: #f48771;
   font-size: 12px;
