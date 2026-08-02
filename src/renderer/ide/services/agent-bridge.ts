@@ -89,6 +89,81 @@ export function stripActions(content: string): string {
   return content.replace(/<action>[\s\S]*?<\/action>/g, "").trim();
 }
 
+// ── 会话历史「块索引 + recall」：基于 Reordering Context System 最小验证实现 ──
+// 结构：固定区索引（更早轮次的一句话摘要）→ 待定区（最近一轮完整内容）→ 外部存储（recall 召回）
+
+interface HistoryTurn {
+  seq: number;
+  userMsgId: string;
+  userText: string;
+  assistantText: string;
+}
+
+/** 提取回复中的 [recall:b轮次号] 标记（可多个） */
+export function parseRecallTags(text: string): Set<number> {
+  const ids = new Set<number>();
+  const re = /\[recall:([^\]]*)\]/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    for (const part of m[1].split(/[,，\s]+/)) {
+      const n = parseInt(part.replace(/^b/i, ""), 10);
+      if (!Number.isNaN(n)) ids.add(n);
+    }
+  }
+  return ids;
+}
+
+function stripRecallTags(text: string): string {
+  return text.replace(/\[recall:[^\]]*\]/gi, "").trim();
+}
+
+/** 从当前会话历史（aiMessages）配对出（用户 → 助手）轮次 */
+function buildHistoryTurns(): HistoryTurn[] {
+  const turns: HistoryTurn[] = [];
+  let cur: HistoryTurn | null = null;
+  for (const msg of state.aiMessages) {
+    if (msg.role === "user") {
+      cur = { seq: turns.length + 1, userMsgId: msg.id, userText: msg.content || "", assistantText: "" };
+      turns.push(cur);
+    } else if (msg.role === "model" && cur) {
+      if (msg.error) continue;
+      const actionsText = msg.actions && msg.actions.length > 0 ? `\n[执行工具: ${msg.actions.map((a) => a.type).join(", ")}]` : "";
+      const text = stripActions(msg.content || "");
+      cur.assistantText = cur.assistantText ? `${cur.assistantText}\n${text}${actionsText}` : `${text}${actionsText}`;
+    }
+  }
+  return turns;
+}
+
+function summarizeTurn(turn: HistoryTurn): string {
+  const userPart = turn.userText.replace(/\s+/g, " ").slice(0, 80);
+  const asstPart = turn.assistantText.replace(/\s+/g, " ").slice(0, 60);
+  return `轮次${turn.seq}: [用户] ${userPart}${asstPart ? ` → [助手] ${asstPart}` : ""}`;
+}
+
+interface HistoryContext {
+  indexText: string;
+  pendingText: string;
+  fullTurns: Map<number, HistoryTurn>;
+}
+
+/** 构建历史上下文：更早轮次进固定区索引（外部存储），最近一轮保留完整内容（待定区） */
+function buildHistoryContext(excludeMsgId?: string): HistoryContext | null {
+  const turns = buildHistoryTurns().filter((t) => t.userMsgId !== excludeMsgId);
+  if (turns.length === 0) return null;
+  const pending = turns[turns.length - 1];
+  const indexed = turns.slice(0, -1);
+  const fullTurns = new Map<number, HistoryTurn>();
+  for (const t of indexed) fullTurns.set(t.seq, t);
+  const indexText = indexed.length
+    ? `【历史上下文】（此前对话摘要，完整内容已移出，需要细节时用 [recall:b轮次号] 召回）\n${indexed.map(summarizeTurn).join("\n")}`
+    : "";
+  const pendingText = pending
+    ? `【最近对话（完整内容，可直接使用）】\n轮次${pending.seq}:\n[用户] ${pending.userText}\n[助手] ${pending.assistantText}`
+    : "";
+  return { indexText, pendingText, fullTurns };
+}
+
 /** 按身份缓存的人格包（避免每次对话重复 IPC） */
 const personaCache = new Map<string, { identityName: string; persona: string; toneRules: string }>();
 
@@ -948,9 +1023,22 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
 
   try {
     let round = 0;
+    let recallAttempts = 0;
     const initialContext = await buildAiContext(scope, userText);
     const persona = await buildPersonaPrompt(userText);
-    let prompt = `${persona ? persona + "\n\n---\n\n" : ""}你是一名资深的编程助手，正在帮助用户在 IDE 中工作。请根据以下上下文回答用户问题。${buildToolsPrompt()}\n\n${initialContext}\n\n用户问题:\n${userText}`;
+    // 历史上下文：更早轮次进索引（recall 召回），最近一轮保留完整内容
+    const hist = buildHistoryContext(userMsgId);
+    let historySection = "";
+    if (hist) {
+      historySection = [
+        hist.indexText,
+        hist.pendingText,
+        "历史规则：若回答需要【历史上下文】中某轮次的细节，请在回复开头输出 [recall:b轮次号]（可多个，如 [recall:b1,b3]），我会召回后重新回答；最近一轮完整内容可直接使用，无需召回。",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+    }
+    let prompt = `${persona ? persona + "\n\n---\n\n" : ""}${historySection ? historySection + "\n\n---\n\n" : ""}你是一名资深的编程助手，正在帮助用户在 IDE 中工作。请根据以下上下文回答用户问题。${buildToolsPrompt()}\n\n${initialContext}\n\n用户问题:\n${userText}`;
 
     while (round < maxRounds) {
       if (isCancelled?.()) break;
@@ -970,8 +1058,30 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
         notify();
         break;
       }
+
+      // recall 处理：模型请求历史轮次的完整内容 → 注入后重新回答（最多 2 次）
+      const recallIds = parseRecallTags(rawContent);
+      if (recallIds.size > 0 && recallAttempts < 2) {
+        const recalled: string[] = [];
+        for (const id of recallIds) {
+          const t = hist?.fullTurns.get(id);
+          if (t) recalled.push(`轮次${t.seq}:\n[用户] ${t.userText}\n[助手] ${t.assistantText}`);
+        }
+        if (recalled.length > 0) {
+          recallAttempts++;
+          prompt = `${prompt}\n\n【已按请求召回的历史内容】\n${recalled.join("\n\n---\n\n")}\n\n请基于以上召回内容重新回答用户问题。`;
+          const modelMsg = state.aiMessages.find((m) => m.id === modelMsgId);
+          if (modelMsg) {
+            modelMsg.content = "";
+            modelMsg.thinking = true;
+          }
+          notify();
+          continue;
+        }
+      }
+
       const actions = parseActions(rawContent);
-      const cleanContent = stripActions(rawContent);
+      const cleanContent = stripRecallTags(stripActions(rawContent));
 
       const modelMsg = state.aiMessages.find((m) => m.id === modelMsgId);
       if (modelMsg) {
