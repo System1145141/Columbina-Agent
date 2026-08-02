@@ -119,6 +119,23 @@ function emitTextMessage(
 }
 
 /**
+ * 把模型思维链（reasoning_content / thinking）以 REASONING_MESSAGE 流发出。
+ * 渲染层订阅 REASONING_MESSAGE_CONTENT 增量累积，展示「深度思考」可折叠块。
+ */
+function emitReasoningMessage(
+  observer: { next: (e: BaseEvent) => void },
+  messageId: string,
+  text: string,
+): void {
+  observer.next({ type: EventType.REASONING_MESSAGE_START, messageId, role: "assistant" });
+  // 每片 16 字：思维链可能很长，避免逐字 IPC 过多
+  for (const delta of sliceToDeltas(text, 16)) {
+    observer.next({ type: EventType.REASONING_MESSAGE_CONTENT, messageId, delta });
+  }
+  observer.next({ type: EventType.REASONING_MESSAGE_END, messageId });
+}
+
+/**
  * 强制总结也失败时的降级文案。用已收集的工具结果拼一个"任务中断"回复，
  * 避免整个 run 抛 subscriber.error 让用户彻底看不到任何回复。
  */
@@ -229,6 +246,11 @@ async function runFcLoopWithEvents(
 
     const data = await response.json();
     const chat = adapter.parseResponse(data);
+
+    // 思维链：模型思考内容以 REASONING_MESSAGE 流发射，渲染层「深度思考」折叠块实时展示
+    if (chat.thinking) {
+      emitReasoningMessage(observer, `thinking-${Date.now()}-${round + 1}`, chat.thinking);
+    }
 
     if (chat.usage) {
       accInput += chat.usage.input;
@@ -391,6 +413,11 @@ async function runFcLoopWithEvents(
 
     const data = await response.json();
     const chat = adapter.parseResponse(data);
+
+    // 思维链：强制总结轮的思考内容同样以 REASONING_MESSAGE 流发射
+    if (chat.thinking) {
+      emitReasoningMessage(observer, `thinking-${Date.now()}-force`, chat.thinking);
+    }
     console.log(LOG_PREFIX, "强制回复完成，长度=" + chat.text.length);
     if (chat.usage) {
       accInput += chat.usage.input;
