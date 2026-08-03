@@ -3,7 +3,7 @@
 // system 顶层 + messages[].content 为 content block 数组 + tools[].input_schema
 import {
   ChatMessage, ChatRequest, ChatResponse, ChatVendorAdapter,
-  HttpRequest, ProviderCapability, StreamChunk, StreamEvent,
+  HttpRequest, ProviderCapability, StreamAccumulator, StreamChunk, StreamEvent,
   TestConnectionResult, ToolCall, ToolExecutionResult, VendorConfig,
 } from "./types";
 
@@ -184,7 +184,12 @@ export class AnthropicAdapter implements ChatVendorAdapter {
 
   parseStreamEvent(event: StreamEvent): StreamChunk | null {
     // Anthropic 流式：eventType 是事件名，data 是 JSON
-    let parsed: { delta?: { type?: string; text?: string; thinking?: string; partial_json?: string }; usage?: { input_tokens?: number; output_tokens?: number } };
+    let parsed: {
+      index?: number;
+      content_block?: { type?: string; id?: string; name?: string };
+      delta?: { type?: string; text?: string; thinking?: string; partial_json?: string; stop_reason?: string };
+      usage?: { input_tokens?: number; output_tokens?: number };
+    };
     try {
       parsed = JSON.parse(event.data);
     } catch {
@@ -192,33 +197,118 @@ export class AnthropicAdapter implements ChatVendorAdapter {
     }
 
     switch (event.eventType) {
-      case "content_block_delta": {
-        const d = parsed.delta;
-        if (!d) return null;
-        const chunk: StreamChunk = {};
-        if (d.type === "text_delta" && typeof d.text === "string") chunk.deltaText = d.text;
-        if (d.type === "thinking_delta" && typeof d.thinking === "string") chunk.deltaThinking = d.thinking;
-        // 暂不实现：d.type === "input_json_delta" → 累积到 deltaToolCalls
-        // 当前三个调用点都不带 tools；未来若需要流式 tool_use 增量，单独实现 + 加测试即可。
-        return Object.keys(chunk).length > 0 ? chunk : null;
-      }
-      case "message_delta": {
-        if (parsed.usage) {
+      case "content_block_start": {
+        // tool_use 块起点：携带 index + id + name（输入参数随后以 input_json_delta 分片到达）
+        const cb = parsed.content_block;
+        if (cb?.type === "tool_use") {
           return {
-            usage: {
-              input: parsed.usage.input_tokens ?? 0,
-              output: parsed.usage.output_tokens ?? 0,
-            },
+            deltaToolCalls: [{ index: parsed.index ?? 0, id: String(cb.id ?? ""), name: String(cb.name ?? "") }],
           };
         }
         return null;
       }
+      case "content_block_delta": {
+        const d = parsed.delta;
+        if (!d) return null;
+        const chunk: StreamChunk = {};
+        if (d.type === "text_delta" && typeof d.text === "string" && d.text.length > 0) chunk.deltaText = d.text;
+        if (d.type === "thinking_delta" && typeof d.thinking === "string" && d.thinking.length > 0) chunk.deltaThinking = d.thinking;
+        if (d.type === "input_json_delta" && typeof d.partial_json === "string" && d.partial_json.length > 0) {
+          chunk.deltaToolCalls = [{ index: parsed.index ?? 0, arguments: d.partial_json }];
+        }
+        return Object.keys(chunk).length > 0 ? chunk : null;
+      }
+      case "content_block_stop": {
+        // 块结束（text/thinking 累积器已按块累积，无需处理；tool_use 需 finalize 把 JSON 片段 parse 成 input）
+        return { deltaToolCalls: [{ index: parsed.index ?? 0, finalize: true }] };
+      }
+      case "message_delta": {
+        const chunk: StreamChunk = {};
+        if (parsed.usage) {
+          chunk.usage = {
+            input: parsed.usage.input_tokens ?? 0,
+            output: parsed.usage.output_tokens ?? 0,
+          };
+        }
+        if (typeof parsed.delta?.stop_reason === "string" && parsed.delta.stop_reason) {
+          chunk.finishReason = parsed.delta.stop_reason;
+        }
+        return Object.keys(chunk).length > 0 ? chunk : null;
+      }
       case "message_stop":
         return { done: true };
-      // 其他事件（message_start / content_block_start / content_block_stop / ping 等）静默忽略
+      // 其他事件（message_start / ping 等）静默忽略
       default:
         return null;
     }
+  }
+
+  createStreamAccumulator(): StreamAccumulator {
+    // 重建 content block 数组（与 parseResponse 输入同构），结束时复用 parseResponse
+    const blocks: ContentBlock[] = [];
+    // index → 累积中的 tool_use（等待 input_json_delta 分片 + content_block_stop finalize）
+    const pending = new Map<number, { id: string; name: string; json: string }>();
+    let stopReason = "end_turn";
+    let usage: { input: number; output: number } | undefined;
+
+    const flushBlock = (index: number): void => {
+      const st = pending.get(index);
+      if (!st) return;
+      pending.delete(index);
+      let input: unknown = {};
+      try {
+        input = JSON.parse(st.json);
+      } catch {
+        input = {};
+      }
+      blocks.push({ type: "tool_use", id: st.id, name: st.name, input });
+    };
+
+    return {
+      push: (chunk: StreamChunk): void => {
+        if (chunk.deltaText) {
+          const last = blocks[blocks.length - 1];
+          if (last && last.type === "text" && typeof last.text === "string") {
+            last.text = last.text + chunk.deltaText;
+          } else {
+            blocks.push({ type: "text", text: chunk.deltaText });
+          }
+        }
+        if (chunk.deltaThinking) {
+          const last = blocks[blocks.length - 1];
+          if (last && last.type === "thinking" && typeof last.thinking === "string") {
+            last.thinking = last.thinking + chunk.deltaThinking;
+          } else {
+            blocks.push({ type: "thinking", thinking: chunk.deltaThinking });
+          }
+        }
+        if (chunk.deltaToolCalls) {
+          for (const d of chunk.deltaToolCalls) {
+            if (d.finalize) {
+              flushBlock(d.index);
+              continue;
+            }
+            const st = pending.get(d.index) ?? { id: "", name: "", json: "" };
+            if (d.id) st.id = d.id;
+            if (d.name) st.name = d.name;
+            if (d.arguments) st.json += d.arguments;
+            pending.set(d.index, st);
+          }
+        }
+        if (chunk.finishReason) stopReason = chunk.finishReason;
+        if (chunk.usage) usage = chunk.usage;
+      },
+      done: (): ChatResponse => {
+        // 兜底：流意外结束（超时/取消中断）时 finalize 所有未闭合的 tool_use 块
+        for (const index of [...pending.keys()]) flushBlock(index);
+        const raw = {
+          content: blocks,
+          stop_reason: stopReason,
+          ...(usage ? { usage: { input_tokens: usage.input, output_tokens: usage.output } } : {}),
+        };
+        return this.parseResponse(raw);
+      },
+    };
   }
 
   appendToolResults(messages: ChatMessage[], results: ToolExecutionResult[]): ChatMessage[] {

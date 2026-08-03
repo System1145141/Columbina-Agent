@@ -2,7 +2,7 @@
 // 请求体协议：POST {baseUrl}/chat/completions，messages + tools[].type=function
 import {
   ChatMessage, ChatRequest, ChatResponse, ChatVendorAdapter,
-  HttpRequest, ProviderCapability, StreamChunk, StreamEvent,
+  HttpRequest, ProviderCapability, StreamAccumulator, StreamChunk, StreamEvent,
   TestConnectionResult, ToolCall, ToolExecutionResult, VendorConfig,
 } from "./types";
 
@@ -90,13 +90,24 @@ export class OpenAICompatAdapter implements ChatVendorAdapter {
     const jsonStr = event.data.trim();
     if (!jsonStr) return null;
     if (jsonStr === "[DONE]") return { done: true };
-    let parsed: { choices?: Array<{ delta?: { content?: unknown; reasoning_content?: unknown; tool_calls?: unknown } }>; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+    let parsed: {
+      choices?: Array<{
+        delta?: {
+          content?: unknown;
+          reasoning_content?: unknown;
+          tool_calls?: Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string } }>;
+        };
+        finish_reason?: string | null;
+      }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+    };
     try {
       parsed = JSON.parse(jsonStr);
     } catch {
       return null;
     }
-    const delta = parsed?.choices?.[0]?.delta;
+    const choice = parsed?.choices?.[0];
+    const delta = choice?.delta;
     if (!delta) {
       // 流末尾的 usage 块（choices 为空但带 usage）
       if (parsed?.usage) {
@@ -110,12 +121,70 @@ export class OpenAICompatAdapter implements ChatVendorAdapter {
       return null;
     }
     const chunk: StreamChunk = {};
-    if (typeof delta.content === "string") chunk.deltaText = delta.content;
-    if (typeof delta.reasoning_content === "string") chunk.deltaThinking = delta.reasoning_content;
-    // 暂不实现：if (Array.isArray(delta.tool_calls)) chunk.deltaToolCalls = ...
-    // 当前三个调用点（MemoryJudge / memory-compressor / 心情观察器）都不带 tools，
-    // 未来若需要流式 tool_call 增量，单独实现 + 加测试即可。
+    if (typeof delta.content === "string" && delta.content.length > 0) chunk.deltaText = delta.content;
+    if (typeof delta.reasoning_content === "string" && delta.reasoning_content.length > 0) chunk.deltaThinking = delta.reasoning_content;
+    // 工具调用增量：id/name 首个分片给，arguments 分片按 index 累积
+    if (Array.isArray(delta.tool_calls)) {
+      chunk.deltaToolCalls = delta.tool_calls.map(tc => ({
+        index: tc.index ?? 0,
+        ...(typeof tc.id === "string" ? { id: tc.id } : {}),
+        ...(typeof tc.function?.name === "string" ? { name: tc.function.name } : {}),
+        ...(typeof tc.function?.arguments === "string" && tc.function.arguments.length > 0
+          ? { arguments: tc.function.arguments }
+          : {}),
+      }));
+    }
+    if (typeof choice?.finish_reason === "string" && choice.finish_reason) {
+      chunk.finishReason = choice.finish_reason;
+    }
     return chunk;
+  }
+
+  createStreamAccumulator(): StreamAccumulator {
+    let text = "";
+    let thinking = "";
+    let finishReason = "stop";
+    let usage: { input: number; output: number } | undefined;
+    // index → 累积中的 tool_call 片段
+    const calls = new Map<number, { id: string; name: string; args: string }>();
+    return {
+      push: (chunk: StreamChunk): void => {
+        if (chunk.deltaText) text += chunk.deltaText;
+        if (chunk.deltaThinking) thinking += chunk.deltaThinking;
+        if (chunk.finishReason) finishReason = chunk.finishReason;
+        if (chunk.usage) usage = chunk.usage;
+        if (chunk.deltaToolCalls) {
+          for (const d of chunk.deltaToolCalls) {
+            const acc = calls.get(d.index) ?? { id: "", name: "", args: "" };
+            if (d.id) acc.id = d.id;
+            if (d.name) acc.name = d.name;
+            if (d.arguments) acc.args += d.arguments;
+            calls.set(d.index, acc);
+          }
+        }
+      },
+      done: (): ChatResponse => {
+        // 重建与一次非流式响应等价的 wire 结构，复用 parseResponse 保证行为一致
+        const toolCalls = [...calls.entries()]
+          .sort((a, b) => a[0] - b[0])
+          .map(([, c]) => ({ id: c.id, type: "function", function: { name: c.name, arguments: c.args } }));
+        const raw = {
+          choices: [
+            {
+              message: {
+                role: "assistant",
+                content: text || null,
+                ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+                ...(thinking ? { reasoning_content: thinking } : {}),
+              },
+              finish_reason: finishReason,
+            },
+          ],
+          ...(usage ? { usage: { prompt_tokens: usage.input, completion_tokens: usage.output } } : {}),
+        };
+        return this.parseResponse(raw);
+      },
+    };
   }
 
   parseResponse(raw: unknown): ChatResponse {

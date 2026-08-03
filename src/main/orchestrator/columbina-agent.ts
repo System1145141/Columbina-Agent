@@ -6,8 +6,10 @@
 //   TEXT_MESSAGE_START → TEXT_MESSAGE_CONTENT(逐字) → TEXT_MESSAGE_END → RUN_FINISHED
 //
 // 设计要点：
-// - FC 循环仍是 stream:false 一次性拿全文（不碰 LLM 层），拿到全文后切成 delta 逐个发
-//   TEXT_MESSAGE_CONTENT，这就是"流式感"的来源——标准 AG-UI 做法。
+// - 真流式：每轮 LLM 请求 stream=true，SSE 边收边发——思维链 delta 即时发射
+//   REASONING_MESSAGE_CONTENT、正文 delta 即时发射 TEXT_MESSAGE_CONTENT（渲染层逐字更新），
+//   同时用 adapter 的 createStreamAccumulator 把分片合并成完整 ChatResponse 供循环决策
+//   （工具调用参数分片累积、usage/finishReason 汇总，与一次非流式响应等价）。
 // - run() 不做副作用（不写记忆、不推断表情）。那些在桥层 runAgent 完成后做，
 //   保持 agent 纯粹只管"产出事件流"。
 // - 错误用 observer.error() 抛，桥层捕获。
@@ -18,9 +20,13 @@ import { toolRegistry, type ToolDefinition } from "./tool-registry";
 import { type ToolCallResult } from "./types";
 import { checkPermission, type ToolRiskLevel } from "../permission";
 import {
+  createSseReader,
   getAdapter,
   type ChatMessage,
   type ChatRequest,
+  type ChatResponse,
+  type ChatVendorAdapter,
+  type StreamChunk,
   type ToolExecutionResult,
   type ToolSpec,
 } from "./vendors";
@@ -90,49 +96,78 @@ function buildToolSpecs(tools: ToolDefinition[] = toolRegistry.getEnabledTools()
   }));
 }
 
-/** 逐字切片：按字符（emoji 安全）切，每片 1 字（渲染端 CSS 渐显用）。 */
-function sliceToDeltas(text: string, chunkSize = 1): string[] {
-  const chars = Array.from(text);
-  const out: string[] = [];
-  for (let i = 0; i < chars.length; i += chunkSize) {
-    out.push(chars.slice(i, i + chunkSize).join(""));
-  }
-  return out.length > 0 ? out : [text];
-}
-
-/**
- * 把一份完整文本以 TEXT_MESSAGE 流发出。
- * 返回该文本（供调用方记到 toolResults 等用）。
- */
+/** 把一份完整文本以单次 TEXT_MESSAGE_CONTENT 发出（降级文案等非流式兜底用）。 */
 function emitTextMessage(
   observer: { next: (e: BaseEvent) => void },
   messageId: string,
   text: string,
 ): void {
   observer.next({ type: EventType.TEXT_MESSAGE_START, messageId, role: "assistant" });
-  // 逐字切片发 delta（每片 4 字，emoji 安全），渲染端逐字累积实现流式感。
-  // FC 仍是 stream:false 一次性拿全文，这里切片只是把"整段一次"变成"多段快速"。
-  for (const delta of sliceToDeltas(text)) {
-    observer.next({ type: EventType.TEXT_MESSAGE_CONTENT, messageId, delta });
-  }
+  if (text) observer.next({ type: EventType.TEXT_MESSAGE_CONTENT, messageId, delta: text });
   observer.next({ type: EventType.TEXT_MESSAGE_END, messageId });
 }
 
 /**
- * 把模型思维链（reasoning_content / thinking）以 REASONING_MESSAGE 流发出。
- * 渲染层订阅 REASONING_MESSAGE_CONTENT 增量累积，展示「深度思考」可折叠块。
+ * 真流式请求一轮 LLM：
+ * - SSE 边收边发——每个增量块即时回调 onDelta（渲染层思维链/正文逐字更新）；
+ * - 同时喂 adapter 累积器，结束时 done() 得到与一次非流式响应等价的 ChatResponse
+ *   （工具调用参数分片合并、usage/finishReason 汇总）。
+ * - 超时按"静默"计：每收到一个数据块就续期，长思考流不会被一刀切；流中止（超时/取消）
+ *   时若已收到部分内容则静默用已累积结果兜底（保底有回复），否则抛 AbortError 由调用方按超时处理。
  */
-function emitReasoningMessage(
-  observer: { next: (e: BaseEvent) => void },
-  messageId: string,
-  text: string,
-): void {
-  observer.next({ type: EventType.REASONING_MESSAGE_START, messageId, role: "assistant" });
-  // 每片 16 字：思维链可能很长，避免逐字 IPC 过多
-  for (const delta of sliceToDeltas(text, 16)) {
-    observer.next({ type: EventType.REASONING_MESSAGE_CONTENT, messageId, delta });
+async function requestStreamRound(
+  adapter: ChatVendorAdapter,
+  req: ChatRequest,
+  settings: AgentLoopSettings,
+  timeoutMs: number,
+  onDelta: (chunk: StreamChunk) => void,
+  registerAbort: (fn: () => void) => void,
+): Promise<{ chat: ChatResponse; partial: boolean }> {
+  const http = adapter.buildStreamRequest(req, settings);
+  console.log(LOG_PREFIX, "请求:", http.url);
+
+  const controller = new AbortController();
+  registerAbort(() => controller.abort());
+  const acc = adapter.createStreamAccumulator();
+  let timer = setTimeout(() => controller.abort(), timeoutMs);
+  let sawAny = false;
+
+  try {
+    const response = await fetch(http.url, {
+      method: "POST",
+      signal: controller.signal,
+      headers: http.headers,
+      body: http.body,
+    });
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "");
+      throw new Error("模型请求失败：HTTP " + response.status + (errorText ? " — " + errorText.slice(0, 200) : ""));
+    }
+    if (!response.body) {
+      throw new Error("响应体为空，不支持流式读取");
+    }
+
+    for await (const event of createSseReader(adapter, response.body)) {
+      const chunk = adapter.parseStreamEvent(event);
+      if (!chunk) continue;
+      sawAny = true;
+      // 活动续命：超时只发生在"静默"，不打断正在推进的长思考流
+      clearTimeout(timer);
+      timer = setTimeout(() => controller.abort(), timeoutMs);
+      onDelta(chunk);
+      acc.push(chunk);
+      if (chunk.done) break;
+    }
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError" && sawAny) {
+      console.warn(LOG_PREFIX, "流式中止（超时/取消），使用已接收的部分内容");
+      return { chat: acc.done(), partial: true };
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-  observer.next({ type: EventType.REASONING_MESSAGE_END, messageId });
+  return { chat: acc.done(), partial: false };
 }
 
 /**
@@ -165,6 +200,8 @@ function buildFallbackReply(toolResults: ToolCallResult[], reason: string): stri
 async function runFcLoopWithEvents(
   options: ColumbinaRunOptions,
   observer: { next: (e: BaseEvent) => void; error: (e: unknown) => void; complete: () => void },
+  isCancelled: () => boolean,
+  registerAbort: (fn: () => void) => void,
 ): Promise<ColumbinaRunResult> {
   const { settings, messages, timeoutMs } = options;
   const adapter = getAdapter(settings.provider);
@@ -187,6 +224,10 @@ async function runFcLoopWithEvents(
   resetReadRefs();
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    if (isCancelled()) {
+      console.warn(LOG_PREFIX, "run 已取消，中断 FC 循环");
+      break;
+    }
     const roundStart = Date.now();
 
     if (Date.now() - startTime > timeoutMs) {
@@ -201,28 +242,52 @@ async function runFcLoopWithEvents(
       model: settings.model,
       messages: conversation,
       ...(tools.length > 0 ? { tools } : {}),
-      stream: false,
+      stream: true,
     };
     if (adapter.applyCacheHints) req = adapter.applyCacheHints(req, settings);
 
-    const http = adapter.buildRequest(req, settings);
-    console.log(LOG_PREFIX, "请求:", http.url);
+    // 真流式：思维链/正文 delta 边收边发（渲染层逐字更新），累积器合并出完整 ChatResponse
+    const textMessageId = `msg-${Date.now()}`;
+    const thinkingMessageId = `thinking-${Date.now()}-${round + 1}`;
+    let thinkingStarted = false;
+    let textStarted = false;
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), PER_ROUND_TIMEOUT_MS);
-    let response: Response;
+    let chat: ChatResponse;
     try {
-      response = await fetch(http.url, {
-        method: "POST",
-        signal: controller.signal,
-        headers: http.headers,
-        body: http.body,
-      });
+      const res = await requestStreamRound(
+        adapter, req, settings, PER_ROUND_TIMEOUT_MS,
+        (chunk) => {
+          // 思维链增量即时发射，渲染层「深度思考」折叠块实时更新
+          if (chunk.deltaThinking) {
+            if (!thinkingStarted) {
+              thinkingStarted = true;
+              observer.next({ type: EventType.REASONING_MESSAGE_START, messageId: thinkingMessageId, role: "assistant" });
+            }
+            observer.next({ type: EventType.REASONING_MESSAGE_CONTENT, messageId: thinkingMessageId, delta: chunk.deltaThinking });
+          }
+          // 正文增量即时发射，渲染层正文气泡逐字更新
+          if (chunk.deltaText) {
+            if (!textStarted) {
+              textStarted = true;
+              observer.next({ type: EventType.TEXT_MESSAGE_START, messageId: textMessageId, role: "assistant" });
+            }
+            observer.next({ type: EventType.TEXT_MESSAGE_CONTENT, messageId: textMessageId, delta: chunk.deltaText });
+          }
+        },
+        registerAbort,
+      );
+      chat = res.chat;
+      // 取消后（中止器已 abort 在途流）丢弃部分结果：不执行工具、不进下一轮
+      if (isCancelled()) {
+        console.warn(LOG_PREFIX, "第 " + (round + 1) + " 轮请求后被取消，丢弃部分结果");
+        const totalUsage = (accInput > 0 || accOutput > 0) ? { input: accInput, output: accOutput } : undefined;
+        return { reply: "", toolResults: allToolResults, totalUsage };
+      }
+      if (res.partial) console.warn(LOG_PREFIX, "第 " + (round + 1) + " 轮流式中止，使用已接收的部分内容");
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
         consecutiveTimeouts++;
         console.warn(LOG_PREFIX, "第 " + (round + 1) + " 轮 LLM 请求超时（" + PER_ROUND_TIMEOUT_MS + "ms），连续第 " + consecutiveTimeouts + " 次");
-        clearTimeout(timer);
         // 连续超时即退出：再重试只会让上下文更长更慢，注定超时。
         // 不再往 conversation 塞"超时提示"消息（雪上加霜），直接跳出走强制总结。
         if (consecutiveTimeouts >= MAX_CONSECUTIVE_TIMEOUTS) {
@@ -234,23 +299,11 @@ async function runFcLoopWithEvents(
         continue;
       }
       throw err;
-    } finally {
-      clearTimeout(timer);
     }
 
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => "");
-      console.error(LOG_PREFIX, "LLM 请求失败 HTTP " + response.status + ":", errorText.slice(0, 300));
-      throw new Error("模型请求失败：HTTP " + response.status + (errorText ? " — " + errorText.slice(0, 200) : ""));
-    }
-
-    const data = await response.json();
-    const chat = adapter.parseResponse(data);
-
-    // 思维链：模型思考内容以 REASONING_MESSAGE 流发射，渲染层「深度思考」折叠块实时展示
-    if (chat.thinking) {
-      emitReasoningMessage(observer, `thinking-${Date.now()}-${round + 1}`, chat.thinking);
-    }
+    // 收尾流事件（模型没产出正文/思维链时 START 不会发射，这里对称收 END）
+    if (thinkingStarted) observer.next({ type: EventType.REASONING_MESSAGE_END, messageId: thinkingMessageId });
+    if (textStarted) observer.next({ type: EventType.TEXT_MESSAGE_END, messageId: textMessageId });
 
     if (chat.usage) {
       accInput += chat.usage.input;
@@ -366,18 +419,21 @@ async function runFcLoopWithEvents(
       continue;
     }
 
-    // 情况2：模型正常返回文本 → 发 TEXT_MESSAGE 流
+    // 情况2：模型正常返回文本（正文已随流式逐字发射完毕，这里只记录回复）
     const content = chat.text || "";
     console.log(LOG_PREFIX, "Function Calling 完成，最终回复长度=" + content.length);
-    const textMessageId = `msg-${Date.now()}`;
-    emitTextMessage(observer, textMessageId, content);
 
     observer.next({ type: EventType.STEP_FINISHED, stepName: `round-${round + 1}` });
     const totalUsage = (accInput > 0 || accOutput > 0) ? { input: accInput, output: accOutput } : undefined;
     return { reply: content, toolResults: allToolResults, totalUsage };
   }
 
-  // 超过最大轮数，强制要求模型总结（不带 tools）
+  // 超过最大轮数或被取消：强制要求模型总结（不带 tools）。取消时直接返回，不再发起请求
+  if (isCancelled()) {
+    console.warn(LOG_PREFIX, "run 已取消，跳过强制总结");
+    const totalUsage = (accInput > 0 || accOutput > 0) ? { input: accInput, output: accOutput } : undefined;
+    return { reply: "", toolResults: allToolResults, totalUsage };
+  }
   console.warn(LOG_PREFIX, "达到最大轮数 " + MAX_TOOL_ROUNDS + "，强制要求模型回复");
   conversation.push({
     role: "user",
@@ -389,44 +445,47 @@ async function runFcLoopWithEvents(
   let finalReq: ChatRequest = {
     model: settings.model,
     messages: conversation,
-    stream: false,
+    stream: true,
   };
   if (adapter.applyCacheHints) finalReq = adapter.applyCacheHints(finalReq, settings);
-  const http = adapter.buildRequest(finalReq, settings);
-  console.log(LOG_PREFIX, "请求:", http.url);
 
-  const controller = new AbortController();
-  // 强制总结是最后兜底：对话历史此时往往已很长，30s 不够模型生成完会被 abort，
-  // 导致整个 run 抛错用户彻底没回复。放宽到 90s。
-  const timer = setTimeout(() => controller.abort(), FORCE_SUMMARY_TIMEOUT_MS);
+  const textMessageId = `msg-${Date.now()}`;
+  const thinkingMessageId = `thinking-${Date.now()}-force`;
+  let thinkingStarted = false;
+  let textStarted = false;
   try {
-    const response = await fetch(http.url, {
-      method: "POST",
-      signal: controller.signal,
-      headers: http.headers,
-      body: http.body,
-    });
+    // 强制总结同样真流式：正文/思维链边收边发（90s 静默超时，见 requestStreamRound）
+    const res = await requestStreamRound(
+      adapter, finalReq, settings, FORCE_SUMMARY_TIMEOUT_MS,
+      (chunk) => {
+        if (chunk.deltaThinking) {
+          if (!thinkingStarted) {
+            thinkingStarted = true;
+            observer.next({ type: EventType.REASONING_MESSAGE_START, messageId: thinkingMessageId, role: "assistant" });
+          }
+          observer.next({ type: EventType.REASONING_MESSAGE_CONTENT, messageId: thinkingMessageId, delta: chunk.deltaThinking });
+        }
+        if (chunk.deltaText) {
+          if (!textStarted) {
+            textStarted = true;
+            observer.next({ type: EventType.TEXT_MESSAGE_START, messageId: textMessageId, role: "assistant" });
+          }
+          observer.next({ type: EventType.TEXT_MESSAGE_CONTENT, messageId: textMessageId, delta: chunk.deltaText });
+        }
+      },
+      registerAbort,
+    );
+    const chat = res.chat;
+    if (res.partial) console.warn(LOG_PREFIX, "强制总结流式中止，使用已接收的部分内容");
+    if (thinkingStarted) observer.next({ type: EventType.REASONING_MESSAGE_END, messageId: thinkingMessageId });
+    if (textStarted) observer.next({ type: EventType.TEXT_MESSAGE_END, messageId: textMessageId });
 
-    if (!response.ok) {
-      throw new Error("最终回复请求失败：HTTP " + response.status);
-    }
-
-    const data = await response.json();
-    const chat = adapter.parseResponse(data);
-
-    // 思维链：强制总结轮的思考内容同样以 REASONING_MESSAGE 流发射
-    if (chat.thinking) {
-      emitReasoningMessage(observer, `thinking-${Date.now()}-force`, chat.thinking);
-    }
     console.log(LOG_PREFIX, "强制回复完成，长度=" + chat.text.length);
     if (chat.usage) {
       accInput += chat.usage.input;
       accOutput += chat.usage.output;
       recordUsage(chat.usage.input, chat.usage.output, 1);
     }
-
-    const textMessageId = `msg-${Date.now()}`;
-    emitTextMessage(observer, textMessageId, chat.text);
 
     observer.next({ type: EventType.STEP_FINISHED, stepName: "force-summary" });
     const totalUsage = (accInput > 0 || accOutput > 0) ? { input: accInput, output: accOutput } : undefined;
@@ -439,13 +498,10 @@ async function runFcLoopWithEvents(
       : (err instanceof Error ? err.message : String(err));
     console.error(LOG_PREFIX, "强制总结也失败，降级返回已有结果:", reason);
     const fallback = buildFallbackReply(allToolResults, reason);
-    const textMessageId = `msg-${Date.now()}`;
-    emitTextMessage(observer, textMessageId, fallback);
+    emitTextMessage(observer, `msg-${Date.now()}`, fallback);
     observer.next({ type: EventType.STEP_FINISHED, stepName: "force-summary" });
     const totalUsage = (accInput > 0 || accOutput > 0) ? { input: accInput, output: accOutput } : undefined;
     return { reply: fallback, toolResults: allToolResults, totalUsage };
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -473,10 +529,12 @@ export class ColumbinaAgent extends AbstractAgent {
 
     return new Observable<BaseEvent>((subscriber) => {
       let cancelled = false;
+      // 各轮在途流式请求的中止器：取消 run 时立即 abort fetch，停止消耗 token
+      const aborters: Array<() => void> = [];
       (async () => {
         try {
           subscriber.next({ type: EventType.RUN_STARTED, threadId, runId });
-          const result = await runFcLoopWithEvents(options, subscriber);
+          const result = await runFcLoopWithEvents(options, subscriber, () => cancelled, (fn) => aborters.push(fn));
           this.lastResult = result;
           if (cancelled) return;
           subscriber.next({
@@ -492,7 +550,10 @@ export class ColumbinaAgent extends AbstractAgent {
         }
       })();
 
-      return () => { cancelled = true; };
+      return () => {
+        cancelled = true;
+        for (const fn of aborters) fn();
+      };
     });
   }
 

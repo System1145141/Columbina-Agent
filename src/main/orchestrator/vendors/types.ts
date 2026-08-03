@@ -83,19 +83,45 @@ export interface StreamEvent {
 }
 
 /**
- * 流式增量块。接口设计比当前需求宽（保留 deltaToolCalls），
- * 但本次两个 adapter 的 parseStreamEvent 实现只解析 deltaText + deltaThinking；
- * 遇到 tool delta 时静默忽略（不报错、不累积）。
- *
- * 未来若 MemoryJudge / 心情观察器想走工具调用，只改 adapter 实现，
- * 不改接口、不改调用方。
+ * 流式工具调用增量片段。同一 tool_call / tool_use 按 index 对齐累积：
+ * - OpenAI：choices[0].delta.tool_calls[]（id/name 首个分片给，arguments 分片拼接）
+ * - Anthropic：content_block_start 给 id/name，input_json_delta 给 arguments 分片，
+ *   content_block_stop 以 finalize:true 标记块结束（累积器把 JSON 片段 parse 成 input）。
+ */
+export interface ToolCallDelta {
+  /** 同轮内的序号（OpenAI tool_calls[].index / Anthropic content_block index）。 */
+  index: number;
+  /** 首次出现时提供（OpenAI 首个分片 / Anthropic content_block_start）。 */
+  id?: string;
+  name?: string;
+  /** 参数 JSON 片段（OpenAI function.arguments 增量 / Anthropic partial_json）。 */
+  arguments?: string;
+  /** Anthropic content_block_stop：该 tool_use 块已结束，累积器应 finalize。 */
+  finalize?: boolean;
+}
+
+/**
+ * 流式增量块。parseStreamEvent 是纯函数只产出增量，累积由 createStreamAccumulator 负责。
  */
 export interface StreamChunk {
   deltaText?: string;
   deltaThinking?: string;
-  deltaToolCalls?: ToolCall[];
+  deltaToolCalls?: ToolCallDelta[];
+  /** 本轮结束原因（OpenAI choices[0].finish_reason / Anthropic message_delta stop_reason）。 */
+  finishReason?: string;
   done?: boolean;
   usage?: { input: number; output: number };
+}
+
+/**
+ * 流式累积器：把一轮 parseStreamEvent 产出的所有 StreamChunk 逐块 push，
+ * 结束时 done() 返回与 parseResponse 等价的 ChatResponse。
+ * 传输细节（OpenAI tool_calls 合并 / Anthropic content block 重建）由 adapter 封装，
+ * FC 循环只 push + done，保持 transport 无关。
+ */
+export interface StreamAccumulator {
+  push(chunk: StreamChunk): void;
+  done(): ChatResponse;
 }
 
 /** 适配器解析后的统一响应，调度层只看这个。 */
@@ -180,5 +206,10 @@ export interface ChatVendorAdapter {
    * 不是字节片段（Chunk）。
    */
   parseStreamEvent(event: StreamEvent): StreamChunk | null;
+  /**
+   * 创建流式累积器：FC 循环流式读取时逐块 push，结束时 done() 得到完整 ChatResponse
+   * （工具调用参数分片合并、usage/finishReason 汇总，行为与 parseResponse 等价）。
+   */
+  createStreamAccumulator(): StreamAccumulator;
   testConnection(cfg: VendorConfig): Promise<TestConnectionResult>;
 }
