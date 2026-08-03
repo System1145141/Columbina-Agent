@@ -10,8 +10,9 @@ import { html } from "@codemirror/lang-html";
 import { markdown } from "@codemirror/lang-markdown";
 import { defaultKeymap, indentWithTab } from "@codemirror/commands";
 import { state, subscribe, notify, type InlineChatState } from "../services/state";
-import { saveTab, getFileExtension, loadFullFile } from "../services/file-service";
+import { saveTab, getFileExtension, loadFullFile, readFile, normalizeLineEndings } from "../services/file-service";
 import { callAgentStream, buildPersonaPrompt } from "../services/agent-bridge";
+import { appendToAiInput, formatConversationBlock } from "../services/ai-context";
 import {
   lspExtension,
   notifyLspOpen,
@@ -609,7 +610,9 @@ function showEditorContextMenu(x: number, y: number) {
     items.push({ label: "询问 Columbina", action: () => openInlineChat() });
     items.push({ label: "解释选中代码", action: () => { openInlineChat(); void runInlineChat("解释这段代码"); } });
     items.push({ label: "重构选中代码", action: () => { openInlineChat(); void runInlineChat("重构这段代码，提高可读性"); } });
+    items.push({ label: "添加到对话（选中代码）", action: () => addSelectedToConversation() });
   }
+  items.push({ label: "添加到对话（整个文件）", action: () => void addFileToConversation() });
 
   for (const item of items) {
     const btn = document.createElement("button");
@@ -636,6 +639,38 @@ function hideEditorContextMenu() {
     editorContextMenu.remove();
     editorContextMenu = null;
   }
+}
+
+/** 把当前编辑器选区添加到对话（来源标注含文件与行号） */
+function addSelectedToConversation(): void {
+  const view = state.editorView;
+  if (!view) return;
+  const { from, to } = view.state.selection.main;
+  if (from === to) return;
+  const text = view.state.sliceDoc(from, to);
+  const filePath = state.activeTabId || "";
+  const lineStart = view.state.doc.lineAt(from).number;
+  const lineEnd = view.state.doc.lineAt(to).number;
+  const source = filePath
+    ? `代码选区: ${filePath} 行 ${lineStart}-${lineEnd}`
+    : `代码选区 行 ${lineStart}-${lineEnd}`;
+  appendToAiInput(formatConversationBlock(source, text, detectLanguage(filePath)));
+}
+
+/** 把当前打开文件（完整内容）添加到对话；读取失败时回退到编辑器当前内容 */
+async function addFileToConversation(): Promise<void> {
+  const filePath = state.activeTabId || "";
+  const lang = detectLanguage(filePath);
+  let content = state.editorView?.state.doc.toString() ?? "";
+  if (filePath) {
+    try {
+      const raw = await readFile(filePath);
+      content = normalizeLineEndings(raw);
+    } catch {
+      // 读取失败（如 diff 标签无真实文件）时使用编辑器当前内容
+    }
+  }
+  appendToAiInput(formatConversationBlock(`整个文件: ${filePath || "未命名"}`, content, lang));
 }
 
 async function promptRenameSymbol() {

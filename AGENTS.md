@@ -21,6 +21,7 @@
 - 右侧 AI 面板，支持「当前文件 / 当前选区 / 整个项目 / Git 变更」四种上下文提问；输入区新增「模型」下拉，可选已保存的模型（与聊天模式共享 `modelConfig`，按身份各自记忆所选模型，切换哥伦比娅/桑多涅时自动联动）。
 - 多会话管理：新建 / 复制 / 重命名 / 删除 / 清空；会话随工作区持久化（每会话 200 条消息、总数上限 30 个，超限淘汰最久未更新者），重开 IDE 自动恢复；无题会话自动以首条消息命名；Agent 运行中禁止切换会话。
 - 面板显示 Agent 思考过程与操作结果，操作确认卡片逐条展示，可撤销。
+- **右键「添加到对话」**：编辑器选区（带文件与行号标注）、终端选区、文件树整个文件，均可一键插入 AI 输入框（`【添加到对话｜来源】` + 代码块，语言高亮），自动打开 AI 面板并聚焦；独立 `ai-context.ts` 模块避免组件循环依赖。
 - **界面为分隔线布局（无气泡）**：用户消息纯文本 + 分隔线；助手消息 =「深度思考」可折叠块（流式累积 AG-UI `REASONING_MESSAGE_CONTENT` 思维链，模型不返回 reasoning 时隐藏）+ 涉及文件标签（write/edit/delete 高亮为已修改）+ 正文；**正文与思维链均流式增量渲染**（订阅 AG-UI 事件逐字更新，`<action>`/`[recall]` 标记实时剥离，不污染显示）。
 - **真实 tool-call 流式**：IDE 模式全部 16 个工具原生化为主进程原生 function calling——渲染层随每次 run 传工作区 roots（`AguiRunInput.ideTools`，`confirmed=false` 时仅只读工具用于摘要/规划等后台 run），主进程 `buildIdeTools` 构建 ToolDefinition 注入 FC 循环；AI 面板订阅 `TOOL_CALL_START/RESULT/END` 事件流式展示调用过程（⏳ 运行中 → ✓/✗ 结果预览）。**只读工具**（read_file / search_files / list_dir / list_files，risk=fs-read）自动执行、无需确认；**写操作工具**（write_file / edit_file / delete_file / run_command / rename_symbol / generate_tests / review_changes / get_diagnostics / check_command_status / stop_command / todo / plugin）声明 `needsConfirm`，FC 循环执行前经**确认桥**（`toolApprovalHandler`）向 AI 面板弹确认卡片，用户点「确认执行/拒绝」后由渲染层执行既有逻辑（快照撤销 / 标签同步 / diff 预览 / LSP / 终端 / todo）并回填结果（120s 未响应自动拒绝，run 取消/出错时清空悬挂请求）；`<action>` 文本协议已从提示词移除（渲染层执行函数仍保留作为兼容）。
 
