@@ -16,6 +16,8 @@ import {
   type Tab,
   getRootForPath,
   getLspDiagnostics,
+  getGitStatusForRoot,
+  gitChangeFingerprint,
 } from "./state";
 import type { EditorView } from "@codemirror/view";
 import { ensureActiveSession } from "./ai-sessions";
@@ -35,9 +37,9 @@ import {
 } from "./file-service";
 import { queryGitStatus, getGitDiff } from "./git-service";
 
-let runCommandInTerminalImpl: ((command: string) => Promise<string | null>) | null = null;
+let runCommandInTerminalImpl: ((command: string, cwd?: string) => Promise<string | null>) | null = null;
 
-export function registerRunCommandInTerminal(fn: (command: string) => Promise<string | null>): void {
+export function registerRunCommandInTerminal(fn: (command: string, cwd?: string) => Promise<string | null>): void {
   runCommandInTerminalImpl = fn;
 }
 
@@ -352,9 +354,12 @@ export async function saveSnapshot(filePath: string): Promise<void> {
   }
 }
 
-/** 检测项目测试框架（读取 package.json 的依赖与 scripts） */
-export async function detectTestFramework(rootPath: string): Promise<string> {
-  if (!rootPath) return "未定位到项目根目录，无法检测测试框架（建议生成 vitest 风格测试）";
+/** 检测项目测试框架（读取 package.json 的依赖与 scripts）；返回结构化信息供运行测试闭环使用 */
+export async function detectTestFramework(rootPath: string): Promise<{ framework: string; runCommand: string; scripts: Record<string, string> }> {
+  const fallback = { framework: "未检测到常见测试框架（建议使用 vitest 风格测试）", runCommand: "npx vitest run <测试文件路径>", scripts: {} };
+  if (!rootPath) {
+    return { framework: "未定位到项目根目录，无法检测测试框架（建议生成 vitest 风格测试）", runCommand: fallback.runCommand, scripts: {} };
+  }
   try {
     const raw = await readFile(`${rootPath}/package.json`);
     const pkg = JSON.parse(raw) as {
@@ -370,17 +375,48 @@ export async function detectTestFramework(rootPath: string): Promise<string> {
     if (deps["@vue/test-utils"]) found.push("@vue/test-utils");
     if (deps["@testing-library/react"]) found.push("@testing-library/react");
     if (deps["@testing-library/vue"]) found.push("@testing-library/vue");
-    const framework = found.length > 0 ? found.join(" + ") : "未检测到常见测试框架（建议使用 vitest 风格测试）";
-    const runCmd = found.includes("vitest")
+    const runCommand = found.includes("vitest")
       ? "npx vitest run <测试文件路径>"
       : found.includes("jest")
         ? "npx jest <测试文件路径>"
         : found.includes("mocha")
           ? "npx mocha <测试文件路径>"
           : "npx vitest run <测试文件路径>";
-    return `项目测试框架: ${framework}\n推荐运行命令: ${runCmd}\npackage.json scripts:\n${JSON.stringify(pkg.scripts || {}, null, 2)}`;
+    return {
+      framework: found.length > 0 ? found.join(" + ") : fallback.framework,
+      runCommand,
+      scripts: pkg.scripts || {},
+    };
   } catch {
-    return "未找到 package.json，无法检测测试框架（建议生成 vitest 风格测试，运行命令 npx vitest run <测试文件路径>）";
+    return fallback;
+  }
+}
+
+/** 生成测试框架信息的描述文本（generate_tests 工具返回给模型） */
+export async function describeTestFramework(rootPath: string): Promise<string> {
+  const info = await detectTestFramework(rootPath);
+  return `项目测试框架: ${info.framework}\n推荐运行命令: ${info.runCommand}\npackage.json scripts:\n${JSON.stringify(info.scripts, null, 2)}`;
+}
+
+/** 测试文件路径匹配（.test.ts / .spec.tsx / .test.js / .spec.mjs 等） */
+export function isTestFilePath(filePath: string): boolean {
+  return /\.(test|spec)\.[cm]?[jt]sx?$/i.test(filePath);
+}
+
+/** 测试运行闭环：检测框架 → 构造命令 → 集成终端运行（目标 root 目录），返回 terminalId 供查看输出 */
+export async function runTestForFile(filePath: string): Promise<{ ok: boolean; output: string }> {
+  const root = getRootForPath(filePath);
+  if (!root) return { ok: false, output: `文件不在任何工作区内: ${filePath}` };
+  const info = await detectTestFramework(root.path);
+  // 文件路径加引号，防止路径含空格（Windows 常见）被 shell 拆解
+  const command = info.runCommand.replace(/<测试文件路径>/, `"${filePath}"`);
+  if (!runCommandInTerminalImpl) return { ok: false, output: "终端尚未就绪，无法运行测试" };
+  try {
+    const terminalId = await runCommandInTerminalImpl(command, root.path);
+    if (!terminalId) return { ok: false, output: "无法启动集成终端" };
+    return { ok: true, output: `已在终端 ${terminalId} 运行: ${command}` };
+  } catch (err) {
+    return { ok: false, output: `运行测试失败: ${err instanceof Error ? err.message : String(err)}` };
   }
 }
 
@@ -556,7 +592,7 @@ async function executeGenerateTests(action: AgentAction): Promise<AgentActionRes
     const root = getRootForPath(target);
     const rootPath = root?.path || "";
     const raw = await readFile(target);
-    const framework = await detectTestFramework(rootPath);
+    const framework = await describeTestFramework(rootPath);
     return {
       actionId: action.id,
       ok: true,
@@ -1122,6 +1158,8 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
   // 记录首轮 prompt：摘要调用以它为前缀（前缀缓存命中，见 Reordering Context System 验证）。
   // 声明在 try 外：摘要优化在 try/catch/finally 之后执行，需函数级作用域。
   let firstPrompt = "";
+  // 审查完成标记：仅当 run 正常结束（未被停止/取消/异常）时才记录 git 审查指纹
+  let gitReviewCompleted = false;
 
   try {
     let round = 0;
@@ -1199,6 +1237,7 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
 
       // <action> 文本协议已废弃：工具调用全部走主进程原生 function calling
       // （确认桥把关、TOOL_CALL 事件流式展示、结果自动回填模型），模型输出即最终回答，单轮结束
+      gitReviewCompleted = true;
       break;
     }
   } catch (err) {
@@ -1217,6 +1256,16 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
 
   // 奇数轮（3、5、7…）完成后触发历史摘要优化（不阻塞 UI，摘要异步完成）
   await maybeSummarizeHistory(firstPrompt);
+
+  // 提交前审查提醒：AI 审查（Git 变更上下文 / Git 面板「AI 审查」）正常完成后记录各 root 的变更指纹，
+  // 提交时比对指纹，未审查或有新变更时提示先审查；被停止/异常中断的审查不记录
+  if (scope === "git" && gitReviewCompleted) {
+    for (const root of state.roots) {
+      const status = getGitStatusForRoot(root.id);
+      state.gitReviewed[root.id] = { fingerprint: gitChangeFingerprint(status) };
+    }
+    notify();
+  }
 }
 
 // Task planning

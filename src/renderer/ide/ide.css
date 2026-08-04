@@ -2603,6 +2603,33 @@ html, body, .ide {
   background: #d4d4d4;
 }
 
+/* 测试运行闭环：AI 面板「运行测试」按钮 */
+.ide__ai-runtest-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.ide__ai-runtest-btn {
+  background: #1f6feb;
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ide__ai-runtest-btn:hover:not(:disabled) {
+  background: #388bfd;
+}
+
+.ide__ai-runtest-btn:disabled {
+  background: #3e3e42;
+  color: #858585;
+  cursor: default;
+}
+
 /* Inline chat */
 .ide__inline-chat {
   width: 420px;

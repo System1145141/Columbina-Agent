@@ -63,10 +63,12 @@
 **测试生成**
 - `generate_tests` 读取项目 package.json 自动检测 vitest / jest / mocha / @vue/test-utils / @testing-library 并给出运行命令；返回目标文件内容与框架信息，Agent 生成测试代码后用 write_file 写入。
 - 命令面板「AI: 为当前文件生成测试」一键入口；无框架时回退 vitest 风格。
+- **测试运行闭环**：Agent 写入/编辑测试文件（`.test.*` / `.spec.*`）成功后，AI 面板消息出现「🧪 运行测试」按钮 → 检测框架构造命令（`npx vitest run <文件>` 等，路径加引号防空格）→ 在文件所属 root 目录的集成终端运行（按 cwd 复用终端，否则新建）→ 终端展示输出；`detectTestFramework` 返回结构化 `{ framework, runCommand, scripts }`。
 
 **代码审查**
 - `review_changes` 遍历所有工作区 Root 的 git status，合并已暂存/已修改/未跟踪/冲突文件（上限 15 个、总量 60k 字符截断），未跟踪文件直接读内容、其余取未暂存+已暂存 diff，Agent 按高/中/低严重程度输出问题清单。
 - 三个入口：Git 面板提交区「AI 审查」按钮、AI 面板「Git 变更」上下文、命令面板「AI: 审查代码变更」。
+- **提交前审查提醒**：AI 审查（Git 变更上下文）正常完成后记录各 root 的变更指纹（staged+modified+untracked+conflicted 文件列表）；Git 提交时比对指纹，未审查或审查后有新变更时弹窗提示先审查（可仍直接提交）；被停止/异常的审查不记录指纹。
 
 **上下文与记忆**
 - 项目级轻量 RAG：异步队列索引项目文件摘要，Agent 能理解项目结构。
@@ -130,16 +132,14 @@
 1. **自动错误修复**：LSP 诊断到错误时 AI 面板显示「一键修复」，Agent 读取相关文件、生成修复 patch，用户确认后应用。
 2. **自然语言生成完整代码**：AI 面板输入需求生成完整代码文件，支持多文件生成与目录结构建议。
 3. **更多跨文件重构类型**：提取函数、移动文件（基于 LSP 引用分析，diff 预览 + 可整体撤销）。
-4. **测试运行闭环**：生成测试后可一键运行（集成终端）并回传结果。
-5. **提交前审查提醒**：Git 提交前若存在未审查的变更，提示先进行 AI 审查（与 Git 面板集成）。
-6. **人格深化**：支持多风格切换（styles/*.md）、世界书按需召回（embedding 匹配）、与 Live2D 表情/状态栏心情联动。
+4. **人格深化**：支持多风格切换（styles/*.md）、世界书按需召回（embedding 匹配）、与 Live2D 表情/状态栏心情联动。
 
 ### 工程化：稳定性与发布
 
-7. **自动化测试**：Vitest 单元测试（file-service / state / workspace-service / git-service / lsp-client）+ 主进程集成测试（Git、LSP、文件监听）+ Playwright 渲染进程关键交互；核心服务覆盖率 > 60%。
-8. **错误监控与日志**：捕获主/渲染进程未处理异常与 unhandledRejection，日志落盘 `userData/logs`。
-9. **发布流水线**：electron-builder + GitHub Actions 自动构建 Windows / macOS / Linux 安装包，可选 auto-update。
-10. **设置导出/导入**：导出 settings / workspaces / 快捷键为 JSON，支持导入恢复。
+5. **自动化测试**：Vitest 单元测试（file-service / state / workspace-service / git-service / lsp-client）+ 主进程集成测试（Git、LSP、文件监听）+ Playwright 渲染进程关键交互；核心服务覆盖率 > 60%。
+6. **错误监控与日志**：捕获主/渲染进程未处理异常与 unhandledRejection，日志落盘 `userData/logs`。
+7. **发布流水线**：electron-builder + GitHub Actions 自动构建 Windows / macOS / Linux 安装包，可选 auto-update。
+8. **设置导出/导入**：导出 settings / workspaces / 快捷键为 JSON，支持导入恢复。
 
 ### 后续可选
 

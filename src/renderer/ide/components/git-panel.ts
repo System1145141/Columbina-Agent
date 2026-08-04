@@ -3,6 +3,7 @@ import {
   subscribe,
   notify,
   getGitStatusForRoot,
+  gitChangeFingerprint,
   getGitSelectedFileForRoot,
   getGitDiffForRoot,
   removeGitRootData,
@@ -180,6 +181,18 @@ async function doCommit(rootId: string, message: string): Promise<void> {
     state.statusMessage = `【${root.name}】没有已暂存的文件可以提交`;
     notify();
     return;
+  }
+  // 提交前审查提醒：未审查或自上次审查后有新变更时，提示先进行 AI 审查
+  const reviewed = state.gitReviewed[rootId];
+  if (!reviewed || reviewed.fingerprint !== gitChangeFingerprint(status)) {
+    const proceed = confirm(
+      `【${root.name}】有未审查的变更。\n\n建议先进行 AI 审查（Git 面板「AI 审查」按钮或命令面板「AI: 审查代码变更」）。\n\n点击「确定」仍然直接提交，点击「取消」中止提交。`
+    );
+    if (!proceed) {
+      state.statusMessage = `【${root.name}】已中止提交：建议先进行 AI 审查`;
+      notify();
+      return;
+    }
   }
   state.gitLoading = true;
   notify();

@@ -13,6 +13,8 @@ import {
   nativeArgsToAction,
   formatNativeToolLabel,
   requestAgentStop,
+  isTestFilePath,
+  runTestForFile,
 } from "../services/agent-bridge";
 import { toggleAiPanel, hideAiPanel } from "../services/layout";
 import {
@@ -317,6 +319,13 @@ async function setupNativeToolConfirm(): Promise<void> {
     }
     try {
       const result = await executeAction(action);
+      // 测试运行闭环：写入/编辑测试文件成功后标记该消息，AI 面板渲染「运行测试」按钮
+      if (result.ok && action.filePath && isTestFilePath(action.filePath)) {
+        const msg = state.aiMessages.find((m) => m.id === activeStreamMsgId);
+        if (msg && !msg.runTestTarget) {
+          msg.runTestTarget = { filePath: action.filePath, name: action.filePath.split(/[\\/]/).pop() || action.filePath };
+        }
+      }
       window.ide?.agentToolConfirmResult({
         requestId: payload.requestId,
         allowed: true,
@@ -496,6 +505,37 @@ function renderAiMessages() {
         tagsEl.appendChild(chip);
       }
       row.appendChild(tagsEl);
+    }
+
+    // 测试运行闭环：Agent 写入/编辑测试文件后显示「运行测试」按钮
+    if (msg.runTestTarget) {
+      const runRow = document.createElement("div");
+      runRow.className = "ide__ai-runtest-row";
+      const runBtn = document.createElement("button");
+      runBtn.type = "button";
+      runBtn.className = "ide__ai-runtest-btn";
+      const st = msg.runTestTarget.status;
+      if (st === "running") {
+        runBtn.disabled = true;
+        runBtn.textContent = "运行中…（请查看终端）";
+      } else if (st === "done") {
+        runBtn.textContent = "已在终端启动";
+      } else if (st === "failed") {
+        runBtn.textContent = "运行失败";
+      } else {
+        runBtn.textContent = `🧪 运行测试 (${msg.runTestTarget.name})`;
+      }
+      runBtn.addEventListener("click", () => {
+        msg.runTestTarget!.status = "running";
+        notify();
+        void runTestForFile(msg.runTestTarget!.filePath).then((r) => {
+          msg.runTestTarget!.status = r.ok ? "done" : "failed";
+          if (!r.ok) alert(r.output);
+          notify();
+        });
+      });
+      runRow.appendChild(runBtn);
+      row.appendChild(runRow);
     }
 
     // 正文

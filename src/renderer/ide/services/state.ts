@@ -88,6 +88,8 @@ export interface AiMessage {
   toolCalls?: AiToolCall[];
   /** 涉及文件标签（确认桥执行 write/edit/delete 等操作时记录，write/edit/delete 标记为已修改） */
   fileTags?: { name: string; modified: boolean }[];
+  /** 测试文件写入成功后标记：AI 面板显示「运行测试」按钮（测试运行闭环） */
+  runTestTarget?: { filePath: string; name: string; status?: string };
   error?: boolean;
 }
 
@@ -218,6 +220,12 @@ export interface GitStatus {
   untracked: string[];
   conflicted: string[];
   clean: boolean;
+}
+
+/** 变更指纹：staged+modified+untracked+conflicted 文件列表排序拼接，用于提交前审查提醒比对 */
+export function gitChangeFingerprint(status: GitStatus | null): string {
+  if (!status) return "";
+  return [...status.staged, ...status.modified, ...status.untracked, ...status.conflicted].sort().join("|");
 }
 
 export interface GitBranchInfo {
@@ -357,6 +365,8 @@ export const state = {
   lspStatusMessage: "" as string,
 
   gitStatusByRoot: {} as Record<string, GitStatus>,
+  /** 提交前审查提醒：rootId → 最近一次 AI 审查时的变更指纹；提交时比对指纹 */
+  gitReviewed: {} as Record<string, { fingerprint: string }>,
   gitPanelVisible: false,
   gitSelectedFileByRoot: {} as Record<string, { path: string; staged: boolean }>,
   gitDiffByRoot: {} as Record<string, string>,

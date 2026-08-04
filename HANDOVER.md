@@ -158,7 +158,7 @@ npm run start        # 直接用 dist 启动
 ## 6. 已知限制与下一步
 
 - **阶段 4（废弃 `<action>` 文本协议）已完成**：`parseActions`、`requestActionConfirmation`/`resolveActionConfirmation`、消息 `actions`/`actionResults` 字段与卡片渲染、`formatActionLabel`、CSS `.ide__ai-actions*` 全部删除；`runAgentTurn` 循环退化为单轮（recall 重试除外），工具调用完全依赖主进程原生 FC + 确认桥。`stripActions` 保留（仅清理旧版本会话消息中的协议残留）；`executeAction`/`AGENT_TOOLS`/`nativeArgsToAction`/`formatNativeToolLabel` 保留（确认桥路径使用）；涉及文件标签改由确认桥执行时写入 `AiMessage.fileTags`。
-- 未来计划详见 AGENTS.md §3：自动错误修复（LSP 诊断一键修复）、自然语言生成完整代码、更多跨文件重构、测试运行闭环、提交前审查提醒、人格深化（多风格/世界书/Live2D）、自动化测试、错误监控日志、发布流水线、设置导入导出。
+- 未来计划详见 AGENTS.md §3：自动错误修复（LSP 诊断一键修复）、自然语言生成完整代码、更多跨文件重构、人格深化（多风格/世界书/Live2D）、自动化测试、错误监控日志、发布流水线、设置导入导出。（**测试运行闭环**与**提交前审查提醒**已落地：AI 面板「🧪 运行测试」按钮 + 终端按 cwd 复用运行；gitReviewed 变更指纹比对提交前提示）
 - 已知小限制：流式期间发生重渲染（如确认桥触发的 `notify`）后，正文增量会短暂依赖最终渲染补全（`streamBubbleEl` 重建）；工具行已按 `data-toolcall` 幂等处理，正文未做同等处理（现状可用）。
 - DeepSeek 思考模式：不支持 temperature/top_p 等参数（设置不报错但不生效）；工具调用场景必须完整回传 reasoning_content（已实现）。
 

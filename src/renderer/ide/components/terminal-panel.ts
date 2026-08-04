@@ -20,6 +20,8 @@ interface TerminalTab {
   fitAddon: FitAddon;
   container: HTMLElement;
   tabEl: HTMLElement;
+  /** 终端启动目录（用于按目录复用终端，测试运行闭环） */
+  cwd?: string;
 }
 
 const terminalTabs = new Map<string, TerminalTab>();
@@ -115,6 +117,7 @@ async function createTerminalTab(cwd?: string): Promise<TerminalTab | null> {
     return null;
   }
   tab.id = created.id;
+  tab.cwd = cwd;
   tab.pid = created.pid;
 
   const tabEl = document.createElement("div");
@@ -231,14 +234,23 @@ function hideTerminalContextMenu() {
   }
 }
 
-async function runCommandInTerminal(command: string): Promise<string | null> {
+async function runCommandInTerminal(command: string, cwd?: string): Promise<string | null> {
   state.terminalVisible = true;
   terminalPanelEl.style.display = "flex";
   let tab: TerminalTab | null = null;
-  if (terminalTabs.size === 0) {
-    tab = await createTerminalTab(getActiveRootPath() || undefined);
-  } else {
-    tab = activeTerminalId ? terminalTabs.get(activeTerminalId) ?? null : null;
+  if (cwd) {
+    // 指定目录时优先复用该目录的终端（测试运行闭环：确保在正确的项目目录执行，避免多 root 混淆）
+    tab = [...terminalTabs.values()].find((t) => t.cwd === cwd) ?? null;
+  }
+  if (!tab) {
+    if (terminalTabs.size === 0) {
+      tab = await createTerminalTab(cwd || getActiveRootPath() || undefined);
+    } else if (cwd) {
+      // 活动终端目录不符：新建目标目录的终端
+      tab = await createTerminalTab(cwd);
+    } else {
+      tab = activeTerminalId ? terminalTabs.get(activeTerminalId) ?? null : null;
+    }
   }
   if (!tab) return null;
   window.ide?.terminalInput(tab.id, command + "\r");
