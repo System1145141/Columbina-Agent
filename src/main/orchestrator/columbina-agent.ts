@@ -72,6 +72,8 @@ export interface ColumbinaRunResult {
 
 /** 确认桥请求：IDE 写操作等在 FC 循环内先经此向渲染层发起用户确认。 */
 export interface ToolApprovalRequest {
+  /** 工具调用 id（与 TOOL_CALL_START 事件的 toolCallId 一致，供渲染层定位工具行） */
+  toolCallId: string;
   toolId: string;
   toolName: string;
   toolDescription: string;
@@ -334,6 +336,11 @@ async function runFcLoopWithEvents(
 
       const execResults: ToolExecutionResult[] = [];
       for (const tc of chat.toolCalls) {
+        // 取消检查：run 取消/停止发生在确认桥 await 期间时，本轮剩余工具不再执行
+        if (isCancelled()) {
+          console.warn(LOG_PREFIX, "run 已取消，跳过剩余工具调用");
+          break;
+        }
         const toolCallId = tc.id || `${tc.name}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         // 工具可能来自 options.tools（IDE 注入的只读工具，不在全局注册表），优先从 runTools 解析
         const displayTool = runTools.find((t) => t.id === tc.name);
@@ -362,6 +369,7 @@ async function runFcLoopWithEvents(
           // 确认桥：IDE 写操作先弹确认卡片，用户确认后由渲染层执行并返回结果。
           // 确认桥存在时跳过 checkPermission 档位判断（用户逐次点击即最强权限门禁）。
           const res = await options.toolApprovalHandler({
+            toolCallId,
             toolId: tc.name,
             toolName: tool.name,
             toolDescription: tool.description,

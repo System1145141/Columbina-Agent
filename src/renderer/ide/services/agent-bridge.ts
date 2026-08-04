@@ -71,6 +71,11 @@ function isAgentStopRequested(): boolean {
   return aiStopRequested;
 }
 
+/** 供确认桥回调等外部模块检查停止态（Solo 自动批准遇停止必须立即拒绝，不再执行） */
+export function isStopRequested(): boolean {
+  return aiStopRequested;
+}
+
 export function getCurrentSelection(): string {
   if (!state.editorView) return "";
   const { from, to } = state.editorView.state.selection.main;
@@ -328,7 +333,16 @@ export function buildToolsPrompt(): string {
     lines.push(`${baseTools.length + 1}. plugin: 调用插件提供的工具\n${pluginToolLines.join("\n")}`);
   }
 
-  return `\n\n你可以使用以下工具来操作项目代码（全部为原生工具调用，直接调用即可，无需输出任何标记）：\n${lines.join("\n")}\n\n注意：\n- 写操作（write_file / edit_file / delete_file / run_command / rename_symbol / todo 等）执行前会弹出确认卡片，用户确认后才会真正执行，执行结果会自动返回给你。\n- 写文件前最好先读取目标文件；优先分析再行动，不要一次输出过多内容。`;
+  // Solo 模式感知：告知模型写操作自动执行，可以更果断（不必每步停下来问用户）
+  const aiMode = state.ideSettings.aiMode || "assist";
+  const confirmNote =
+    aiMode === "assist"
+      ? "写操作（write_file / edit_file / delete_file / run_command / rename_symbol / todo 等）执行前会弹出确认卡片，用户确认后才会真正执行，执行结果会自动返回给你。"
+      : aiMode === "solo"
+        ? "Solo 模式：文件写操作（write_file / edit_file / rename_symbol / generate_tests / todo 等）会自动执行、无需确认；delete_file / run_command / stop_command 仍需用户确认。大胆持续执行，不要停下来询问用户意见。"
+        : "Solo+ 模式：一切工具调用（含删除文件与运行命令）都会自动执行、无需确认。大胆持续执行，不要停下来询问用户意见。";
+
+  return `\n\n你可以使用以下工具来操作项目代码（全部为原生工具调用，直接调用即可，无需输出任何标记）：\n${lines.join("\n")}\n\n注意：\n- ${confirmNote}\n- 写文件前最好先读取目标文件；优先分析再行动，不要一次输出过多内容。`;
 }
 
 const MAX_SNAPSHOTS = 50;
@@ -401,6 +415,50 @@ export async function describeTestFramework(rootPath: string): Promise<string> {
 /** 测试文件路径匹配（.test.ts / .spec.tsx / .test.js / .spec.mjs 等） */
 export function isTestFilePath(filePath: string): boolean {
   return /\.(test|spec)\.[cm]?[jt]sx?$/i.test(filePath);
+}
+
+// ── Solo 模式运行统计（防护：单轮写操作上限 + 连续失败回退）──
+const SOLO_MAX_WRITES_PER_RUN = 10;
+const SOLO_MAX_CONSECUTIVE_FAILURES = 3;
+let soloRunStats = { writes: 0, consecutiveFailures: 0 };
+
+/** 每个 run 开始前重置 Solo 统计 */
+export function resetSoloRunStats(): void {
+  soloRunStats = { writes: 0, consecutiveFailures: 0 };
+}
+
+/** 是否为写类工具（计入单轮写操作上限；generate_tests/review_changes 等只读工具不计） */
+export function isSoloWriteTool(toolName: string): boolean {
+  return [
+    "write_file",
+    "edit_file",
+    "delete_file",
+    "rename_symbol",
+    "run_command",
+    "stop_command",
+    "todo",
+    "plugin",
+  ].includes(toolName);
+}
+
+/** Solo 自动执行前调用：写操作计数 +1；返回是否已达上限（后续操作应转回确认卡） */
+export function soloWriteLimitReached(): boolean {
+  return soloRunStats.writes >= SOLO_MAX_WRITES_PER_RUN;
+}
+
+export function recordSoloWrite(): void {
+  soloRunStats.writes++;
+}
+
+/** Solo 自动执行后记录结果；返回 true 表示连续失败达上限，应停止 run */
+export function recordSoloToolResult(ok: boolean): boolean {
+  if (ok) {
+    soloRunStats.consecutiveFailures = 0;
+  } else {
+    soloRunStats.consecutiveFailures++;
+    if (soloRunStats.consecutiveFailures >= SOLO_MAX_CONSECUTIVE_FAILURES) return true;
+  }
+  return false;
 }
 
 /** 测试运行闭环：检测框架 → 构造命令 → 集成终端运行（目标 root 目录），返回 terminalId 供查看输出 */
@@ -1152,6 +1210,8 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
 
   // 上一轮停止标记残留清零
   aiStopRequested = false;
+  // Solo 模式防护统计：每个 run 重置（写操作上限 / 连续失败计数）
+  resetSoloRunStats();
   state.aiRunning = true;
   notify();
 
@@ -1250,6 +1310,8 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
     window.agui?.cancel();
     state.aiRunning = false;
     state.aiCurrentMessageId = "";
+    // Solo 统计随 run 结束清零，避免残留请求污染下一 run
+    resetSoloRunStats();
     aiStopRequested = false;
     notify();
   }

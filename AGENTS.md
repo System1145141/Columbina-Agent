@@ -48,6 +48,13 @@
 
 - 工具实现改为**注册表驱动**：`AGENT_TOOLS` 注册表（name / description / formatLabel / execute），`executeAction` 查表执行、`buildToolsPrompt` 与 `formatActionLabel` 自动生成——新增工具只需注册一项，无需改动解析与提示词拼接。
 
+**Solo Mode（vibe coding）**
+- 三态 AI 工作模式（`ideSettings.aiMode`，面板头部下拉切换 + 持久化）：**辅助**（默认，写操作逐条确认）/ **Solo**（文件写操作自动执行，delete_file / run_command / stop_command 高危白名单仍确认）/ **Solo+**（一切工具调用自动执行）。
+- 实现：确认桥收到请求后按模式自动批准（Solo/Solo+ 跳过确认卡片，直接走 `executeAction`，快照撤销 / 标签同步 / diff / LSP / 终端逻辑 100% 复用）；主进程确认请求携带 `toolCallId`，工具行标记「⚡ 自动执行」。
+- 防护：单轮写操作上限 10 次（超限转回确认卡，只读工具不受限）；连续 3 次工具失败自动停止；停止按钮一键终止（主进程工具循环 + 渲染层回调双重停止检查）；撤销栈 / refactorUndoStack 兜底。
+- 提示词按模式变化：Solo 下告知模型写操作自动执行、大胆持续执行；辅助模式提示词与原先逐字一致。
+- 状态栏「⚡ Solo / ⚡ Solo+」徽章 + 面板金色边框视觉标识；Solo 模式渲染层重试上限 5 → 10。
+
 **任务规划与多轮执行**
 - 复杂需求先输出任务计划（3-8 步），用户可确认、修改或取消；每完成一步 Agent 自动进入下一步，直到任务完成。
 - 命令面板「AI: 规划并执行任务」入口。

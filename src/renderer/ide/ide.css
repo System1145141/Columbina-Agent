@@ -2447,6 +2447,41 @@ html, body, .ide {
   background: #c42b1c;
 }
 
+/* AI 工作模式下拉（辅助 / Solo / Solo+） */
+.ide__ai-mode-wrap {
+  display: inline-flex;
+  align-items: center;
+}
+
+.ide__ai-mode-select {
+  background: #2d2d30;
+  color: #cccccc;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* Solo 模式：面板金色边框视觉标识（vibe coding 进行中） */
+.ide__ai-panel.is-solo {
+  border-left: 2px solid #d8c47a;
+}
+
+.ide__ai-panel.is-solo-plus {
+  border-left: 3px solid #e8a33d;
+}
+
+/* 工具行「⚡ 自动执行」标记（Solo 自动批准路径） */
+.ide__ai-toolcall-auto {
+  color: #d8c47a;
+  font-size: 11px;
+  margin-left: 8px;
+  border: 1px solid #6b5d2e;
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
 /* AI panel light theme */
 .ide.ide--light .ide__ai-panel {
   background: #f8f8f8;

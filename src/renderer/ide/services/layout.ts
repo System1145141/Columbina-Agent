@@ -77,6 +77,21 @@ export async function toggleIdeTheme(): Promise<void> {
   await saveIdeSettings({ theme: state.ideSettings.theme === "dark" ? "light" : "dark" });
 }
 
+const AI_MODE_CYCLE = ["assist", "solo", "solo+"] as const;
+export type AiMode = (typeof AI_MODE_CYCLE)[number];
+
+export function getAiMode(): AiMode {
+  return state.ideSettings.aiMode || "assist";
+}
+
+/** 循环切换 AI 工作模式：辅助 → Solo → Solo+ → 辅助 */
+export async function cycleAiMode(): Promise<AiMode> {
+  const current = getAiMode();
+  const next = AI_MODE_CYCLE[(AI_MODE_CYCLE.indexOf(current) + 1) % AI_MODE_CYCLE.length];
+  await saveIdeSettings({ aiMode: next });
+  return next;
+}
+
 export function changeEditorFontSize(delta: number): void {
   const next = Math.max(8, Math.min(32, state.ideSettings.fontSize + delta));
   if (next !== state.ideSettings.fontSize) {

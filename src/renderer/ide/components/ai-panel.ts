@@ -13,10 +13,15 @@ import {
   nativeArgsToAction,
   formatNativeToolLabel,
   requestAgentStop,
+  isStopRequested,
   isTestFilePath,
   runTestForFile,
+  soloWriteLimitReached,
+  recordSoloWrite,
+  recordSoloToolResult,
+  isSoloWriteTool,
 } from "../services/agent-bridge";
-import { toggleAiPanel, hideAiPanel } from "../services/layout";
+import { toggleAiPanel, hideAiPanel, saveIdeSettings } from "../services/layout";
 import {
   getActiveSession,
   getSessionsByRecent,
@@ -40,6 +45,7 @@ const aiContextSelectEl = document.getElementById("ai-context-select") as HTMLSe
 const aiModelSelectEl = document.getElementById("ai-model-select") as HTMLSelectElement;
 const aiUndoBtn = document.getElementById("ai-undo-btn") as HTMLButtonElement;
 const aiSessionBtn = document.getElementById("ai-session-btn") as HTMLButtonElement;
+const aiModeSelectEl = document.getElementById("ai-mode-select") as HTMLSelectElement;
 const aiInputAreaEl = document.querySelector(".ide__ai-input-area") as HTMLElement;
 let aiPlanModeCb: HTMLInputElement | null = null;
 
@@ -287,16 +293,38 @@ function showNativeConfirmCard(payload: { toolName: string; args: Record<string,
   scrollMessagesToBottom();
 }
 
-/** 注册确认桥监听：主进程请求 → 弹卡片 → 用户确认后渲染层执行既有逻辑并回传结果 */
+/** 注册确认桥监听：主进程请求 → 辅助模式弹卡片；Solo 模式自动批准执行（高危工具仍确认） */
 async function setupNativeToolConfirm(): Promise<void> {
-  window.ide?.onAgentToolConfirm(async (payload: { requestId: string; toolId: string; toolName: string; args: Record<string, unknown> }) => {
+  window.ide?.onAgentToolConfirm(async (payload: { requestId: string; toolId: string; toolName: string; toolCallId?: string; args: Record<string, unknown> }) => {
     // 竞态兜底：上一张未响应的卡片先拒绝
     resolveNativeToolConfirmation(false);
-    const allowed = await new Promise<boolean>((resolve) => {
-      pendingNativeConfirmResolve = resolve;
-      showNativeConfirmCard(payload);
-    });
-    hideNativeConfirmCard();
+    // 停止/run 已结束：立即拒绝（Solo 自动批准遇停止必须停止执行，防止本轮剩余工具继续跑）
+    if (isStopRequested() || !state.aiRunning) {
+      window.ide?.agentToolConfirmResult({ requestId: payload.requestId, allowed: false }).catch((err) =>
+        console.error("[IDE] 工具确认回传失败（run 已停止）:", err),
+      );
+      return;
+    }
+    const mode = state.ideSettings.aiMode || "assist";
+    const highRisk = ["delete_file", "run_command", "stop_command"].includes(payload.toolId);
+    const autoApprove = mode === "solo+" || (mode === "solo" && !highRisk);
+    // 写操作上限仅对写类工具生效（只读工具超限后仍自动执行）
+    const writeLimitHit = isSoloWriteTool(payload.toolId) && soloWriteLimitReached();
+    let allowed: boolean;
+    if (autoApprove && !writeLimitHit) {
+      // Solo：自动批准，跳过确认卡片（快照撤销 / 标签同步 / diff / LSP 等逻辑在 executeAction 内复用）
+      allowed = true;
+      if (payload.toolCallId) markSoloAutoTool(payload.toolCallId);
+    } else {
+      if (autoApprove && writeLimitHit) {
+        pushAiSystemNotice("⚠️ 已达本轮 Solo 写操作上限（10 次），后续写操作转为确认卡片。可继续确认，或点「停止」结束本轮。");
+      }
+      allowed = await new Promise<boolean>((resolve) => {
+        pendingNativeConfirmResolve = resolve;
+        showNativeConfirmCard(payload);
+      });
+      hideNativeConfirmCard();
+    }
     if (!allowed) {
       window.ide?.agentToolConfirmResult({ requestId: payload.requestId, allowed: false }).catch((err) =>
         console.error("[IDE] 工具确认回传失败（allowed=false）:", err),
@@ -318,6 +346,10 @@ async function setupNativeToolConfirm(): Promise<void> {
       }
     }
     try {
+      // Solo 防护：写操作计数（自动批准路径；辅助模式不计数）
+      if (autoApprove) {
+        if (isSoloWriteTool(action.type)) recordSoloWrite();
+      }
       const result = await executeAction(action);
       // 测试运行闭环：写入/编辑测试文件成功后标记该消息，AI 面板渲染「运行测试」按钮
       if (result.ok && action.filePath && isTestFilePath(action.filePath)) {
@@ -325,6 +357,11 @@ async function setupNativeToolConfirm(): Promise<void> {
         if (msg && !msg.runTestTarget) {
           msg.runTestTarget = { filePath: action.filePath, name: action.filePath.split(/[\\/]/).pop() || action.filePath };
         }
+      }
+      // Solo 防护：连续失败达上限 → 自动停止本轮
+      if (autoApprove && recordSoloToolResult(result.ok)) {
+        pushAiSystemNotice("⛔ 连续 3 次工具执行失败，已自动停止本轮 Solo 运行。请检查错误后重新发起。");
+        requestAgentStop();
       }
       window.ide?.agentToolConfirmResult({
         requestId: payload.requestId,
@@ -339,6 +376,22 @@ async function setupNativeToolConfirm(): Promise<void> {
       }).catch((e) => console.error("[IDE] 工具确认回传失败:", e));
     }
   });
+}
+
+/** 工具行标记「⚡ 自动执行」（Solo 自动批准路径） */
+function markSoloAutoTool(toolCallId: string): void {
+  const el = findToolCallEl(toolCallId);
+  if (!el || el.querySelector(".ide__ai-toolcall-auto")) return;
+  const span = document.createElement("span");
+  span.className = "ide__ai-toolcall-auto";
+  span.textContent = "⚡ 自动执行";
+  el.appendChild(span);
+}
+
+/** AI 面板系统提示消息（Solo 防护触发等） */
+function pushAiSystemNotice(text: string): void {
+  state.aiMessages.push({ id: `sys-${Date.now()}`, role: "model", content: text });
+  notify();
 }
 
 function handleStreamEvent(rawEvent: unknown): void {
@@ -691,6 +744,12 @@ function updateAiPanel() {
   aiSendBtn.style.display = state.aiRunning ? "none" : "";
   aiStopBtn.style.display = state.aiRunning ? "" : "none";
   aiUndoBtn.disabled = state.fileSnapshots.size === 0;
+  // AI 工作模式下拉与当前设置同步
+  const aiMode = state.ideSettings.aiMode || "assist";
+  if (aiModeSelectEl.value !== aiMode) aiModeSelectEl.value = aiMode;
+  // Solo 模式：面板加视觉标识（金色边框）
+  aiPanelEl.classList.toggle("is-solo", aiMode !== "assist");
+  aiPanelEl.classList.toggle("is-solo-plus", aiMode === "solo+");
   // 身份切换时重填模型下拉（哥伦比娅 / 桑多涅各自记忆所选模型）
   const identity = state.ideSettings.agentIdentity || "columbina";
   if (identity !== lastModelIdentity) {
@@ -710,10 +769,12 @@ async function sendAiMessage() {
   const scope = aiContextSelectEl.value as import("../services/state").AiContextScope;
   aiInputEl.value = "";
 
+  // Solo 模式放宽渲染层重试上限（主进程 FC 循环另有 20 轮工具调用上限）
+  const maxRounds = state.ideSettings.aiMode === "assist" ? 5 : 10;
   if (aiPlanModeCb?.checked) {
     await runAgentPlan(text, scope);
   } else {
-    await runAgentTurn(text, scope);
+    await runAgentTurn(text, scope, maxRounds);
   }
 }
 
@@ -728,6 +789,9 @@ export function initAiPanel(): void {
   });
   aiSendBtn.addEventListener("click", () => void sendAiMessage());
   aiStopBtn.addEventListener("click", () => requestAgentStop());
+  aiModeSelectEl.addEventListener("change", () => {
+    void saveIdeSettings({ aiMode: aiModeSelectEl.value as "assist" | "solo" | "solo+" });
+  });
   document.addEventListener("click", (e) => {
     if (sessionMenu && !sessionMenu.contains(e.target as Node)) {
       hideSessionMenu();

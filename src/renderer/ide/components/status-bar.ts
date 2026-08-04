@@ -147,6 +147,10 @@ function renderStatusBar() {
     statusLeftEl.textContent = state.statusMessage || state.lspStatusMessage;
   } else {
     const leftParts: string[] = [];
+    // Solo 模式徽章（vibe coding 状态可见）
+    const aiMode = state.ideSettings.aiMode || "assist";
+    if (aiMode === "solo") leftParts.push("⚡ Solo");
+    else if (aiMode === "solo+") leftParts.push("⚡ Solo+");
     if (gitStatus?.branch) {
       leftParts.push(buildGitSummary(gitStatus));
     }

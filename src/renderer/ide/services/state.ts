@@ -58,6 +58,11 @@ export interface IdeSettings {
   languageServers?: Record<string, LanguageServerConfig>;
   /** Agent 人格身份：columbina（哥伦比娅）/ sandrone（桑多涅） */
   agentIdentity?: "columbina" | "sandrone";
+  /**
+   * AI 工作模式：assist（辅助，写操作逐条确认）/ solo（Solo，文件写自动执行，高危仍确认）/
+   * solo+（全自动，一切写操作与命令自动执行）。纯 vibe coding 模式，靠撤销栈与停止按钮兜底。
+   */
+  aiMode?: "assist" | "solo" | "solo+";
 }
 
 export interface WorkspaceRoot {
@@ -706,7 +711,7 @@ declare global {
       readFileEncoded: (filePath: string) => Promise<{ content: string; encoding: string }>;
       readFileChunk: (filePath: string, offset: number, length: number) => Promise<{ content: string; totalSize: number; isEnd: boolean }>;
       writeFile: (filePath: string, content: string, encoding?: string) => Promise<{ ok: boolean; error?: string }>;
-      onAgentToolConfirm: (callback: (payload: { requestId: string; toolId: string; toolName: string; args: Record<string, unknown> }) => void) => () => void;
+      onAgentToolConfirm: (callback: (payload: { requestId: string; toolId: string; toolName: string; toolCallId?: string; args: Record<string, unknown> }) => void) => () => void;
       agentToolConfirmResult: (payload: { requestId: string; allowed: boolean; result?: { ok: boolean; output?: string; error?: string } }) => Promise<{ ok: boolean }>;
       watchFile: (filePath: string) => Promise<void>;
       unwatchFile: (filePath: string) => void;

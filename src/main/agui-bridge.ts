@@ -121,6 +121,7 @@ function requestToolApproval(
     pendingToolApprovals.set(requestId, { resolve, timer });
     sender.send(IPC.IDE_AGENT_TOOL_CONFIRM_REQUEST, {
       requestId,
+      toolCallId: req.toolCallId,
       toolId: req.toolId,
       toolName: req.toolName,
       toolDescription: req.toolDescription,

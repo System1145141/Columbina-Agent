@@ -111,6 +111,13 @@
         <div class="ide__ai-header">
           <span>Columbina AI</span>
           <div class="ide__ai-header-actions">
+            <label class="ide__ai-mode-wrap" title="AI 工作模式：辅助（写操作逐条确认）/ Solo（文件写自动、高危仍确认）/ Solo+（全自动）">
+              <select id="ai-mode-select" class="ide__ai-mode-select">
+                <option value="assist">辅助</option>
+                <option value="solo">⚡Solo</option>
+                <option value="solo+">⚡Solo+</option>
+              </select>
+            </label>
             <button type="button" class="ide__ai-header-btn" id="ai-session-btn" title="会话管理（切换 / 新建 / 复制 / 重命名 / 删除）">▾ 会话</button>
             <button type="button" class="ide__ai-header-btn" id="ai-undo-btn" title="撤销上次修改" disabled>撤销</button>
             <button type="button" class="ide__ai-close" id="ai-close-btn" aria-label="关闭 AI 面板">×</button>
