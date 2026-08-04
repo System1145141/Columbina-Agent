@@ -5,6 +5,7 @@ import {
   type AgentActionResult,
   type AiContextScope,
   type AguiBaseEvent,
+  type AiMessage,
   type FileSnapshot,
   type AiTaskPlan,
   type AiTaskPlanStep,
@@ -38,6 +39,39 @@ let runCommandInTerminalImpl: ((command: string) => Promise<string | null>) | nu
 
 export function registerRunCommandInTerminal(fn: (command: string) => Promise<string | null>): void {
   runCommandInTerminalImpl = fn;
+}
+
+/** 操作确认卡超时（与主进程工具确认桥 120s 一致）：超时自动拒绝，防止 Agent 循环永久等待 */
+const ACTION_CONFIRM_TIMEOUT_MS = 120_000;
+
+/**
+ * 停止机制：用户点 AI 面板「停止」后置位。
+ * 主进程 AGUI_CANCEL 取消 run 后 Observable 既不 complete 也不 error（columbina-agent 取消路径直接 return），
+ * 渲染层 callAgentStream 的 promise 会永久悬挂——所以必须由本模块主动结算挂起的流式调用。
+ */
+let aiStopRequested = false;
+let activeStreamSettle: {
+  resolve: (v: { content: string; reasoning: string }) => void;
+  reject: (e: unknown) => void;
+} | null = null;
+
+/** 请求停止当前 Agent run（停止按钮入口）：取消主进程 run + 结算渲染层挂起调用 */
+export function requestAgentStop(): void {
+  aiStopRequested = true;
+  window.agui?.cancel();
+  // 任务规划执行中：标记计划取消，阻止 executeTaskPlan 进入下一步
+  if (state.aiCurrentPlan) state.aiCurrentPlan.cancelled = true;
+  // 结算渲染层挂起的操作确认卡（否则 runAgentTurn 卡在 await 上）
+  resolveActionConfirmation(false);
+  // 结算挂起的流式调用（主进程取消后不再发 AG-UI 事件）
+  if (activeStreamSettle) {
+    activeStreamSettle.resolve({ content: "", reasoning: "" });
+    activeStreamSettle = null;
+  }
+}
+
+function isAgentStopRequested(): boolean {
+  return aiStopRequested;
 }
 
 export function getCurrentSelection(): string {
@@ -178,7 +212,7 @@ async function maybeSummarizeHistory(firstPrompt: string): Promise<void> {
     // 以 firstPrompt 为前缀（缓存命中），仅末尾追加摘要指令；模型从完整上下文中提取各轮内容
     const summarizePrompt = `${firstPrompt}\n\n【摘要任务】请针对以上对话中的以下轮次各生成一行简短摘要：${toSummarize.map((t) => `轮次${t.seq}`).join("、")}。\n摘要要求：保留用户核心诉求与最终结论；提及关键实体（文件路径、函数/符号名、命令、数字参数）；每行不超过 80 字。\n输出格式（严格每行一条，除此之外不要输出任何内容）：\n轮次<序号>: <摘要>`;
     try {
-      const { content: sum } = await callAgentStream(summarizePrompt);
+      const { content: sum } = await callAgentStream(summarizePrompt, { tools: "none" });
       let updated = 0;
       for (const line of sum.split("\n")) {
         const m = line.match(/^轮次(\d+):\s*(.+)$/);
@@ -362,9 +396,10 @@ export async function saveSnapshot(filePath: string): Promise<void> {
       filePath,
       content: normalizeLineEndings(raw),
       lineEnding: detectLineEnding(raw),
+      sessionId: state.activeAiSessionId || undefined,
     });
   } catch {
-    state.fileSnapshots.set(filePath, { filePath, content: "", lineEnding: "lf" });
+    state.fileSnapshots.set(filePath, { filePath, content: "", lineEnding: "lf", sessionId: state.activeAiSessionId || undefined });
   }
 }
 
@@ -716,7 +751,7 @@ async function executeEditFile(action: AgentAction): Promise<AgentActionResult> 
       state.editorView.dispatch({ changes: { from: 0, to: state.editorView.state.doc.length, insert: result } });
     }
   }
-  state.refactorUndoStack.push({ label: `编辑 ${basename(action.filePath)}`, snapshots: [{ filePath: action.filePath, content: originalText, lineEnding }] });
+  state.refactorUndoStack.push({ label: `编辑 ${basename(action.filePath)}`, snapshots: [{ filePath: action.filePath, content: originalText, lineEnding, sessionId: state.activeAiSessionId || undefined }] });
   if (state.refactorUndoStack.length > 20) state.refactorUndoStack.shift();
   notify();
   return { actionId: action.id, ok: true, output: `已应用 ${previewEdits.length} 处编辑到 ${action.filePath}（可用「撤销上次重构」回滚）` };
@@ -731,7 +766,7 @@ async function executeDeleteFile(action: AgentAction): Promise<AgentActionResult
   let snapshot: FileSnapshot;
   try {
     const raw = await readFile(action.filePath);
-    snapshot = { filePath: action.filePath, content: normalizeLineEndings(raw), lineEnding: detectLineEnding(raw) };
+    snapshot = { filePath: action.filePath, content: normalizeLineEndings(raw), lineEnding: detectLineEnding(raw), sessionId: state.activeAiSessionId || undefined };
   } catch {
     return { actionId: action.id, ok: false, error: `文件不存在或无法读取: ${action.filePath}` };
   }
@@ -911,13 +946,23 @@ export async function executeAction(action: AgentAction): Promise<AgentActionRes
   return tool.execute(action);
 }
 
-export function requestActionConfirmation(): Promise<boolean> {
+export function requestActionConfirmation(timeoutMs: number = ACTION_CONFIRM_TIMEOUT_MS): Promise<boolean> {
   return new Promise((resolve) => {
+    // 上一张未响应的卡片先结算（拒绝），避免悬挂残留
+    resolveActionConfirmation(false);
     state.pendingActionResolve = resolve;
+    state.pendingActionTimer = setTimeout(() => {
+      // 超时自动拒绝：与主进程工具确认桥 120s 超时语义一致
+      resolveActionConfirmation(false);
+    }, timeoutMs);
   });
 }
 
 export function resolveActionConfirmation(confirmed: boolean): void {
+  if (state.pendingActionTimer) {
+    clearTimeout(state.pendingActionTimer);
+    state.pendingActionTimer = null;
+  }
   if (state.pendingActionResolve) {
     state.pendingActionResolve(confirmed);
     state.pendingActionResolve = null;
@@ -927,6 +972,19 @@ export function resolveActionConfirmation(confirmed: boolean): void {
 export function updateUndoButton(): void {
   // Handled by ai-panel component via state subscription
   notify();
+}
+
+/** 系统消息写入快照所属会话（找不到该会话时回退当前会话），避免撤销结果串到别的会话 */
+function pushAgentNoticeToSession(sessionId: string | undefined, content: string): void {
+  const msg: AiMessage = { id: `s-${Date.now()}`, role: "model", content };
+  if (sessionId) {
+    const session = state.aiSessions.find((s) => s.id === sessionId);
+    if (session) {
+      session.messages.push(msg);
+      return;
+    }
+  }
+  state.aiMessages.push(msg);
 }
 
 export async function undoLastWrite(): Promise<void> {
@@ -954,7 +1012,7 @@ export async function undoLastWrite(): Promise<void> {
       }
       state.fileSnapshots.delete(last.filePath);
       notify();
-      state.aiMessages.push({ id: `s-${Date.now()}`, role: "model", content: `已撤销对 ${last.filePath} 的修改` });
+      pushAgentNoticeToSession(last.sessionId, `已撤销对 ${last.filePath} 的修改`);
       notify();
     } else {
       alert(`撤销失败: ${result.error || "未知错误"}`);
@@ -997,11 +1055,10 @@ export async function undoLastRefactor(): Promise<boolean> {
     }
   }
   notify();
-  state.aiMessages.push({
-    id: `s-${Date.now()}`,
-    role: "model",
-    content: failed > 0 ? `撤销重构「${group.label}」部分失败（${failed} 个文件）` : `已撤销重构「${group.label}」`,
-  });
+  pushAgentNoticeToSession(
+    group.snapshots[0]?.sessionId,
+    failed > 0 ? `撤销重构「${group.label}」部分失败（${failed} 个文件）` : `已撤销重构「${group.label}」`
+  );
   notify();
   return failed === 0;
 }
@@ -1062,6 +1119,18 @@ export async function callAgentStream(prompt: string, opts?: { tools?: "full" | 
     let reasoning = "";
     let resolved = false;
 
+    // 注册挂起的流式调用：用户点「停止」时由 requestAgentStop 主动结算，
+    // 否则主进程取消 run 后（Observable 既不 complete 也不 error）本 promise 会永久悬挂
+    const settleResolve = (v: { content: string; reasoning: string }) => {
+      activeStreamSettle = null;
+      resolve(v);
+    };
+    const settleReject = (e: unknown) => {
+      activeStreamSettle = null;
+      reject(e);
+    };
+    activeStreamSettle = { resolve: settleResolve, reject: settleReject };
+
     state.aiEventUnsub?.();
     state.aiEventUnsub = window.agui?.onEvent((rawEvent) => {
       const event = rawEvent as AguiBaseEvent;
@@ -1078,13 +1147,13 @@ export async function callAgentStream(prompt: string, opts?: { tools?: "full" | 
         case "RUN_FINISHED":
           if (!resolved) {
             resolved = true;
-            resolve({ content, reasoning });
+            activeStreamSettle?.resolve({ content, reasoning });
           }
           break;
         case "RUN_ERROR":
           if (!resolved) {
             resolved = true;
-            reject(new Error(event.content || "请求失败"));
+            activeStreamSettle?.reject(new Error(event.content || "请求失败"));
           }
           break;
       }
@@ -1094,7 +1163,9 @@ export async function callAgentStream(prompt: string, opts?: { tools?: "full" | 
       messages: [{ role: "user", content: prompt }],
       style: "chat",
       modelId: state.aiModelId || undefined,
-      // IDE 模式：主进程注入原生工具（只读自动执行 + 写操作经确认桥）；tools="none" 时完全不注入
+      // IDE 模式：主进程注入原生工具（只读自动执行 + 写操作经确认桥）；
+      // tools="none" 时显式 noTools，避免回退到全局工具注册表（含写盘/shell 工具）
+      noTools: opts?.tools === "none",
       ...(opts?.tools === "none"
         ? {}
         : {
@@ -1105,9 +1176,9 @@ export async function callAgentStream(prompt: string, opts?: { tools?: "full" | 
           }),
     }).then((ack) => {
       if (!ack?.success) {
-        reject(new Error(ack?.error || "Agent 启动失败"));
+        settleReject(new Error(ack?.error || "Agent 启动失败"));
       }
-    }).catch(reject);
+    }).catch(settleReject);
   });
 }
 
@@ -1117,6 +1188,8 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
   state.aiMessages.push({ id: userMsgId, role: "user", content: userText });
   notify();
 
+  // 上一轮停止标记残留清零
+  aiStopRequested = false;
   state.aiRunning = true;
   notify();
 
@@ -1127,6 +1200,9 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
   try {
     let round = 0;
     let recallAttempts = 0;
+    // 多轮工具调用的执行轨迹：每轮追加（工具摘要 + 回复节选），
+    // 保证第 3+ 轮 prompt 仍能看到早期轮次的执行情况（最新一轮完整结果单独拼接）
+    const trail: { reply: string; summary: string }[] = [];
     const initialContext = await buildAiContext(scope, userText);
     const persona = await buildPersonaPrompt(userText);
     // 历史上下文：更早轮次进索引（recall 召回），最近一轮保留完整内容
@@ -1141,11 +1217,14 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
         .filter(Boolean)
         .join("\n\n");
     }
-    let prompt = `${persona ? persona + "\n\n---\n\n" : ""}${historySection ? historySection + "\n\n---\n\n" : ""}你是一名资深的编程助手，正在帮助用户在 IDE 中工作。请根据以下上下文回答用户问题。${buildToolsPrompt()}\n\n${initialContext}\n\n用户问题:\n${userText}`;
+    // 上下文基础（人格 + 历史 + 工具说明 + 场景上下文 + 用户问题）：
+    // 多轮工具调用时，第二轮起主进程是全新 run（无 IDE 上下文），必须完整复用，否则模型丢失身份与历史
+    const contextBase = `${persona ? persona + "\n\n---\n\n" : ""}${historySection ? historySection + "\n\n---\n\n" : ""}你是一名资深的编程助手，正在帮助用户在 IDE 中工作。请根据以下上下文回答用户问题。${buildToolsPrompt()}\n\n${initialContext}\n\n用户问题:\n${userText}`;
+    let prompt = contextBase;
     firstPrompt = prompt;
 
     while (round < maxRounds) {
-      if (isCancelled?.()) break;
+      if (isCancelled?.() || isAgentStopRequested()) break;
       round++;
       const modelMsgId = `m-${Date.now()}-${round}`;
       state.aiCurrentMessageId = modelMsgId;
@@ -1153,10 +1232,10 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
       notify();
 
       const { content: rawContent, reasoning } = await callAgentStream(prompt);
-      if (isCancelled?.()) {
+      if (isCancelled?.() || isAgentStopRequested()) {
         const modelMsg = state.aiMessages.find((m) => m.id === modelMsgId);
         if (modelMsg) {
-          modelMsg.content = "(已取消)";
+          modelMsg.content = rawContent || "(已停止)";
           modelMsg.thinking = false;
         }
         notify();
@@ -1198,7 +1277,7 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
       notify();
 
       if (actions.length === 0) break;
-      if (isCancelled?.()) break;
+      if (isCancelled?.() || isAgentStopRequested()) break;
 
       const confirmed = await requestActionConfirmation();
       if (!confirmed) {
@@ -1215,7 +1294,7 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
 
       const results: AgentActionResult[] = [];
       for (const action of actions) {
-        if (isCancelled?.()) break;
+        if (isCancelled?.() || isAgentStopRequested()) break;
         const result = await executeAction(action);
         results.push(result);
       }
@@ -1224,7 +1303,7 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
       }
       notify();
 
-      if (isCancelled?.()) break;
+      if (isCancelled?.() || isAgentStopRequested()) break;
 
       const resultText = results
         .map((r) => {
@@ -1232,16 +1311,34 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
           return `Action (${action?.type}): ${r.ok ? "成功" : "失败"}\n${r.output || r.error || ""}`;
         })
         .join("\n\n---\n\n");
-      prompt = `请继续。你刚才请求执行的操作结果如下：\n\n${resultText}\n\n请根据结果继续回答用户问题，或执行下一步操作。${buildToolsPrompt()}`;
+      // 本轮执行摘要追加进 trail（工具名+状态+输出截断），保证第 3+ 轮仍能看到早期轮次
+      trail.push({
+        reply: cleanContent,
+        summary: results
+          .map((r) => {
+            const action = actions.find((a) => a.id === r.actionId);
+            return `${action?.type || "action"}: ${r.ok ? "成功" : "失败"}${r.output ? `（${r.output.slice(0, 160)}）` : ""}`;
+          })
+          .join("；"),
+      });
+      // 此前轮次的执行轨迹（不含本轮：本轮完整结果单独拼接在【最新工具执行结果】）
+      const trailText = trail.slice(0, -1).map((t, i) => `第${i + 1}轮: ${t.summary}${t.reply ? `；回复: ${t.reply.slice(0, 200)}` : ""}`).join("\n");
+      // 第二轮起：完整复用 contextBase（人格/历史/工具说明/用户问题），追加执行轨迹与最新结果
+      prompt = `${contextBase}${trailText ? `\n\n【此前执行过程】\n${trailText}` : ""}\n\n【最新工具执行结果】\n${resultText}\n\n请根据结果继续回答用户问题，或执行下一步操作。`;
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     state.aiMessages.push({ id: `e-${Date.now()}`, role: "model", content: errMsg, error: true });
     notify();
   } finally {
+    // 清理主进程残留 run：确认卡超时/异常路径下渲染层已结束但主进程 run 可能仍在跑
+    // （AGUI_CANCEL 幂等：正常结束时 activeRuns 已空；maybeSummarizeHistory 的 run 在 finally 之后才启动）
+    window.agui?.cancel();
     state.aiRunning = false;
     state.aiCurrentMessageId = "";
-    state.pendingActionResolve = null;
+    // 结算可能悬挂的操作确认卡（含清理超时定时器）
+    resolveActionConfirmation(false);
+    aiStopRequested = false;
     notify();
   }
 
@@ -1335,6 +1432,12 @@ export async function runAgentPlan(goal: string, scope: AiContextScope) {
   try {
     const plan = await generateTaskPlan(goal, scope);
     if (!plan) {
+      // 用户点「停止」导致计划生成中断：不再回退普通对话
+      if (isAgentStopRequested()) {
+        state.aiMessages.push({ id: `s-${Date.now()}`, role: "model", content: "任务规划已停止。" });
+        notify();
+        return;
+      }
       state.aiMessages.push({ id: `e-${Date.now()}`, role: "model", content: "无法生成任务计划，将按普通对话处理。" });
       notify();
       await runAgentTurn(goal, scope, 3);
@@ -1349,6 +1452,8 @@ export async function runAgentPlan(goal: string, scope: AiContextScope) {
     notify();
   } finally {
     setAiTaskPlanRunning(false);
+    // 与 runAgentTurn finally 对称：停止标记在规划路径（未进入 runAgentTurn）也可能被置位，需清零
+    aiStopRequested = false;
     notify();
   }
 }

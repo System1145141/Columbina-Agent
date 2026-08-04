@@ -41,6 +41,11 @@ export interface AguiRunInput {
    * confirmed 为 false 时仅注入只读工具（自动执行，无确认卡片），用于摘要/规划等后台 run。
    */
   ideTools?: { roots: string[]; confirmed?: boolean };
+  /**
+   * 显式要求不注入任何工具（优先级最高，覆盖 ideTools）。
+   * 用于幽灵补全 / 摘要等后台 run：避免回退到全局工具注册表（含写盘/shell 工具）。
+   */
+  noTools?: boolean;
 }
 
 /** 调用方（index.ts）注入：把输入转成 agent 需要的 options（含 system prompt 拼接）。 */
@@ -56,8 +61,8 @@ export type OnRunFinishedFn = (result: ColumbinaRunResult, latestUserText: strin
 /** 调用方注入：拿聊天窗口（广播副作用用，可空）。 */
 export type GetChatWindowFn = () => { webContents: WebContents; isDestroyed(): boolean } | null;
 
-/** 单次对话的活跃订阅（用于取消）。键 = runId。 */
-const activeRuns = new Map<string, Subscription>();
+/** 单次对话的活跃订阅（用于取消）。键 = runId；值含发起窗口，取消时按窗口过滤。 */
+const activeRuns = new Map<string, { sub: Subscription; sender: WebContents }>();
 
 // ── 工具确认桥：FC 循环内 needsConfirm 工具执行前，向发起 run 的窗口弹确认卡片 ──
 interface PendingToolApproval {
@@ -143,6 +148,23 @@ let getChatWindowFn: GetChatWindowFn = () => null;
  * @param onRunFinished agent 跑完的副作用（记忆/sticker 等）
  * @param getChatWindow 聊天窗口（事件要发到这里）
  */
+/**
+ * 取消指定窗口发起的所有活跃 run（窗口关闭时调用，防止 run 继续消耗 token、
+ * 悬挂确认卡等满 120s 超时）。幂等：没有匹配 run 时为 no-op。
+ */
+export function cancelRunsForWindow(sender: WebContents): void {
+  // 用稳定数字 id 比较（webContents 实例销毁后引用仍可比对，id 生命周期内唯一）
+  const senderId = sender.id;
+  for (const [runId, entry] of activeRuns) {
+    if (entry.sender.id !== senderId) continue;
+    entry.sub.unsubscribe();
+    activeRuns.delete(runId);
+  }
+  // 确认桥只在 IDE run 注入（ideTools && confirmed !== false），聊天 run 无挂起确认，
+  // 且当前仅一个 IDE 窗口，全量 flush 安全
+  flushPendingToolApprovals();
+}
+
 export function registerAgUiIpc(
   buildOptions: BuildOptionsFn,
   onRunFinished: OnRunFinishedFn,
@@ -162,8 +184,9 @@ export function registerAgUiIpc(
     // 事件转发目标：优先用 invoke 的 sender（发起 run 的窗口），兜底用聊天窗口
     const sender = event.sender;
     const { options, latestUserText } = await buildOptionsFn(input);
-    // IDE 模式：注入工具确认桥（needsConfirm 工具先经渲染层确认卡片把关）
-    if (input.ideTools) {
+    // IDE 模式：注入工具确认桥（needsConfirm 工具先经渲染层确认卡片把关）。
+    // 仅只读工具的后台 run（confirmed === false）不需要确认桥。
+    if (input.ideTools && input.ideTools.confirmed !== false) {
       options.toolApprovalHandler = (req) => requestToolApproval(sender, req);
     }
 
@@ -229,7 +252,7 @@ export function registerAgUiIpc(
         }
       },
     });
-    activeRuns.set(runId, sub);
+    activeRuns.set(runId, { sub, sender });
 
     // invoke 立刻返回 ack，不等 Observable 结束。
     // 终态（RUN_FINISHED/RUN_ERROR）由事件流承载，渲染端据此 offEvent + 收尾。
@@ -237,12 +260,8 @@ export function registerAgUiIpc(
     return { success: true, runId };
   });
 
-  ipcMain.handle(IPC.AGUI_CANCEL, () => {
-    for (const sub of activeRuns.values()) {
-      sub.unsubscribe();
-    }
-    activeRuns.clear();
-    flushPendingToolApprovals();
+  ipcMain.handle(IPC.AGUI_CANCEL, (event) => {
+    cancelRunsForWindow(event.sender);
     return true;
   });
 }

@@ -2438,6 +2438,15 @@ html, body, .ide {
   cursor: not-allowed;
 }
 
+/* 停止按钮（Agent 运行中替代「发送」） */
+.ide__ai-stop {
+  background: #a1260d;
+}
+
+.ide__ai-stop:hover {
+  background: #c42b1c;
+}
+
 /* AI panel light theme */
 .ide.ide--light .ide__ai-panel {
   background: #f8f8f8;

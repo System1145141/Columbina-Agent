@@ -14,6 +14,7 @@ import {
   executeAction,
   nativeArgsToAction,
   formatNativeToolLabel,
+  requestAgentStop,
 } from "../services/agent-bridge";
 import { toggleAiPanel, hideAiPanel } from "../services/layout";
 import {
@@ -35,6 +36,7 @@ const aiCloseBtn = document.getElementById("ai-close-btn") as HTMLButtonElement;
 const aiMessagesEl = document.getElementById("ai-messages") as HTMLElement;
 const aiInputEl = document.getElementById("ai-input") as HTMLTextAreaElement;
 const aiSendBtn = document.getElementById("ai-send-btn") as HTMLButtonElement;
+const aiStopBtn = document.getElementById("ai-stop-btn") as HTMLButtonElement;
 const aiContextSelectEl = document.getElementById("ai-context-select") as HTMLSelectElement;
 const aiModelSelectEl = document.getElementById("ai-model-select") as HTMLSelectElement;
 const aiUndoBtn = document.getElementById("ai-undo-btn") as HTMLButtonElement;
@@ -221,8 +223,13 @@ function ensureToolCallsContainer(): HTMLElement | null {
   }
   const container = document.createElement("div");
   container.className = "ide__ai-toolcalls";
-  // 顺序：思维链折叠块 → 工具调用 → 正文气泡（思维链在首片段到达时插到 firstChild，正文后续 appendChild 排其后）
-  streamRowEl.appendChild(container);
+  // 顺序与 renderAiMessages 一致：思维链折叠块 → 工具调用 → 正文。
+  // 正文气泡可能已在重渲染中先行创建（插到其前），否则追加到行尾。
+  if (streamBubbleEl && streamBubbleEl.parentElement === streamRowEl) {
+    streamRowEl.insertBefore(container, streamBubbleEl);
+  } else {
+    streamRowEl.appendChild(container);
+  }
   streamToolCallsEl = container;
   return container;
 }
@@ -327,10 +334,15 @@ function handleStreamEvent(rawEvent: unknown): void {
 
   if (event.type === "TEXT_MESSAGE_CONTENT" && event.delta && isActive) {
     streamRaw += event.delta;
+    const clean = stripActions(stripRecallTags(streamRaw));
     if (streamBubbleEl) {
-      streamBubbleEl.textContent = stripActions(stripRecallTags(streamRaw));
+      streamBubbleEl.textContent = clean;
       scrollMessagesToBottom();
     }
+    // 同步到消息对象：流式期间 notify()（如确认桥触发）会全量重建 DOM，
+    // 若 msg.content 不随 delta 更新，重建后正文会短暂空白
+    const msg = state.aiMessages.find((m) => m.id === activeStreamMsgId);
+    if (msg) msg.content = clean;
   } else if (
     (event.type === "REASONING_MESSAGE_CONTENT" ||
       event.type === "REASONING_MESSAGE_CHUNK" ||
@@ -339,18 +351,24 @@ function handleStreamEvent(rawEvent: unknown): void {
     isActive
   ) {
     streamReasoning += event.delta;
-    // 首个思维链片段到达时创建折叠块
-    if (!streamThinkingContentEl && streamRowEl) {
-      const details = document.createElement("details");
-      details.className = "ide__ai-thinking";
-      const summary = document.createElement("summary");
-      summary.textContent = "深度思考";
-      details.appendChild(summary);
-      const content = document.createElement("div");
-      content.className = "ide__ai-thinking-content";
-      details.appendChild(content);
-      streamThinkingContentEl = content;
-      streamRowEl.insertBefore(details, streamRowEl.firstChild);
+    // 首个思维链片段到达时创建折叠块；重渲染（notify 重建 DOM）后旧元素已脱离文档，
+    // 需重建（与 ensureToolCallsContainer 同样幂等处理），否则思维链块永久消失
+    if ((!streamThinkingContentEl || !streamThinkingContentEl.isConnected) && streamRowEl) {
+      const existing = streamRowEl.querySelector(".ide__ai-thinking-content") as HTMLElement | null;
+      if (existing) {
+        streamThinkingContentEl = existing;
+      } else {
+        const details = document.createElement("details");
+        details.className = "ide__ai-thinking";
+        const summary = document.createElement("summary");
+        summary.textContent = "深度思考";
+        details.appendChild(summary);
+        const content = document.createElement("div");
+        content.className = "ide__ai-thinking-content";
+        details.appendChild(content);
+        streamThinkingContentEl = content;
+        streamRowEl.insertBefore(details, streamRowEl.firstChild);
+      }
     }
     if (streamThinkingContentEl) {
       streamThinkingContentEl.textContent = streamReasoning;
@@ -677,6 +695,9 @@ function updateAiPanel() {
   if (!state.aiPanelVisible) hideSessionMenu();
   aiPanelEl.style.display = state.aiPanelVisible ? "flex" : "none";
   aiSendBtn.disabled = state.aiRunning;
+  // 运行中显示「停止」按钮替代「发送」
+  aiSendBtn.style.display = state.aiRunning ? "none" : "";
+  aiStopBtn.style.display = state.aiRunning ? "" : "none";
   aiUndoBtn.disabled = state.fileSnapshots.size === 0;
   // 身份切换时重填模型下拉（哥伦比娅 / 桑多涅各自记忆所选模型）
   const identity = state.ideSettings.agentIdentity || "columbina";
@@ -714,6 +735,7 @@ export function initAiPanel(): void {
     toggleSessionMenu();
   });
   aiSendBtn.addEventListener("click", () => void sendAiMessage());
+  aiStopBtn.addEventListener("click", () => requestAgentStop());
   document.addEventListener("click", (e) => {
     if (sessionMenu && !sessionMenu.contains(e.target as Node)) {
       hideSessionMenu();

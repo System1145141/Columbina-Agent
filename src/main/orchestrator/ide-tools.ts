@@ -22,18 +22,35 @@ function isLikelyBinary(buffer: Buffer): boolean {
   return false;
 }
 
+/** 判断规范化后的绝对路径是否位于某 root 内（含 root 自身）。 */
+function isInsideRoots(roots: string[], absPath: string): boolean {
+  const normalized = path.resolve(absPath);
+  return roots.some((r) => {
+    const root = path.resolve(r);
+    return normalized === root || normalized.startsWith(root + path.sep);
+  });
+}
+
 /** 相对路径按 roots 依次解析；绝对路径必须落在某 root 内。解析失败返回 null。 */
 function resolveInRoots(roots: string[], p: string): string | null {
   if (!p) return null;
   if (path.isAbsolute(p)) {
-    return roots.some((r) => p === r || p.startsWith(r + path.sep)) ? p : null;
+    // 规范化后再校验：path.resolve 会折叠 ../，防止 /root/../etc/passwd 之类逃逸
+    const resolved = path.resolve(p);
+    return isInsideRoots(roots, resolved) ? resolved : null;
   }
   for (const r of roots) {
-    const abs = path.join(r, p);
+    // path.join 会把 ../ 规范化，必须二次校验解析结果仍在 root 内，防止 ../../etc/passwd 逃逸
+    const abs = path.resolve(r, p);
+    if (!isInsideRoots([r], abs)) continue;
     if (fs.existsSync(abs)) return abs;
   }
   // 相对路径未命中任何 root：仍返回第一个 root 下的拼接结果（供错误信息使用），由调用方按 existsSync 判断
-  return roots.length > 0 ? path.join(roots[0], p) : null;
+  if (roots.length > 0) {
+    const abs = path.resolve(roots[0], p);
+    return isInsideRoots([roots[0]], abs) ? abs : null;
+  }
+  return null;
 }
 
 function dirEntries(dirPath: string): { name: string; isDirectory: boolean }[] {

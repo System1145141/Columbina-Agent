@@ -824,7 +824,8 @@ async function runInlineChat(instruction: string) {
 新代码
 <<<end>>>`;
 
-    const { content } = await callAgentStream(prompt);
+    // Inline Chat 用 <<<>>> 文本协议交互，不注入 IDE 工具（工具会诱导模型偏离协议输出，导致空修改）
+    const { content } = await callAgentStream(prompt, { tools: "none" });
     const { explanation, blocks } = parseSearchReplaceBlocks(content);
     const { modified, errors } = applySearchReplace(chatState.selectedText, blocks);
 

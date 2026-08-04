@@ -168,6 +168,8 @@ export interface FileSnapshot {
   filePath: string;
   content: string;
   lineEnding: Tab["lineEnding"];
+  /** 创建快照时的活跃 AI 会话 id：撤销结果消息应写入该会话，而非当前会话 */
+  sessionId?: string;
 }
 
 /** 一次跨文件重构（如符号重命名）的整体撤销快照组 */
@@ -328,6 +330,8 @@ export const state = {
     filePath: "",
   } as InlineCompletion,
   pendingActionResolve: null as ((value: boolean) => void) | null,
+  /** 操作确认卡的超时定时器（超时自动拒绝，防止 Agent 循环永久等待） */
+  pendingActionTimer: null as ReturnType<typeof setTimeout> | null,
   projectIndex: [] as ProjectIndexEntry[],
 
   searchVisible: false,
@@ -767,6 +771,8 @@ declare global {
         identityId?: string;
         modelId?: string;
         attachments?: { name: string; text: string }[];
+        ideTools?: { roots: string[]; confirmed?: boolean };
+        noTools?: boolean;
       }) => Promise<{ success: boolean; error?: string }>;
       onEvent: (callback: (event: unknown) => void) => () => void;
       cancel: () => Promise<boolean>;

@@ -48,6 +48,32 @@ function isPathUnderRoot(filePath: string, rootPath: string): boolean {
   return normFile === normRoot || normFile.startsWith(normRoot + "/");
 }
 
+/**
+ * 消息截断后对齐历史索引的 seq 编号：
+ * 截断只丢最老消息，被丢弃的 user 消息数即 seq 偏移量（buildHistoryTurns 按 user 消息计数）。
+ * 旧 seq <= 偏移量的索引对应已丢弃轮次，删除；其余重编号并同步索引行内的「轮次N:」前缀。
+ * 修复：消息 slice(-MAX) 截断后 historyIndexes 若不修剪，recall 会召回错误轮次。
+ */
+function alignHistoryIndexes(
+  allMessages: AiMessage[],
+  keptMessages: AiMessage[],
+  indexes?: Record<number, string>
+): Record<number, string> | undefined {
+  if (!indexes || Object.keys(indexes).length === 0) return indexes;
+  const dropped = allMessages
+    .slice(0, Math.max(0, allMessages.length - keptMessages.length))
+    .filter((m) => m.role === "user").length;
+  if (dropped <= 0) return indexes;
+  const next: Record<number, string> = {};
+  for (const [k, v] of Object.entries(indexes)) {
+    const oldSeq = Number(k);
+    if (!Number.isFinite(oldSeq) || oldSeq <= dropped) continue;
+    const newSeq = oldSeq - dropped;
+    next[newSeq] = v.replace(/^轮次\d+:/, `轮次${newSeq}:`);
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
 function collectWorkspaceState(): Record<string, unknown> {
   const openFiles: string[] = [];
   for (const tab of state.tabs.values()) {
@@ -72,7 +98,8 @@ function collectWorkspaceState(): Record<string, unknown> {
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
       messages: s.messages.slice(-MAX_PERSISTED_AI_MESSAGES),
-      historyIndexes: s.historyIndexes,
+      // 消息截断后同步对齐索引 seq，防止 recall 召回错误轮次
+      historyIndexes: alignHistoryIndexes(s.messages, s.messages.slice(-MAX_PERSISTED_AI_MESSAGES), s.historyIndexes),
     })),
     activeAiSessionId: state.activeAiSessionId,
     // 兼容旧版本 IDE 读取：仅保留当前会话消息
@@ -146,8 +173,9 @@ async function applyWorkspace(data: WorkspaceData, filePath?: string): Promise<v
       createdAt: typeof s.createdAt === "number" ? s.createdAt : 0,
       updatedAt: typeof s.updatedAt === "number" ? s.updatedAt : 0,
       messages: Array.isArray(s.messages) ? s.messages : [],
+      // 旧版本数据：消息被截断过但索引未同步修剪，无法对齐旧 seq → 清空索引（下次奇数轮重新摘要）
       historyIndexes:
-        s.historyIndexes && typeof s.historyIndexes === "object"
+        s.historyIndexes && typeof s.historyIndexes === "object" && (s.messages as AiMessage[]).length < MAX_PERSISTED_AI_MESSAGES
           ? s.historyIndexes
           : undefined,
     }));

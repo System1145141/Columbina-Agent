@@ -270,12 +270,18 @@ export async function buildAgentRunOptions(
       },
       messages: fcMessages,
       timeoutMs: deps.chatRequestTimeoutMs,
-      // talk 模式无工具（纯聊天）；IDE 模式注入原生工具集（只读自动执行 + 写操作经确认桥把关）；
+      // talk 模式无工具（纯聊天）；noTools 显式要求不注入任何工具（幽灵补全/摘要等后台 run）；
+      // IDE 模式注入原生工具集：confirmed=false 时仅只读工具（自动执行，无确认卡片）；
       // 其余模式（桌面聊天等）不传 tools，回退到全局工具注册表。
-      ...(isTalkMode
+      ...(isTalkMode || input.noTools
         ? { tools: [] as ToolDefinition[] }
         : input.ideTools
-          ? { tools: buildIdeTools(input.ideTools.roots ?? []) }
+          ? {
+              tools:
+                input.ideTools.confirmed === false
+                  ? buildIdeReadOnlyTools(input.ideTools.roots ?? [])
+                  : buildIdeTools(input.ideTools.roots ?? []),
+            }
           : {}),
     },
     latestUserText,
