@@ -41,9 +41,6 @@ export function registerRunCommandInTerminal(fn: (command: string) => Promise<st
   runCommandInTerminalImpl = fn;
 }
 
-/** 操作确认卡超时（与主进程工具确认桥 120s 一致）：超时自动拒绝，防止 Agent 循环永久等待 */
-const ACTION_CONFIRM_TIMEOUT_MS = 120_000;
-
 /**
  * 停止机制：用户点 AI 面板「停止」后置位。
  * 主进程 AGUI_CANCEL 取消 run 后 Observable 既不 complete 也不 error（columbina-agent 取消路径直接 return），
@@ -61,8 +58,6 @@ export function requestAgentStop(): void {
   window.agui?.cancel();
   // 任务规划执行中：标记计划取消，阻止 executeTaskPlan 进入下一步
   if (state.aiCurrentPlan) state.aiCurrentPlan.cancelled = true;
-  // 结算渲染层挂起的操作确认卡（否则 runAgentTurn 卡在 await 上）
-  resolveActionConfirmation(false);
   // 结算挂起的流式调用（主进程取消后不再发 AG-UI 事件）
   if (activeStreamSettle) {
     activeStreamSettle.resolve({ content: "", reasoning: "" });
@@ -81,47 +76,8 @@ export function getCurrentSelection(): string {
   return state.editorView.state.doc.sliceString(from, to);
 }
 
-export function parseActions(content: string): AgentAction[] {
-  const actions: AgentAction[] = [];
-  const regex = /<action>([\s\S]*?)<\/action>/g;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(content)) !== null) {
-    try {
-      const raw = JSON.parse(match[1].trim()) as Record<string, unknown>;
-      const type = String(raw.type || "");
-      if (!AGENT_TOOLS.some((t) => t.name === type)) continue;
-      actions.push({
-        id: `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        type: type as AgentAction["type"],
-        filePath: typeof raw.filePath === "string" ? raw.filePath : undefined,
-        content: typeof raw.content === "string" ? raw.content : undefined,
-        query: typeof raw.query === "string" ? raw.query : undefined,
-        command: typeof raw.command === "string" ? raw.command : undefined,
-        line: typeof raw.line === "number" ? raw.line : undefined,
-        col: typeof raw.col === "number" ? raw.col : undefined,
-        newName: typeof raw.newName === "string" ? raw.newName : undefined,
-        edits: Array.isArray(raw.edits)
-          ? (raw.edits as { search: string; replace: string; occurrence?: number }[]).filter(
-              (e) => e && typeof e.search === "string" && typeof e.replace === "string"
-            )
-          : undefined,
-        pattern: typeof raw.pattern === "string" ? raw.pattern : undefined,
-        terminalId: typeof raw.terminalId === "string" ? raw.terminalId : undefined,
-        todoAction: typeof raw.todoAction === "string" ? (raw.todoAction as AgentAction["todoAction"]) : undefined,
-        items: Array.isArray(raw.items) ? raw.items.filter((i): i is string => typeof i === "string") : undefined,
-        index: typeof raw.index === "number" ? raw.index : undefined,
-        done: typeof raw.done === "boolean" ? raw.done : undefined,
-        pluginName: typeof raw.pluginName === "string" ? raw.pluginName : undefined,
-        pluginParams: typeof raw.pluginParams === "object" && raw.pluginParams !== null ? (raw.pluginParams as Record<string, unknown>) : undefined,
-      });
-    } catch {
-      // ignore invalid action JSON
-    }
-  }
-  return actions;
-}
-
 export function stripActions(content: string): string {
+  // 仅用于清理旧版本会话消息中的 <action> 协议残留（协议已废弃，新消息不会再包含）
   return content.replace(/<action>[\s\S]*?<\/action>/g, "").trim();
 }
 
@@ -170,9 +126,8 @@ function buildHistoryTurns(): HistoryTurn[] {
       turns.push(cur);
     } else if (msg.role === "model" && cur) {
       if (msg.error) continue;
-      const actionsText = msg.actions && msg.actions.length > 0 ? `\n[执行工具: ${msg.actions.map((a) => a.type).join(", ")}]` : "";
       const text = stripActions(msg.content || "");
-      cur.assistantText = cur.assistantText ? `${cur.assistantText}\n${text}${actionsText}` : `${text}${actionsText}`;
+      cur.assistantText = cur.assistantText ? `${cur.assistantText}\n${text}` : text;
     }
   }
   return turns;
@@ -372,12 +327,6 @@ export function buildToolsPrompt(): string {
   }
 
   return `\n\n你可以使用以下工具来操作项目代码（全部为原生工具调用，直接调用即可，无需输出任何标记）：\n${lines.join("\n")}\n\n注意：\n- 写操作（write_file / edit_file / delete_file / run_command / rename_symbol / todo 等）执行前会弹出确认卡片，用户确认后才会真正执行，执行结果会自动返回给你。\n- 写文件前最好先读取目标文件；优先分析再行动，不要一次输出过多内容。`;
-}
-
-export function formatActionLabel(action: AgentAction): string {
-  const tool = AGENT_TOOLS.find((t) => t.name === action.type);
-  if (tool) return tool.formatLabel(action);
-  return "未知操作";
 }
 
 const MAX_SNAPSHOTS = 50;
@@ -946,29 +895,6 @@ export async function executeAction(action: AgentAction): Promise<AgentActionRes
   return tool.execute(action);
 }
 
-export function requestActionConfirmation(timeoutMs: number = ACTION_CONFIRM_TIMEOUT_MS): Promise<boolean> {
-  return new Promise((resolve) => {
-    // 上一张未响应的卡片先结算（拒绝），避免悬挂残留
-    resolveActionConfirmation(false);
-    state.pendingActionResolve = resolve;
-    state.pendingActionTimer = setTimeout(() => {
-      // 超时自动拒绝：与主进程工具确认桥 120s 超时语义一致
-      resolveActionConfirmation(false);
-    }, timeoutMs);
-  });
-}
-
-export function resolveActionConfirmation(confirmed: boolean): void {
-  if (state.pendingActionTimer) {
-    clearTimeout(state.pendingActionTimer);
-    state.pendingActionTimer = null;
-  }
-  if (state.pendingActionResolve) {
-    state.pendingActionResolve(confirmed);
-    state.pendingActionResolve = null;
-  }
-}
-
 export function updateUndoButton(): void {
   // Handled by ai-panel component via state subscription
   notify();
@@ -1200,9 +1126,6 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
   try {
     let round = 0;
     let recallAttempts = 0;
-    // 多轮工具调用的执行轨迹：每轮追加（工具摘要 + 回复节选），
-    // 保证第 3+ 轮 prompt 仍能看到早期轮次的执行情况（最新一轮完整结果单独拼接）
-    const trail: { reply: string; summary: string }[] = [];
     const initialContext = await buildAiContext(scope, userText);
     const persona = await buildPersonaPrompt(userText);
     // 历史上下文：更早轮次进索引（recall 召回），最近一轮保留完整内容
@@ -1264,67 +1187,19 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
         }
       }
 
-      const actions = parseActions(rawContent);
       const cleanContent = stripRecallTags(stripActions(rawContent));
 
       const modelMsg = state.aiMessages.find((m) => m.id === modelMsgId);
       if (modelMsg) {
-        modelMsg.content = cleanContent || (actions.length > 0 ? "我计划执行以下操作:" : "");
+        modelMsg.content = cleanContent;
         modelMsg.thinking = false;
         modelMsg.thinkingContent = reasoning || undefined;
-        modelMsg.actions = actions.length > 0 ? actions : undefined;
       }
       notify();
 
-      if (actions.length === 0) break;
-      if (isCancelled?.() || isAgentStopRequested()) break;
-
-      const confirmed = await requestActionConfirmation();
-      if (!confirmed) {
-        for (const action of actions) action.rejected = true;
-        if (modelMsg) {
-          modelMsg.actionResults = actions.map((a) => ({ actionId: a.id, ok: false, error: "用户已拒绝" }));
-        }
-        notify();
-        break;
-      }
-
-      for (const action of actions) action.confirmed = true;
-      notify();
-
-      const results: AgentActionResult[] = [];
-      for (const action of actions) {
-        if (isCancelled?.() || isAgentStopRequested()) break;
-        const result = await executeAction(action);
-        results.push(result);
-      }
-      if (modelMsg) {
-        modelMsg.actionResults = results;
-      }
-      notify();
-
-      if (isCancelled?.() || isAgentStopRequested()) break;
-
-      const resultText = results
-        .map((r) => {
-          const action = actions.find((a) => a.id === r.actionId);
-          return `Action (${action?.type}): ${r.ok ? "成功" : "失败"}\n${r.output || r.error || ""}`;
-        })
-        .join("\n\n---\n\n");
-      // 本轮执行摘要追加进 trail（工具名+状态+输出截断），保证第 3+ 轮仍能看到早期轮次
-      trail.push({
-        reply: cleanContent,
-        summary: results
-          .map((r) => {
-            const action = actions.find((a) => a.id === r.actionId);
-            return `${action?.type || "action"}: ${r.ok ? "成功" : "失败"}${r.output ? `（${r.output.slice(0, 160)}）` : ""}`;
-          })
-          .join("；"),
-      });
-      // 此前轮次的执行轨迹（不含本轮：本轮完整结果单独拼接在【最新工具执行结果】）
-      const trailText = trail.slice(0, -1).map((t, i) => `第${i + 1}轮: ${t.summary}${t.reply ? `；回复: ${t.reply.slice(0, 200)}` : ""}`).join("\n");
-      // 第二轮起：完整复用 contextBase（人格/历史/工具说明/用户问题），追加执行轨迹与最新结果
-      prompt = `${contextBase}${trailText ? `\n\n【此前执行过程】\n${trailText}` : ""}\n\n【最新工具执行结果】\n${resultText}\n\n请根据结果继续回答用户问题，或执行下一步操作。`;
+      // <action> 文本协议已废弃：工具调用全部走主进程原生 function calling
+      // （确认桥把关、TOOL_CALL 事件流式展示、结果自动回填模型），模型输出即最终回答，单轮结束
+      break;
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
@@ -1336,8 +1211,6 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
     window.agui?.cancel();
     state.aiRunning = false;
     state.aiCurrentMessageId = "";
-    // 结算可能悬挂的操作确认卡（含清理超时定时器）
-    resolveActionConfirmation(false);
     aiStopRequested = false;
     notify();
   }

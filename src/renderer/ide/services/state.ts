@@ -86,9 +86,9 @@ export interface AiMessage {
   toolName?: string;
   /** 本轮原生 tool-call 调用序列（TOOL_CALL_START/RESULT/END 事件流式累积） */
   toolCalls?: AiToolCall[];
+  /** 涉及文件标签（确认桥执行 write/edit/delete 等操作时记录，write/edit/delete 标记为已修改） */
+  fileTags?: { name: string; modified: boolean }[];
   error?: boolean;
-  actions?: AgentAction[];
-  actionResults?: AgentActionResult[];
 }
 
 /** Agent 会话：一个可切换/复制/重命名的独立对话上下文 */
@@ -329,9 +329,6 @@ export const state = {
     loading: false,
     filePath: "",
   } as InlineCompletion,
-  pendingActionResolve: null as ((value: boolean) => void) | null,
-  /** 操作确认卡的超时定时器（超时自动拒绝，防止 Agent 循环永久等待） */
-  pendingActionTimer: null as ReturnType<typeof setTimeout> | null,
   projectIndex: [] as ProjectIndexEntry[],
 
   searchVisible: false,

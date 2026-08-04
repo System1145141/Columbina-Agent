@@ -5,8 +5,6 @@ import {
   confirmTaskPlan,
   cancelTaskPlan,
   undoLastWrite,
-  resolveActionConfirmation,
-  formatActionLabel,
   loadAgentModels,
   setAgentModel,
   stripActions,
@@ -27,7 +25,6 @@ import {
   deleteSession,
   clearActiveSession,
 } from "../services/ai-sessions";
-import { basename } from "../services/file-service";
 import { showPromptDialog } from "./file-tree";
 
 const aiToggleBtn = document.getElementById("ai-toggle-btn") as HTMLButtonElement;
@@ -305,6 +302,19 @@ async function setupNativeToolConfirm(): Promise<void> {
       return;
     }
     const action = nativeArgsToAction(payload.toolId, payload.args || {});
+    // 记录涉及文件标签（write/edit/delete 高亮为已修改），替代已废弃的 <action> 协议 actions 字段
+    if (action.filePath) {
+      const msg = state.aiMessages.find((m) => m.id === activeStreamMsgId);
+      if (msg) {
+        const modified = action.type === "write_file" || action.type === "edit_file" || action.type === "delete_file";
+        const name = action.filePath.split(/[\\/]/).pop() || action.filePath;
+        msg.fileTags = msg.fileTags || [];
+        if (!msg.fileTags.some((t) => t.name === name)) {
+          msg.fileTags.push({ name, modified });
+        }
+        notify();
+      }
+    }
     try {
       const result = await executeAction(action);
       window.ide?.agentToolConfirmResult({
@@ -422,11 +432,8 @@ function handleStreamEvent(rawEvent: unknown): void {
 /** 收集消息中 Agent 涉及的文件（write/edit/delete 标记为已修改） */
 function collectFileTags(msg: AiMessage): { name: string; modified: boolean }[] {
   const map = new Map<string, boolean>();
-  for (const a of msg.actions || []) {
-    if (!a.filePath) continue;
-    const modified = a.type === "write_file" || a.type === "edit_file" || a.type === "delete_file";
-    const key = basename(a.filePath);
-    map.set(key, (map.get(key) ?? false) || modified);
+  for (const t of msg.fileTags || []) {
+    map.set(t.name, (map.get(t.name) ?? false) || t.modified);
   }
   return [...map.entries()].map(([name, modified]) => ({ name, modified }));
 }
@@ -505,61 +512,6 @@ function renderAiMessages() {
       error.className = "ide__ai-error";
       error.textContent = msg.content;
       row.appendChild(error);
-    }
-
-    if (msg.actions && msg.actions.length > 0 && !msg.actionResults) {
-      const actionsEl = document.createElement("div");
-      actionsEl.className = "ide__ai-actions";
-      const title = document.createElement("div");
-      title.className = "ide__ai-actions-title";
-      title.textContent = "Agent 请求执行以下操作：";
-      actionsEl.appendChild(title);
-
-      for (const action of msg.actions) {
-        const item = document.createElement("div");
-        item.className = "ide__ai-action" + (action.confirmed ? " is-confirmed" : action.rejected ? " is-rejected" : "");
-        const label = document.createElement("span");
-        label.className = "ide__ai-action-label";
-        label.textContent = formatActionLabel(action);
-        item.appendChild(label);
-        actionsEl.appendChild(item);
-      }
-
-      if (!msg.actions.some((a) => a.confirmed || a.rejected)) {
-        const btns = document.createElement("div");
-        btns.className = "ide__ai-actions-btns";
-        const confirmBtn = document.createElement("button");
-        confirmBtn.type = "button";
-        confirmBtn.className = "ide__ai-action-btn ide__ai-action-btn--confirm";
-        confirmBtn.textContent = "确认执行";
-        confirmBtn.addEventListener("click", () => {
-          resolveActionConfirmation(true);
-        });
-        const rejectBtn = document.createElement("button");
-        rejectBtn.type = "button";
-        rejectBtn.className = "ide__ai-action-btn ide__ai-action-btn--reject";
-        rejectBtn.textContent = "拒绝";
-        rejectBtn.addEventListener("click", () => {
-          resolveActionConfirmation(false);
-        });
-        btns.appendChild(confirmBtn);
-        btns.appendChild(rejectBtn);
-        actionsEl.appendChild(btns);
-      }
-
-      row.appendChild(actionsEl);
-    }
-
-    if (msg.actionResults && msg.actionResults.length > 0) {
-      const resultsEl = document.createElement("div");
-      resultsEl.className = "ide__ai-action-results";
-      for (const result of msg.actionResults) {
-        const item = document.createElement("div");
-        item.className = "ide__ai-action-result" + (result.ok ? "" : " is-error");
-        item.textContent = `${result.ok ? "✓" : "✗"} ${result.output || result.error || ""}`;
-        resultsEl.appendChild(item);
-      }
-      row.appendChild(resultsEl);
     }
 
     aiMessagesEl.appendChild(row);

@@ -100,21 +100,9 @@ export function duplicateSession(sourceId?: string): AiSession | null {
 function deepCopyMessages(messages: AiMessage[]): AiMessage[] {
   return messages.map((m) => ({
     ...m,
-    actions: m.actions ? m.actions.map((a) => ({ ...a })) : undefined,
-    actionResults: m.actionResults ? m.actionResults.map((r) => ({ ...r })) : undefined,
+    // fileTags 数组需深拷贝，避免复制会话后两会话共享同一数组
+    fileTags: m.fileTags ? m.fileTags.map((t) => ({ ...t })) : undefined,
   }));
-}
-
-/** 结算悬挂的操作确认（拒绝）并清理超时定时器，避免 Agent 循环永久等待 */
-function settlePendingAction(): void {
-  if (state.pendingActionTimer) {
-    clearTimeout(state.pendingActionTimer);
-    state.pendingActionTimer = null;
-  }
-  if (state.pendingActionResolve) {
-    state.pendingActionResolve(false);
-    state.pendingActionResolve = null;
-  }
 }
 
 /** 切换到指定会话；任务规划为会话内执行期状态，切换时重置 */
@@ -125,7 +113,6 @@ export function switchToSession(sessionId: string): boolean {
   state.aiMessages = session.messages;
   state.aiCurrentPlan = null;
   state.aiTaskPlanRunning = false;
-  settlePendingAction();
   notify();
   return true;
 }
@@ -153,7 +140,6 @@ export function deleteSession(sessionId: string): void {
       state.aiMessages = [];
       state.aiCurrentPlan = null;
       state.aiTaskPlanRunning = false;
-      settlePendingAction();
       notify();
     }
   } else {
@@ -171,7 +157,6 @@ export function clearActiveSession(): void {
   state.aiMessages = [];
   state.aiCurrentPlan = null;
   state.aiTaskPlanRunning = false;
-  settlePendingAction();
   notify();
 }
 

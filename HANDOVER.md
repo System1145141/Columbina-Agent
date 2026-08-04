@@ -41,7 +41,7 @@ npm run start        # 直接用 dist 启动
 | 1 | 渲染层消费 `TOOL_CALL_START/RESULT/END` 事件，流式展示工具调用（⏳ → ✓/✗ + 结果预览） | ✅ |
 | 2 | 只读工具原生化：`read_file / search_files / list_dir / list_files`，主进程直接执行，无需确认 | ✅ |
 | 3 | 写工具确认桥：12 个写/派发工具声明 `needsConfirm`，执行前经 IPC 弹确认卡片，确认后渲染层执行并回填 | ✅ |
-| 4 | 完全废弃 `<action>` 文本协议（提示词已移除，渲染层执行函数保留作兼容） | ⬜ 未做 |
+| 4 | 完全废弃 `<action>` 文本协议 | ✅ |
 
 **关键文件与机制**：
 
@@ -157,7 +157,7 @@ npm run start        # 直接用 dist 启动
 
 ## 6. 已知限制与下一步
 
-- **阶段 4（废弃 `<action>` 文本协议）未做**：`AGENT_TOOLS` 描述、`parseActions`、`requestActionConfirmation`、消息 `actions`/`actionResults` 卡片渲染仍保留（向后兼容）。做时注意：确认桥已覆盖全部写操作，文本协议只剩兼容价值。
+- **阶段 4（废弃 `<action>` 文本协议）已完成**：`parseActions`、`requestActionConfirmation`/`resolveActionConfirmation`、消息 `actions`/`actionResults` 字段与卡片渲染、`formatActionLabel`、CSS `.ide__ai-actions*` 全部删除；`runAgentTurn` 循环退化为单轮（recall 重试除外），工具调用完全依赖主进程原生 FC + 确认桥。`stripActions` 保留（仅清理旧版本会话消息中的协议残留）；`executeAction`/`AGENT_TOOLS`/`nativeArgsToAction`/`formatNativeToolLabel` 保留（确认桥路径使用）；涉及文件标签改由确认桥执行时写入 `AiMessage.fileTags`。
 - 未来计划详见 AGENTS.md §3：自动错误修复（LSP 诊断一键修复）、自然语言生成完整代码、更多跨文件重构、测试运行闭环、提交前审查提醒、人格深化（多风格/世界书/Live2D）、自动化测试、错误监控日志、发布流水线、设置导入导出。
 - 已知小限制：流式期间发生重渲染（如确认桥触发的 `notify`）后，正文增量会短暂依赖最终渲染补全（`streamBubbleEl` 重建）；工具行已按 `data-toolcall` 幂等处理，正文未做同等处理（现状可用）。
 - DeepSeek 思考模式：不支持 temperature/top_p 等参数（设置不报错但不生效）；工具调用场景必须完整回传 reasoning_content（已实现）。
