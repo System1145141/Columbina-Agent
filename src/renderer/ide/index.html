@@ -27,6 +27,18 @@
       </div>
     </header>
     <div class="ide__workspace">
+      <aside class="ide__solo-sessions" id="solo-session-panel" style="display: none;">
+        <div class="ide__solo-sessions-header">
+          <span>会话</span>
+          <div class="ide__solo-sessions-actions">
+            <button type="button" class="ide__solo-sessions-action" id="solo-session-new" title="新建会话">＋</button>
+            <button type="button" class="ide__solo-sessions-action" id="solo-session-copy" title="复制当前会话">⧉</button>
+            <button type="button" class="ide__solo-sessions-action" id="solo-session-rename" title="重命名当前会话">✎</button>
+            <button type="button" class="ide__solo-sessions-action" id="solo-session-clear" title="清空当前会话消息">🗑</button>
+          </div>
+        </div>
+        <div class="ide__solo-sessions-list" id="solo-session-list"></div>
+      </aside>
       <aside class="ide__sidebar" id="file-tree">
         <div class="ide__sidebar-header">
           <span class="ide__sidebar-title" id="sidebar-title">资源管理器</span>
