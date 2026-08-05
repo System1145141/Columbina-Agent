@@ -177,6 +177,11 @@ let streamReasoning = "";
 let activeStreamMsgId: string | null = null;
 /** 当前 run 发起时的会话 id（RUN_STARTED 记录）：统计按发起时归属，run 中切换/删除会话不串账 */
 let activeRunSessionId: string | null = null;
+
+/** 用量统计归属：run 停止时清空快照（停止路径无终态事件，需显式清理，防止残留串到下一轮） */
+function clearActiveRunSnapshot(): void {
+  activeRunSessionId = null;
+}
 let streamRowEl: HTMLElement | null = null;
 let streamBubbleEl: HTMLElement | null = null;
 let streamThinkingContentEl: HTMLElement | null = null;
@@ -364,6 +369,7 @@ async function setupNativeToolConfirm(): Promise<void> {
       // Solo 防护：连续失败达上限 → 自动停止本轮
       if (autoApprove && recordSoloToolResult(result.ok)) {
         pushAiSystemNotice("⛔ 连续 3 次工具执行失败，已自动停止本轮 Solo 运行。请检查错误后重新发起。");
+        clearActiveRunSnapshot();
         requestAgentStop();
       }
       window.ide?.agentToolConfirmResult({
@@ -410,9 +416,10 @@ function handleStreamEvent(rawEvent: unknown): void {
   const isActive = Boolean(state.aiCurrentMessageId) && activeStreamMsgId === state.aiCurrentMessageId;
 
   // run 开始：记录发起时的会话 id（用量统计归属；防止 run 中切换会话串账）。
-  // 多轮重试（recall）是同一逻辑轮的连续 run，只取首轮快照；新消息的 run 在终态已清空快照
+  // 首轮快照后不再覆盖（多轮工具调用/recall 重试属同一逻辑轮）；
+  // 停止路径由 clearActiveRunSnapshot 显式清空，新 run 重新快照
   if (event.type === "RUN_STARTED") {
-    if (!activeRunSessionId) activeRunSessionId = state.activeAiSessionId;
+    if (activeRunSessionId === null) activeRunSessionId = state.activeAiSessionId;
   } else if (event.type === "TEXT_MESSAGE_CONTENT" && event.delta && isActive) {
     streamRaw += event.delta;
     const clean = stripActions(stripRecallTags(streamRaw));
@@ -792,6 +799,10 @@ async function sendAiMessage() {
   const text = aiInputEl.value.trim();
   if (!text || state.aiRunning) return;
 
+  // 用量统计归属兜底：新 turn 开始即清快照，统一覆盖所有无终态终止路径
+  // （停止 / 连续失败 / runAgentTurn finally 兜底 cancel / 异常），防止残留串账
+  clearActiveRunSnapshot();
+
   const scope = aiContextSelectEl.value as import("../services/state").AiContextScope;
   aiInputEl.value = "";
 
@@ -814,7 +825,11 @@ export function initAiPanel(): void {
     toggleSessionMenu();
   });
   aiSendBtn.addEventListener("click", () => void sendAiMessage());
-  aiStopBtn.addEventListener("click", () => requestAgentStop());
+  aiStopBtn.addEventListener("click", () => {
+    // 停止路径无终态事件：显式清空用量归属快照，防止残留串到下一轮 run
+    clearActiveRunSnapshot();
+    requestAgentStop();
+  });
   aiModeSelectEl.addEventListener("change", () => {
     void saveIdeSettings({ aiMode: aiModeSelectEl.value as "assist" | "solo" | "solo+" });
   });
