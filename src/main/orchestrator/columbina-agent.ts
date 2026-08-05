@@ -67,7 +67,7 @@ export interface ColumbinaRunOptions {
 export interface ColumbinaRunResult {
   reply: string;
   toolResults: ToolCallResult[];
-  totalUsage?: { input: number; output: number };
+  totalUsage?: { input: number; output: number; hit?: number; miss?: number };
 }
 
 /** 确认桥请求：IDE 写操作等在 FC 循环内先经此向渲染层发起用户确认。 */
@@ -214,6 +214,8 @@ async function runFcLoopWithEvents(
   const startTime = Date.now();
   let accInput = 0;
   let accOutput = 0;
+  let accHit = 0;
+  let accMiss = 0;
   let consecutiveTimeouts = 0; // 连续超时计数：达到上限直接跳出走强制总结
 
   console.log(LOG_PREFIX, `provider=${settings.provider} transport=${adapter.transport} model=${settings.model}`);
@@ -282,7 +284,7 @@ async function runFcLoopWithEvents(
       // 取消后（中止器已 abort 在途流）丢弃部分结果：不执行工具、不进下一轮
       if (isCancelled()) {
         console.warn(LOG_PREFIX, "第 " + (round + 1) + " 轮请求后被取消，丢弃部分结果");
-        const totalUsage = (accInput > 0 || accOutput > 0) ? { input: accInput, output: accOutput } : undefined;
+        const totalUsage = (accInput > 0 || accOutput > 0) ? { input: accInput, output: accOutput, hit: accHit, miss: accMiss } : undefined;
         return { reply: "", toolResults: allToolResults, totalUsage };
       }
       if (res.partial) console.warn(LOG_PREFIX, "第 " + (round + 1) + " 轮流式中止，使用已接收的部分内容");
@@ -310,7 +312,9 @@ async function runFcLoopWithEvents(
     if (chat.usage) {
       accInput += chat.usage.input;
       accOutput += chat.usage.output;
-      recordUsage(chat.usage.input, chat.usage.output, 1);
+      accHit += chat.usage.hit ?? 0;
+      accMiss += chat.usage.miss ?? 0;
+      recordUsage(chat.usage.input, chat.usage.output, 1, chat.usage.hit ?? 0, chat.usage.miss ?? 0);
     }
 
     console.log(
@@ -432,14 +436,14 @@ async function runFcLoopWithEvents(
     console.log(LOG_PREFIX, "Function Calling 完成，最终回复长度=" + content.length);
 
     observer.next({ type: EventType.STEP_FINISHED, stepName: `round-${round + 1}` });
-    const totalUsage = (accInput > 0 || accOutput > 0) ? { input: accInput, output: accOutput } : undefined;
+    const totalUsage = (accInput > 0 || accOutput > 0) ? { input: accInput, output: accOutput, hit: accHit, miss: accMiss } : undefined;
     return { reply: content, toolResults: allToolResults, totalUsage };
   }
 
   // 超过最大轮数或被取消：强制要求模型总结（不带 tools）。取消时直接返回，不再发起请求
   if (isCancelled()) {
     console.warn(LOG_PREFIX, "run 已取消，跳过强制总结");
-    const totalUsage = (accInput > 0 || accOutput > 0) ? { input: accInput, output: accOutput } : undefined;
+    const totalUsage = (accInput > 0 || accOutput > 0) ? { input: accInput, output: accOutput, hit: accHit, miss: accMiss } : undefined;
     return { reply: "", toolResults: allToolResults, totalUsage };
   }
   console.warn(LOG_PREFIX, "达到最大轮数 " + MAX_TOOL_ROUNDS + "，强制要求模型回复");
@@ -492,11 +496,13 @@ async function runFcLoopWithEvents(
     if (chat.usage) {
       accInput += chat.usage.input;
       accOutput += chat.usage.output;
-      recordUsage(chat.usage.input, chat.usage.output, 1);
+      accHit += chat.usage.hit ?? 0;
+      accMiss += chat.usage.miss ?? 0;
+      recordUsage(chat.usage.input, chat.usage.output, 1, chat.usage.hit ?? 0, chat.usage.miss ?? 0);
     }
 
     observer.next({ type: EventType.STEP_FINISHED, stepName: "force-summary" });
-    const totalUsage = (accInput > 0 || accOutput > 0) ? { input: accInput, output: accOutput } : undefined;
+    const totalUsage = (accInput > 0 || accOutput > 0) ? { input: accInput, output: accOutput, hit: accHit, miss: accMiss } : undefined;
     return { reply: chat.text, toolResults: allToolResults, totalUsage };
   } catch (err) {
     // 兜底再失败也别让整个 run 崩掉（subscriber.error 会让用户彻底没回复）。
@@ -508,7 +514,7 @@ async function runFcLoopWithEvents(
     const fallback = buildFallbackReply(allToolResults, reason);
     emitTextMessage(observer, `msg-${Date.now()}`, fallback);
     observer.next({ type: EventType.STEP_FINISHED, stepName: "force-summary" });
-    const totalUsage = (accInput > 0 || accOutput > 0) ? { input: accInput, output: accOutput } : undefined;
+    const totalUsage = (accInput > 0 || accOutput > 0) ? { input: accInput, output: accOutput, hit: accHit, miss: accMiss } : undefined;
     return { reply: fallback, toolResults: allToolResults, totalUsage };
   }
 }
@@ -540,6 +546,7 @@ export class ColumbinaAgent extends AbstractAgent {
       // 各轮在途流式请求的中止器：取消 run 时立即 abort fetch，停止消耗 token
       const aborters: Array<() => void> = [];
       (async () => {
+        const runStart = Date.now();
         try {
           subscriber.next({ type: EventType.RUN_STARTED, threadId, runId });
           const result = await runFcLoopWithEvents(options, subscriber, () => cancelled, (fn) => aborters.push(fn));
@@ -549,6 +556,9 @@ export class ColumbinaAgent extends AbstractAgent {
             type: EventType.RUN_FINISHED,
             threadId,
             runId,
+            // 概览面板：本轮 token 用量（含缓存命中）与耗时
+            usage: result.totalUsage,
+            durationMs: Date.now() - runStart,
           });
           subscriber.complete();
         } catch (err) {

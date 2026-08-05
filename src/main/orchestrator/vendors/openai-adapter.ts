@@ -99,7 +99,7 @@ export class OpenAICompatAdapter implements ChatVendorAdapter {
         };
         finish_reason?: string | null;
       }>;
-      usage?: { prompt_tokens?: number; completion_tokens?: number };
+      usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_cache_hit_tokens?: number; prompt_cache_miss_tokens?: number };
     };
     try {
       parsed = JSON.parse(jsonStr);
@@ -115,6 +115,8 @@ export class OpenAICompatAdapter implements ChatVendorAdapter {
           usage: {
             input: parsed.usage.prompt_tokens ?? 0,
             output: parsed.usage.completion_tokens ?? 0,
+            hit: parsed.usage.prompt_cache_hit_tokens ?? 0,
+            miss: parsed.usage.prompt_cache_miss_tokens ?? 0,
           },
         };
       }
@@ -144,7 +146,7 @@ export class OpenAICompatAdapter implements ChatVendorAdapter {
     let text = "";
     let thinking = "";
     let finishReason = "stop";
-    let usage: { input: number; output: number } | undefined;
+    let usage: { input: number; output: number; hit?: number; miss?: number } | undefined;
     // index → 累积中的 tool_call 片段
     const calls = new Map<number, { id: string; name: string; args: string }>();
     return {
@@ -180,7 +182,7 @@ export class OpenAICompatAdapter implements ChatVendorAdapter {
               finish_reason: finishReason,
             },
           ],
-          ...(usage ? { usage: { prompt_tokens: usage.input, completion_tokens: usage.output } } : {}),
+          ...(usage ? { usage: { prompt_tokens: usage.input, completion_tokens: usage.output, prompt_cache_hit_tokens: usage.hit ?? 0, prompt_cache_miss_tokens: usage.miss ?? 0 } } : {}),
         };
         return this.parseResponse(raw);
       },
@@ -199,7 +201,7 @@ export class OpenAICompatAdapter implements ChatVendorAdapter {
         };
         finish_reason?: string;
       }>;
-      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; prompt_cache_hit_tokens?: number; prompt_cache_miss_tokens?: number };
     };
     const choice = data.choices?.[0];
     const msg = choice?.message;
@@ -219,9 +221,14 @@ export class OpenAICompatAdapter implements ChatVendorAdapter {
       ...(thinking ? { thinking } : {}),
     };
 
-    // 提取 token 用量（OpenAI 协议: prompt_tokens/completion_tokens）
+    // 提取 token 用量（OpenAI 协议: prompt_tokens/completion_tokens；DeepSeek 等带前缀缓存命中统计）
     const usage = data.usage
-      ? { input: data.usage.prompt_tokens ?? 0, output: data.usage.completion_tokens ?? 0 }
+      ? {
+          input: data.usage.prompt_tokens ?? 0,
+          output: data.usage.completion_tokens ?? 0,
+          hit: data.usage.prompt_cache_hit_tokens ?? 0,
+          miss: data.usage.prompt_cache_miss_tokens ?? 0,
+        }
       : undefined;
 
     return {

@@ -90,6 +90,11 @@ export function duplicateSession(sourceId?: string): AiSession | null {
     updatedAt: Date.now(),
     messages: deepCopyMessages(source.messages),
     historyIndexes: source.historyIndexes ? { ...source.historyIndexes } : undefined,
+    // 用量统计深拷贝：副本独立累积，不共享引用
+    stats: source.stats ? { ...source.stats } : undefined,
+    lastRun: source.lastRun
+      ? { usage: source.lastRun.usage ? { ...source.lastRun.usage } : undefined, durationMs: source.lastRun.durationMs }
+      : undefined,
   };
   state.aiSessions.unshift(copy);
   trimSessions();

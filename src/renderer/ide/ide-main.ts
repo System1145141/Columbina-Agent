@@ -9,6 +9,7 @@ import { initFileTree } from "./components/file-tree";
 import { initCommandPalette } from "./components/command-palette";
 import { initAiPanel } from "./components/ai-panel";
 import { initSessionPanel } from "./components/session-panel";
+import { initOverviewPanel } from "./components/overview-panel";
 import { initTerminalPanel } from "./components/terminal-panel";
 import { initGitPanel } from "./components/git-panel";
 import { initProblemsPanel } from "./components/problems-panel";
@@ -72,6 +73,7 @@ function init(): void {
   initCommandPalette();
   initAiPanel();
   initSessionPanel();
+  initOverviewPanel();
   initTerminalPanel();
   initGitPanel();
   initProblemsPanel();

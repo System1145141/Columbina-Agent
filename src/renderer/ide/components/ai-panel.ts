@@ -175,6 +175,8 @@ function toggleSessionMenu(): void {
 let streamRaw = "";
 let streamReasoning = "";
 let activeStreamMsgId: string | null = null;
+/** 当前 run 发起时的会话 id（RUN_STARTED 记录）：统计按发起时归属，run 中切换/删除会话不串账 */
+let activeRunSessionId: string | null = null;
 let streamRowEl: HTMLElement | null = null;
 let streamBubbleEl: HTMLElement | null = null;
 let streamThinkingContentEl: HTMLElement | null = null;
@@ -186,6 +188,7 @@ function resetStream(): void {
   streamRaw = "";
   streamReasoning = "";
   activeStreamMsgId = null;
+  activeRunSessionId = null;
   streamRowEl = null;
   streamBubbleEl = null;
   streamThinkingContentEl = null;
@@ -401,10 +404,16 @@ function handleStreamEvent(rawEvent: unknown): void {
     toolCallId?: string;
     toolCallName?: string;
     content?: string;
+    usage?: { input: number; output: number; hit?: number; miss?: number };
+    durationMs?: number;
   };
   const isActive = Boolean(state.aiCurrentMessageId) && activeStreamMsgId === state.aiCurrentMessageId;
 
-  if (event.type === "TEXT_MESSAGE_CONTENT" && event.delta && isActive) {
+  // run 开始：记录发起时的会话 id（用量统计归属；防止 run 中切换会话串账）。
+  // 多轮重试（recall）是同一逻辑轮的连续 run，只取首轮快照；新消息的 run 在终态已清空快照
+  if (event.type === "RUN_STARTED") {
+    if (!activeRunSessionId) activeRunSessionId = state.activeAiSessionId;
+  } else if (event.type === "TEXT_MESSAGE_CONTENT" && event.delta && isActive) {
     streamRaw += event.delta;
     const clean = stripActions(stripRecallTags(streamRaw));
     if (streamBubbleEl) {
@@ -487,6 +496,23 @@ function handleStreamEvent(rawEvent: unknown): void {
   } else if (event.type === "RUN_FINISHED" || event.type === "RUN_ERROR") {
     // 终态：清理可能悬挂的确认卡片（主进程侧超时会自动拒绝并继续）
     resolveNativeToolConfirmation(false);
+    // 概览面板：RUN_FINISHED 携带本轮 usage（含缓存命中）与耗时，累计到发起时的会话
+    if (event.type === "RUN_FINISHED" && (event.usage || event.durationMs !== undefined) && activeRunSessionId) {
+      const session = state.aiSessions.find((s) => s.id === activeRunSessionId);
+      if (session) {
+        session.stats = session.stats ?? { requests: 0, durationMs: 0, input: 0, output: 0, hit: 0, miss: 0 };
+        session.stats.requests++;
+        session.stats.durationMs += event.durationMs ?? 0;
+        if (event.usage) {
+          session.stats.input += event.usage.input ?? 0;
+          session.stats.output += event.usage.output ?? 0;
+          session.stats.hit += event.usage.hit ?? 0;
+          session.stats.miss += event.usage.miss ?? 0;
+        }
+        session.lastRun = { usage: event.usage, durationMs: event.durationMs };
+        notify();
+      }
+    }
     resetStream();
   }
 }

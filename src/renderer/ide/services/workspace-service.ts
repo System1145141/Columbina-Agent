@@ -100,6 +100,8 @@ function collectWorkspaceState(): Record<string, unknown> {
       messages: s.messages.slice(-MAX_PERSISTED_AI_MESSAGES),
       // 消息截断后同步对齐索引 seq，防止 recall 召回错误轮次
       historyIndexes: alignHistoryIndexes(s.messages, s.messages.slice(-MAX_PERSISTED_AI_MESSAGES), s.historyIndexes),
+      stats: s.stats ? { ...s.stats } : undefined,
+      lastRun: s.lastRun ? { usage: s.lastRun.usage ? { ...s.lastRun.usage } : undefined, durationMs: s.lastRun.durationMs } : undefined,
     })),
     activeAiSessionId: state.activeAiSessionId,
     // 兼容旧版本 IDE 读取：仅保留当前会话消息
@@ -178,6 +180,8 @@ async function applyWorkspace(data: WorkspaceData, filePath?: string): Promise<v
         s.historyIndexes && typeof s.historyIndexes === "object" && (s.messages as AiMessage[]).length < MAX_PERSISTED_AI_MESSAGES
           ? s.historyIndexes
           : undefined,
+      stats: s.stats && typeof s.stats === "object" ? { ...s.stats } : undefined,
+      lastRun: s.lastRun && typeof s.lastRun === "object" ? { usage: s.lastRun.usage ? { ...s.lastRun.usage } : undefined, durationMs: s.lastRun.durationMs } : undefined,
     }));
     const activeId =
       typeof data.activeAiSessionId === "string" && state.aiSessions.some((s) => s.id === data.activeAiSessionId)

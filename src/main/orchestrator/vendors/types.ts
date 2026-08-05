@@ -110,7 +110,7 @@ export interface StreamChunk {
   /** 本轮结束原因（OpenAI choices[0].finish_reason / Anthropic message_delta stop_reason）。 */
   finishReason?: string;
   done?: boolean;
-  usage?: { input: number; output: number };
+  usage?: { input: number; output: number; hit?: number; miss?: number };
 }
 
 /**
@@ -134,8 +134,9 @@ export interface ChatResponse {
   finishReason: string;
   raw: unknown;
   /** API 返回的 token 用量（OpenAI: prompt_tokens/completion_tokens；Anthropic: input_tokens/output_tokens）。
-   *  未上报时为 undefined，由调用方兜底。 */
-  usage?: { input: number; output: number };
+   *  hit/miss 为缓存命中/未命中 tokens（DeepSeek prompt_cache_*、Anthropic cache_read/cache_creation），
+   *  供应商未上报时为 undefined，由调用方兜底。 */
+  usage?: { input: number; output: number; hit?: number; miss?: number };
 }
 
 export interface HttpRequest {

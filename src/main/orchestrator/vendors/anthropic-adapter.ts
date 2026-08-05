@@ -128,7 +128,7 @@ export class AnthropicAdapter implements ChatVendorAdapter {
     const data = raw as {
       content?: ContentBlock[];
       stop_reason?: string;
-      usage?: { input_tokens?: number; output_tokens?: number };
+      usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
     };
     const blocks = data.content ?? [];
     let text = "";
@@ -169,9 +169,14 @@ export class AnthropicAdapter implements ChatVendorAdapter {
       rawAssistant: blocks,
     };
 
-    // 提取 token 用量（Anthropic 协议: input_tokens/output_tokens）
+    // 提取 token 用量（Anthropic 协议: input_tokens/output_tokens；cache_read = 缓存命中）
     const usage = data.usage
-      ? { input: data.usage.input_tokens ?? 0, output: data.usage.output_tokens ?? 0 }
+      ? {
+          input: data.usage.input_tokens ?? 0,
+          output: data.usage.output_tokens ?? 0,
+          hit: data.usage.cache_read_input_tokens ?? 0,
+          miss: data.usage.cache_creation_input_tokens ?? 0,
+        }
       : undefined;
 
     return { assistantMessage, text, thinking, toolCalls, finishReason, raw, usage };
@@ -188,7 +193,7 @@ export class AnthropicAdapter implements ChatVendorAdapter {
       index?: number;
       content_block?: { type?: string; id?: string; name?: string };
       delta?: { type?: string; text?: string; thinking?: string; partial_json?: string; stop_reason?: string };
-      usage?: { input_tokens?: number; output_tokens?: number };
+      usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
     };
     try {
       parsed = JSON.parse(event.data);
@@ -228,6 +233,8 @@ export class AnthropicAdapter implements ChatVendorAdapter {
           chunk.usage = {
             input: parsed.usage.input_tokens ?? 0,
             output: parsed.usage.output_tokens ?? 0,
+            hit: parsed.usage.cache_read_input_tokens ?? 0,
+            miss: parsed.usage.cache_creation_input_tokens ?? 0,
           };
         }
         if (typeof parsed.delta?.stop_reason === "string" && parsed.delta.stop_reason) {
@@ -249,7 +256,7 @@ export class AnthropicAdapter implements ChatVendorAdapter {
     // index → 累积中的 tool_use（等待 input_json_delta 分片 + content_block_stop finalize）
     const pending = new Map<number, { id: string; name: string; json: string }>();
     let stopReason = "end_turn";
-    let usage: { input: number; output: number } | undefined;
+    let usage: { input: number; output: number; hit?: number; miss?: number } | undefined;
 
     const flushBlock = (index: number): void => {
       const st = pending.get(index);
@@ -304,7 +311,7 @@ export class AnthropicAdapter implements ChatVendorAdapter {
         const raw = {
           content: blocks,
           stop_reason: stopReason,
-          ...(usage ? { usage: { input_tokens: usage.input, output_tokens: usage.output } } : {}),
+          ...(usage ? { usage: { input_tokens: usage.input, output_tokens: usage.output, cache_read_input_tokens: usage.hit ?? 0, cache_creation_input_tokens: usage.miss ?? 0 } } : {}),
         };
         return this.parseResponse(raw);
       },

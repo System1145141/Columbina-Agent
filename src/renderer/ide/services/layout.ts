@@ -118,12 +118,14 @@ export function showSearchPanel(): void {
   state.gitPanelVisible = false;
   state.problemsVisible = false;
   state.outlineVisible = false;
+  state.overviewVisible = false;
   sidebarTitleEl.textContent = "搜索";
   treeRootEl.style.display = "none";
   searchPanelEl.style.display = "flex";
   gitPanelEl.style.display = "none";
   problemsPanelEl.style.display = "none";
   outlinePanelEl.style.display = "none";
+  overviewPanelEl.style.display = "none";
   document.getElementById("search-input")?.focus();
   notify();
 }
@@ -134,6 +136,7 @@ export function hideSearchPanel(): void {
   treeRootEl.style.display = "block";
   searchPanelEl.style.display = "none";
   gitPanelEl.style.display = "none";
+  overviewPanelEl.style.display = "none";
   notify();
 }
 
@@ -147,12 +150,14 @@ export function showProblemsPanel(): void {
   state.searchVisible = false;
   state.gitPanelVisible = false;
   state.outlineVisible = false;
+  state.overviewVisible = false;
   sidebarTitleEl.textContent = "问题";
   treeRootEl.style.display = "none";
   searchPanelEl.style.display = "none";
   gitPanelEl.style.display = "none";
   problemsPanelEl.style.display = "flex";
   outlinePanelEl.style.display = "none";
+  overviewPanelEl.style.display = "none";
   notify();
 }
 
@@ -161,6 +166,7 @@ export function hideProblemsPanel(): void {
   sidebarTitleEl.textContent = "资源管理器";
   treeRootEl.style.display = "block";
   searchPanelEl.style.display = "none";
+  overviewPanelEl.style.display = "none";
   gitPanelEl.style.display = "none";
   problemsPanelEl.style.display = "none";
   notify();
@@ -178,12 +184,14 @@ export function showOutlinePanel(): void {
   state.searchVisible = false;
   state.gitPanelVisible = false;
   state.problemsVisible = false;
+  state.overviewVisible = false;
   sidebarTitleEl.textContent = "大纲";
   treeRootEl.style.display = "none";
   searchPanelEl.style.display = "none";
   gitPanelEl.style.display = "none";
   problemsPanelEl.style.display = "none";
   outlinePanelEl.style.display = "flex";
+  overviewPanelEl.style.display = "none";
   notify();
 }
 
@@ -195,6 +203,7 @@ export function hideOutlinePanel(): void {
   gitPanelEl.style.display = "none";
   problemsPanelEl.style.display = "none";
   outlinePanelEl.style.display = "none";
+  overviewPanelEl.style.display = "none";
   notify();
 }
 
@@ -208,12 +217,14 @@ export function showGitPanel(): void {
   state.searchVisible = false;
   state.problemsVisible = false;
   state.outlineVisible = false;
+  state.overviewVisible = false;
   sidebarTitleEl.textContent = "源代码管理";
   treeRootEl.style.display = "none";
   searchPanelEl.style.display = "none";
   gitPanelEl.style.display = "flex";
   problemsPanelEl.style.display = "none";
   outlinePanelEl.style.display = "none";
+  overviewPanelEl.style.display = "none";
   notify();
 }
 
@@ -223,12 +234,48 @@ export function hideGitPanel(): void {
   treeRootEl.style.display = "block";
   searchPanelEl.style.display = "none";
   gitPanelEl.style.display = "none";
+  overviewPanelEl.style.display = "none";
   notify();
 }
 
 export function toggleGitPanel(): void {
   if (state.gitPanelVisible) hideGitPanel();
   else showGitPanel();
+}
+
+const overviewPanelEl = document.getElementById("overview-panel") as HTMLElement;
+
+export function showOverviewPanel(): void {
+  state.overviewVisible = true;
+  state.searchVisible = false;
+  state.gitPanelVisible = false;
+  state.problemsVisible = false;
+  state.outlineVisible = false;
+  sidebarTitleEl.textContent = "概览";
+  treeRootEl.style.display = "none";
+  searchPanelEl.style.display = "none";
+  gitPanelEl.style.display = "none";
+  problemsPanelEl.style.display = "none";
+  outlinePanelEl.style.display = "none";
+  overviewPanelEl.style.display = "flex";
+  notify();
+}
+
+export function hideOverviewPanel(): void {
+  state.overviewVisible = false;
+  sidebarTitleEl.textContent = "资源管理器";
+  treeRootEl.style.display = "block";
+  searchPanelEl.style.display = "none";
+  gitPanelEl.style.display = "none";
+  problemsPanelEl.style.display = "none";
+  outlinePanelEl.style.display = "none";
+  overviewPanelEl.style.display = "none";
+  notify();
+}
+
+export function toggleOverviewPanel(): void {
+  if (state.overviewVisible) hideOverviewPanel();
+  else showOverviewPanel();
 }
 
 export function showAiPanel(): void {

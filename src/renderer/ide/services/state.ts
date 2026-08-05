@@ -98,6 +98,22 @@ export interface AiMessage {
   error?: boolean;
 }
 
+/** AI 会话用量统计（概览面板数据源，随会话持久化） */
+export interface AiSessionStats {
+  requests: number;
+  durationMs: number;
+  input: number;
+  output: number;
+  hit: number;
+  miss: number;
+}
+
+/** 最近一轮 run 的用量快照（概览面板「本次」指标） */
+export interface AiLastRun {
+  usage?: { input: number; output: number; hit?: number; miss?: number };
+  durationMs?: number;
+}
+
 /** Agent 会话：一个可切换/复制/重命名的独立对话上下文 */
 export interface AiSession {
   id: string;
@@ -107,6 +123,10 @@ export interface AiSession {
   messages: AiMessage[];
   /** 会话历史轮次的 LLM 摘要索引（seq → 索引行）；无索引的轮次保留全文（最近 1-2 轮） */
   historyIndexes?: Record<number, string>;
+  /** 会话级 AI 用量统计（RUN_FINISHED 事件累积；旧会话无此字段显示 0） */
+  stats?: AiSessionStats;
+  /** 最近一轮 run 的用量快照（「本次命中 / 本次 tokens」） */
+  lastRun?: AiLastRun;
 }
 
 export interface AguiBaseEvent {
@@ -347,6 +367,8 @@ export const state = {
   searchVisible: false,
   problemsVisible: false,
   outlineVisible: false,
+  /** 概览面板（AI 用量统计）显隐 */
+  overviewVisible: false,
   commandPaletteVisible: false,
   commandItems: [] as CommandItem[],
   commandSelectedIndex: -1,
