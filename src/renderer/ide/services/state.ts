@@ -91,6 +91,8 @@ export interface AiMessage {
   toolName?: string;
   /** 本轮原生 tool-call 调用序列（TOOL_CALL_START/RESULT/END 事件流式累积） */
   toolCalls?: AiToolCall[];
+  /** 消息时间线片段（深度思考/工具调用按真实时序交替）；旧消息无此字段时回退 thinkingContent+toolCalls 渲染 */
+  segments?: AiStreamSegment[];
   /** 涉及文件标签（确认桥执行 write/edit/delete 等操作时记录，write/edit/delete 标记为已修改） */
   fileTags?: { name: string; modified: boolean }[];
   /** 测试文件写入成功后标记：AI 面板显示「运行测试」按钮（测试运行闭环） */
@@ -112,6 +114,20 @@ export interface AiSessionStats {
 export interface AiLastRun {
   usage?: { input: number; output: number; hit?: number; miss?: number };
   durationMs?: number;
+}
+
+/** 消息时间线中的一段：深度思考（reasoning）或工具调用（tool），按真实执行顺序交替存储 */
+export interface AiStreamSegment {
+  kind: "reasoning" | "tool";
+  /** reasoning 段：思维链文本（流式累积） */
+  text?: string;
+  /** 折叠块展开状态（默认最新一段展开；用户手动折叠后写回，重渲染不重置） */
+  open?: boolean;
+  /** tool 段：工具调用 id（与 TOOL_CALL 事件对齐） */
+  toolId?: string;
+  name?: string;
+  status?: "running" | "done" | "error";
+  resultPreview?: string;
 }
 
 /** Agent 会话：一个可切换/复制/重命名的独立对话上下文 */

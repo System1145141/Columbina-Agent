@@ -1,4 +1,4 @@
-import { state, subscribe, notify, type AiMessage, type AiToolCall } from "../services/state";
+import { state, subscribe, notify, type AiMessage, type AiToolCall, type AiStreamSegment } from "../services/state";
 import {
   runAgentTurn,
   runAgentPlan,
@@ -185,7 +185,6 @@ function clearActiveRunSnapshot(): void {
 let streamRowEl: HTMLElement | null = null;
 let streamBubbleEl: HTMLElement | null = null;
 let streamThinkingContentEl: HTMLElement | null = null;
-let streamToolCallsEl: HTMLElement | null = null;
 /** toolCallId → DOM 行，用于流式更新结果状态 */
 const streamToolEls = new Map<string, HTMLElement>();
 
@@ -197,7 +196,6 @@ function resetStream(): void {
   streamRowEl = null;
   streamBubbleEl = null;
   streamThinkingContentEl = null;
-  streamToolCallsEl = null;
   streamToolEls.clear();
 }
 
@@ -225,26 +223,34 @@ function findToolCallEl(id: string): HTMLElement | null {
   return el ?? streamToolEls.get(id) ?? null;
 }
 
-function ensureToolCallsContainer(): HTMLElement | null {
-  // 流式 DOM 可能被 renderAiMessages 整体重建：缓存容器若已脱离文档则复用行内已有容器或重建
-  if (streamToolCallsEl && streamToolCallsEl.isConnected) return streamToolCallsEl;
-  if (!streamRowEl) return null;
-  const existing = streamRowEl.querySelector(".ide__ai-toolcalls") as HTMLElement | null;
-  if (existing) {
-    streamToolCallsEl = existing;
-    return existing;
-  }
-  const container = document.createElement("div");
-  container.className = "ide__ai-toolcalls";
-  // 顺序与 renderAiMessages 一致：思维链折叠块 → 工具调用 → 正文。
-  // 正文气泡可能已在重渲染中先行创建（插到其前），否则追加到行尾。
+/** 流式段元素插入：所有时间线片段（思考块/工具行）都在正文气泡之前，新段插到段区末尾 */
+function insertSegmentEl(el: HTMLElement): void {
+  if (!streamRowEl) return;
   if (streamBubbleEl && streamBubbleEl.parentElement === streamRowEl) {
-    streamRowEl.insertBefore(container, streamBubbleEl);
+    streamRowEl.insertBefore(el, streamBubbleEl);
   } else {
-    streamRowEl.appendChild(container);
+    streamRowEl.appendChild(el);
   }
-  streamToolCallsEl = container;
-  return container;
+}
+
+/** 创建思考折叠块（data-seg + 展开状态 + toggle 写回 seg.open，流式/重渲染共用） */
+function createThinkingDetails(seg: { open?: boolean; text?: string }, segIdx: number): HTMLElement {
+  const details = document.createElement("details");
+  details.className = "ide__ai-thinking";
+  details.dataset.seg = String(segIdx);
+  if (seg.open) details.open = true;
+  const summary = document.createElement("summary");
+  summary.textContent = "深度思考";
+  details.appendChild(summary);
+  const content = document.createElement("div");
+  content.className = "ide__ai-thinking-content";
+  content.textContent = seg.text || "";
+  details.appendChild(content);
+  // 用户折叠/展开状态持久化到段（重渲染不重置）
+  details.addEventListener("toggle", () => {
+    seg.open = details.open;
+  });
+  return details;
 }
 
 function scrollMessagesToBottom(): void {
@@ -431,6 +437,29 @@ function handleStreamEvent(rawEvent: unknown): void {
     // 若 msg.content 不随 delta 更新，重建后正文会短暂空白
     const msg = state.aiMessages.find((m) => m.id === activeStreamMsgId);
     if (msg) msg.content = clean;
+  } else if (event.type === "REASONING_MESSAGE_START" && isActive) {
+    // 新一轮思考开始：开新时间线段（折叠块），最新块展开、旧块收起
+    const msg = state.aiMessages.find((m) => m.id === activeStreamMsgId);
+    if (!msg) return;
+    msg.segments = msg.segments || [];
+    const seg: AiStreamSegment = { kind: "reasoning", text: "", open: true };
+    msg.segments.push(seg);
+    streamReasoning = "";
+    const segIdx = msg.segments.length - 1;
+    const details = createThinkingDetails(seg, segIdx);
+    const content = details.querySelector(".ide__ai-thinking-content") as HTMLElement;
+    streamThinkingContentEl = content;
+    // 收起此前展开的思考块（最新思考块展开策略），并同步段的 open 状态
+    if (streamRowEl) {
+      streamRowEl.querySelectorAll(".ide__ai-thinking[open]").forEach((el) => {
+        el.removeAttribute("open");
+        const idx = Number((el as HTMLElement).dataset.seg);
+        const prev = msg.segments?.[idx];
+        if (prev && prev.kind === "reasoning") prev.open = false;
+      });
+    }
+    insertSegmentEl(details);
+    scrollMessagesToBottom();
   } else if (
     (event.type === "REASONING_MESSAGE_CONTENT" ||
       event.type === "REASONING_MESSAGE_CHUNK" ||
@@ -439,29 +468,39 @@ function handleStreamEvent(rawEvent: unknown): void {
     isActive
   ) {
     streamReasoning += event.delta;
-    // 首个思维链片段到达时创建折叠块；重渲染（notify 重建 DOM）后旧元素已脱离文档，
-    // 需重建（与 ensureToolCallsContainer 同样幂等处理），否则思维链块永久消失
-    if ((!streamThinkingContentEl || !streamThinkingContentEl.isConnected) && streamRowEl) {
-      const existing = streamRowEl.querySelector(".ide__ai-thinking-content") as HTMLElement | null;
-      if (existing) {
-        streamThinkingContentEl = existing;
+    // 时间线段：追加到最后一个 reasoning 段（防御：START 未到达时自动补段）
+    const msg = state.aiMessages.find((m) => m.id === activeStreamMsgId);
+    if (msg) {
+      const last = msg.segments?.[msg.segments.length - 1];
+      if (last && last.kind === "reasoning") {
+        last.text = (last.text || "") + event.delta;
       } else {
-        const details = document.createElement("details");
-        details.className = "ide__ai-thinking";
-        const summary = document.createElement("summary");
-        summary.textContent = "深度思考";
-        details.appendChild(summary);
-        const content = document.createElement("div");
-        content.className = "ide__ai-thinking-content";
-        details.appendChild(content);
-        streamThinkingContentEl = content;
-        streamRowEl.insertBefore(details, streamRowEl.firstChild);
+        msg.segments = msg.segments || [];
+        msg.segments.push({ kind: "reasoning", text: event.delta, open: true });
+      }
+      msg.thinkingContent = streamReasoning; // 旧字段兼容同步
+    }
+    // DOM：当前段元素；重渲染（notify 重建 DOM）后按 data-seg 重新定位，找不到时重建块
+    const segIdx = msg?.segments ? msg.segments.length - 1 : 0;
+    if ((!streamThinkingContentEl || !streamThinkingContentEl.isConnected) && streamRowEl) {
+      const block = streamRowEl.querySelector(
+        `.ide__ai-thinking[data-seg="${segIdx}"] .ide__ai-thinking-content`,
+      ) as HTMLElement | null;
+      if (block) {
+        streamThinkingContentEl = block;
+      } else {
+        // 兜底：START 与首个 CONTENT 之间发生重渲染（空思考段被渲染跳过）→ 重建块
+        const lastSeg = msg?.segments?.[msg.segments.length - 1];
+        if (lastSeg && lastSeg.kind === "reasoning") {
+          const details = createThinkingDetails(lastSeg, segIdx);
+          const content = details.querySelector(".ide__ai-thinking-content") as HTMLElement;
+          streamThinkingContentEl = content;
+          insertSegmentEl(details);
+        }
       }
     }
     if (streamThinkingContentEl) {
       streamThinkingContentEl.textContent = streamReasoning;
-      const msg = state.aiMessages.find((m) => m.id === activeStreamMsgId);
-      if (msg) msg.thinkingContent = streamReasoning;
       scrollMessagesToBottom();
     }
   } else if (event.type === "TOOL_CALL_START" && isActive) {
@@ -473,13 +512,14 @@ function handleStreamEvent(rawEvent: unknown): void {
     const call: AiToolCall = { id, name: String(event.toolCallName ?? ""), status: "running" };
     msg.toolCalls = msg.toolCalls || [];
     msg.toolCalls.push(call);
-    const container = ensureToolCallsContainer();
-    if (container) {
-      const el = createToolCallEl(call);
-      container.appendChild(el);
-      streamToolEls.set(id, el);
-      scrollMessagesToBottom();
-    }
+    // 时间线段：工具调用（与思考段交替，按真实时序）
+    msg.segments = msg.segments || [];
+    msg.segments.push({ kind: "tool", toolId: id, name: call.name, status: "running" });
+    const el = createToolCallEl(call);
+    el.dataset.seg = String(msg.segments.length - 1);
+    insertSegmentEl(el);
+    streamToolEls.set(id, el);
+    scrollMessagesToBottom();
   } else if (event.type === "TOOL_CALL_RESULT" && isActive) {
     const id = String(event.toolCallId ?? "");
     const msg = state.aiMessages.find((m) => m.id === activeStreamMsgId);
@@ -488,6 +528,12 @@ function handleStreamEvent(rawEvent: unknown): void {
     const output = typeof event.content === "string" ? event.content : "";
     call.status = output.startsWith("[错误]") || output.startsWith("[已拒绝]") ? "error" : "done";
     call.resultPreview = output.slice(0, 120) || undefined;
+    // 同步时间线段状态
+    const seg = msg?.segments?.find((s) => s.kind === "tool" && s.toolId === id);
+    if (seg) {
+      seg.status = call.status;
+      seg.resultPreview = call.resultPreview;
+    }
     const el = findToolCallEl(id);
     if (el) {
       el.className = "ide__ai-toolcall" + (call.status === "error" ? " is-error" : " is-done");
@@ -555,28 +601,48 @@ function renderAiMessages() {
       streamRowEl = row;
     }
 
-    // 深度思考（可折叠）：流式中首个 reasoning 到达时创建；非流式按已存内容
-    if (!isStreaming && msg.thinkingContent && msg.thinkingContent.trim()) {
-      const details = document.createElement("details");
-      details.className = "ide__ai-thinking";
-      const summary = document.createElement("summary");
-      summary.textContent = "深度思考";
-      details.appendChild(summary);
-      const content = document.createElement("div");
-      content.className = "ide__ai-thinking-content";
-      content.textContent = msg.thinkingContent;
-      details.appendChild(content);
-      row.appendChild(details);
-    }
-
-    // 原生 tool-call 调用记录（read/search/list 等只读操作，主进程自动执行；写操作经确认桥）
-    if (msg.toolCalls && msg.toolCalls.length > 0) {
-      const callsEl = document.createElement("div");
-      callsEl.className = "ide__ai-toolcalls";
-      for (const tc of msg.toolCalls) {
-        callsEl.appendChild(createToolCallEl(tc));
+    // 消息时间线片段（深度思考/工具调用按真实时序交替）——新消息主路径
+    if (msg.segments && msg.segments.length > 0) {
+      msg.segments.forEach((seg, i) => {
+        if (seg.kind === "reasoning") {
+          if (!seg.text?.trim()) return;
+          const details = createThinkingDetails(seg, i);
+          row.appendChild(details);
+        } else if (seg.kind === "tool" && seg.toolId) {
+          const el = createToolCallEl({
+            id: seg.toolId,
+            name: seg.name || "tool",
+            status: seg.status || "done",
+            resultPreview: seg.resultPreview,
+          });
+          el.dataset.seg = String(i);
+          row.appendChild(el);
+        }
+      });
+    } else {
+      // 旧消息回退：合并思考块 + 工具容器（无 segments 字段）
+      if (!isStreaming && msg.thinkingContent && msg.thinkingContent.trim()) {
+        const details = document.createElement("details");
+        details.className = "ide__ai-thinking";
+        const summary = document.createElement("summary");
+        summary.textContent = "深度思考";
+        details.appendChild(summary);
+        const content = document.createElement("div");
+        content.className = "ide__ai-thinking-content";
+        content.textContent = msg.thinkingContent;
+        details.appendChild(content);
+        row.appendChild(details);
       }
-      row.appendChild(callsEl);
+
+      // 原生 tool-call 调用记录（read/search/list 等只读操作，主进程自动执行；写操作经确认桥）
+      if (msg.toolCalls && msg.toolCalls.length > 0) {
+        const callsEl = document.createElement("div");
+        callsEl.className = "ide__ai-toolcalls";
+        for (const tc of msg.toolCalls) {
+          callsEl.appendChild(createToolCallEl(tc));
+        }
+        row.appendChild(callsEl);
+      }
     }
 
     // 涉及文件标签

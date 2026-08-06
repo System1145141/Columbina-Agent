@@ -2671,6 +2671,11 @@ html, body, .ide {
   overflow: hidden;
 }
 
+/* segments 时间线模式：工具行作为消息行直接子级（与思考块交替），行间留间距 */
+.ide__ai-toolcall[data-seg] {
+  margin: 2px 0;
+}
+
 .ide__ai-toolcall.is-running {
   color: #a5c8ff;
 }
