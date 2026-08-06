@@ -22,6 +22,7 @@
 // 这些全部塞到 BuildOptionsDeps 里。dispatcher 在 Phase 1 注入同样的 deps 即可。
 import type { ColumbinaRunOptions, ColumbinaRunResult } from "./columbina-agent";
 import type { ToolDefinition } from "./tool-registry";
+import { buildIdeTools, buildIdeReadOnlyTools } from "./ide-tools";
 import type { ChatMessage } from "./vendors/types";
 import type { AguiRunInput } from "../agui-bridge";
 import { IPC } from "../../shared/ipc-channels";
@@ -269,7 +270,19 @@ export async function buildAgentRunOptions(
       },
       messages: fcMessages,
       timeoutMs: deps.chatRequestTimeoutMs,
-      ...(isTalkMode ? { tools: [] as ToolDefinition[] } : {}),
+      // talk 模式无工具（纯聊天）；noTools 显式要求不注入任何工具（幽灵补全/摘要等后台 run）；
+      // IDE 模式注入原生工具集：confirmed=false 时仅只读工具（自动执行，无确认卡片）；
+      // 其余模式（桌面聊天等）不传 tools，回退到全局工具注册表。
+      ...(isTalkMode || input.noTools
+        ? { tools: [] as ToolDefinition[] }
+        : input.ideTools
+          ? {
+              tools:
+                input.ideTools.confirmed === false
+                  ? buildIdeReadOnlyTools(input.ideTools.roots ?? [])
+                  : buildIdeTools(input.ideTools.roots ?? []),
+            }
+          : {}),
     },
     latestUserText,
   };

@@ -57,7 +57,7 @@ import { synthesize as customCloudSynthesize } from "./tts/custom-cloud-engine";
 import { synthesize as mimoSynthesize } from "./tts/mimo-engine";
 import { synthesizeByEngine } from "./tts/tts-dispatcher";
 import { startOpener, stopOpener, setLive2dWindow, reloadManifest, handleBubbleClick, handleChatWindowOpened, testFire } from "./opener/opener-runner";
-import { registerAgUiIpc, type AguiRunInput } from "./agui-bridge";
+import { registerAgUiIpc, cancelRunsForWindow, type AguiRunInput } from "./agui-bridge";
 import { setWeatherConfig, setSearchConfig, loadTodos, onTodosChange, setKuuhenkiSettings } from "./orchestrator/built-in-tools";
 import { registerRecallHistoryTool } from "./orchestrator/history-tools";
 import { registerDocumentTools } from "./orchestrator/document-tools";
@@ -2483,7 +2483,10 @@ function createWindow(): void {
     return { provider: s.provider, baseUrl: s.baseUrl, model: s.model, apiKey: s.apiKey };
   });
 
+  const mainWc = mainWindow.webContents;
   mainWindow.on("closed", () => {
+    // 窗口关闭时取消该窗口发起的 AG-UI run，防止继续消耗 token
+    cancelRunsForWindow(mainWc);
     mainWindow = null;
   });
 }
@@ -2596,7 +2599,10 @@ function createIdeWindow(): void {
     ideWindow?.show();
   });
 
+  const ideWc = ideWindow.webContents;
   ideWindow.on("closed", () => {
+    // 窗口关闭时取消该窗口发起的 AG-UI run（含悬挂的工具确认卡），防止残留 run 消耗 token
+    cancelRunsForWindow(ideWc);
     cleanupIdeSubprocesses();
     ideWindow = null;
   });
@@ -3204,7 +3210,7 @@ ipcMain.handle(IPC.IDE_MOVE, async (_event, sourcePath: unknown, targetDir: unkn
   }
 });
 
-setupLspIpc();
+setupLspIpc((p: string) => isPathWithinWorkspace(p));
 setupGitIpc();
 
 ipcMain.handle(IPC.IDE_GET_MEMORY_CONTEXT, async (_event, query: unknown) => {
@@ -3527,6 +3533,10 @@ function searchInDirectory(
 
 ipcMain.handle(IPC.IDE_SEARCH_FILES, async (_event, folderPath: unknown, query: unknown, options: unknown) => {
   if (typeof folderPath !== "string" || typeof query !== "string" || query.length === 0) return [];
+  if (!isPathWithinWorkspace(folderPath)) {
+    console.error("[Columbina IDE] searchFiles blocked: folder outside workspace");
+    return [];
+  }
   const opts = typeof options === "object" && options !== null ? (options as Record<string, unknown>) : {};
   const caseSensitive = opts.caseSensitive === true;
   const wholeWord = opts.wholeWord === true;
@@ -3600,6 +3610,10 @@ function listFilesMatching(dirPath: string, regex: RegExp, baseRel: string, out:
 
 ipcMain.handle(IPC.IDE_LIST_FILES, async (_event, rootPath: unknown, pattern: unknown) => {
   if (typeof rootPath !== "string" || typeof pattern !== "string" || pattern.length === 0) return [];
+  if (!isPathWithinWorkspace(rootPath)) {
+    console.error("[Columbina IDE] listFiles blocked: folder outside workspace");
+    return [];
+  }
   let regex: RegExp;
   try {
     regex = globToRegex(pattern);
@@ -3693,20 +3707,56 @@ function normalizePathSeparator(p: string): string {
   return p.replace(/\\/g, "/");
 }
 
-function isPathWithinWorkspace(targetPath: string): boolean {
-  if (ideWorkspaceRoots.size === 0) {
-    // 工作区为空时不强制限制（兼容老配置加载流程）
-    return true;
-  }
-  const resolved = path.resolve(targetPath);
-  const normalized = normalizePathSeparator(resolved);
-  for (const root of ideWorkspaceRoots) {
-    const normalizedRoot = normalizePathSeparator(path.resolve(root));
-    if (normalized === normalizedRoot || normalized.startsWith(normalizedRoot + "/")) {
-      return true;
+/**
+ * 解析路径的真实路径用于 symlink 逃逸防护：文件不存在时逐级向上找最近存在的祖先
+ * 做 realpath，再拼回剩余部分（覆盖"写入尚不存在的新文件"场景）。解析失败返回 null。
+ */
+function safeRealpath(p: string): string | null {
+  let cur = p;
+  const suffix: string[] = [];
+  for (let i = 0; i < 128; i++) {
+    try {
+      return path.join(fs.realpathSync(cur), ...suffix);
+    } catch {
+      const parent = path.dirname(cur);
+      if (parent === cur) return null;
+      suffix.unshift(path.basename(cur));
+      cur = parent;
     }
   }
-  return false;
+  return null;
+}
+
+function isPathWithinWorkspace(targetPath: string): boolean {
+  if (ideWorkspaceRoots.size === 0) {
+    // 没有打开任何工作区时拒绝所有路径操作（安全默认：不放行）
+    return false;
+  }
+  // roots 的两种形式：原始路径（用户所选，可能本身是 symlink）与其真实路径
+  const rootsResolved = Array.from(ideWorkspaceRoots).map((r) => path.resolve(r));
+  const rootsReal = rootsResolved.map((r) => {
+    try {
+      return fs.realpathSync(r);
+    } catch {
+      return r;
+    }
+  });
+  const resolved = path.resolve(targetPath);
+  const normalized = normalizePathSeparator(resolved);
+  // 1) 字符串前缀校验用原始 roots：root 本身是 symlink 时，用户路径前缀就是 symlink 路径
+  const rootHit = rootsResolved.some((root) => {
+    const normalizedRoot = normalizePathSeparator(root);
+    return normalized === normalizedRoot || normalized.startsWith(normalizedRoot + "/");
+  });
+  if (!rootHit) return false;
+  // 2) 真实路径校验：拒绝符号链接指向工作区外的逃逸
+  const real = safeRealpath(resolved);
+  if (real === null) return true; // 路径不存在且无法解析祖先：字符串校验已通过，交给后续 IO 报错
+  const normalizedReal = normalizePathSeparator(real);
+  return rootsReal.some((root) => {
+    const normalizedRoot = normalizePathSeparator(root);
+    return normalizedReal === normalizedRoot || normalizedReal.startsWith(normalizedRoot + "/");
+  });
 }
 
 function getDefaultShell(): string {
@@ -3728,7 +3778,14 @@ function sendTerminalExit(id: string, exitCode?: number) {
 
 ipcMain.handle(IPC.IDE_TERMINAL_CREATE, async (_event, cwd: unknown) => {
   const shell = getDefaultShell();
-  const workDir = typeof cwd === "string" && cwd.length > 0 ? cwd : process.cwd();
+  // cwd 必须位于工作区内，否则回退到第一个工作区根目录（防止在任意目录启动 shell）
+  const firstRoot = ideWorkspaceRoots.size > 0 ? Array.from(ideWorkspaceRoots)[0] : "";
+  let workDir = process.cwd();
+  if (typeof cwd === "string" && cwd.length > 0) {
+    workDir = isPathWithinWorkspace(cwd) ? cwd : firstRoot || workDir;
+  } else if (firstRoot) {
+    workDir = firstRoot;
+  }
   const id = `term-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
     const term = pty.spawn(shell, [], {

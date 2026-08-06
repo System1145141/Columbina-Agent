@@ -58,6 +58,11 @@ export interface IdeSettings {
   languageServers?: Record<string, LanguageServerConfig>;
   /** Agent 人格身份：columbina（哥伦比娅）/ sandrone（桑多涅） */
   agentIdentity?: "columbina" | "sandrone";
+  /**
+   * AI 工作模式：assist（辅助，写操作逐条确认）/ solo（Solo，文件写自动执行，高危仍确认）/
+   * solo+（全自动，一切写操作与命令自动执行）。纯 vibe coding 模式，靠撤销栈与停止按钮兜底。
+   */
+  aiMode?: "assist" | "solo" | "solo+";
 }
 
 export interface WorkspaceRoot {
@@ -67,15 +72,46 @@ export interface WorkspaceRoot {
   missing?: boolean;
 }
 
+/** 原生 tool-call（function calling）的调用记录：主进程自动执行，渲染层流式展示 */
+export interface AiToolCall {
+  id: string;
+  name: string;
+  status: "running" | "done" | "error";
+  /** 结果摘要（截断后的工具输出预览，持久化时控制体积） */
+  resultPreview?: string;
+}
+
 export interface AiMessage {
   id: string;
   role: "user" | "model";
   content: string;
   thinking?: boolean;
+  /** 思维链内容（REASONING 事件流式累积；模型不返回 reasoning 时为空） */
+  thinkingContent?: string;
   toolName?: string;
+  /** 本轮原生 tool-call 调用序列（TOOL_CALL_START/RESULT/END 事件流式累积） */
+  toolCalls?: AiToolCall[];
+  /** 涉及文件标签（确认桥执行 write/edit/delete 等操作时记录，write/edit/delete 标记为已修改） */
+  fileTags?: { name: string; modified: boolean }[];
+  /** 测试文件写入成功后标记：AI 面板显示「运行测试」按钮（测试运行闭环） */
+  runTestTarget?: { filePath: string; name: string; status?: string };
   error?: boolean;
-  actions?: AgentAction[];
-  actionResults?: AgentActionResult[];
+}
+
+/** AI 会话用量统计（概览面板数据源，随会话持久化） */
+export interface AiSessionStats {
+  requests: number;
+  durationMs: number;
+  input: number;
+  output: number;
+  hit: number;
+  miss: number;
+}
+
+/** 最近一轮 run 的用量快照（概览面板「本次」指标） */
+export interface AiLastRun {
+  usage?: { input: number; output: number; hit?: number; miss?: number };
+  durationMs?: number;
 }
 
 /** Agent 会话：一个可切换/复制/重命名的独立对话上下文 */
@@ -85,6 +121,12 @@ export interface AiSession {
   createdAt: number;
   updatedAt: number;
   messages: AiMessage[];
+  /** 会话历史轮次的 LLM 摘要索引（seq → 索引行）；无索引的轮次保留全文（最近 1-2 轮） */
+  historyIndexes?: Record<number, string>;
+  /** 会话级 AI 用量统计（RUN_FINISHED 事件累积；旧会话无此字段显示 0） */
+  stats?: AiSessionStats;
+  /** 最近一轮 run 的用量快照（「本次命中 / 本次 tokens」） */
+  lastRun?: AiLastRun;
 }
 
 export interface AguiBaseEvent {
@@ -138,6 +180,8 @@ export interface AgentAction {
   pluginParams?: Record<string, unknown>;
   confirmed?: boolean;
   rejected?: boolean;
+  /** 原生 tool-call 确认桥已把关（跳过执行函数内部的二次确认弹窗） */
+  agentConfirmed?: boolean;
 }
 
 export interface AgentActionResult {
@@ -151,6 +195,8 @@ export interface FileSnapshot {
   filePath: string;
   content: string;
   lineEnding: Tab["lineEnding"];
+  /** 创建快照时的活跃 AI 会话 id：撤销结果消息应写入该会话，而非当前会话 */
+  sessionId?: string;
 }
 
 /** 一次跨文件重构（如符号重命名）的整体撤销快照组 */
@@ -199,6 +245,12 @@ export interface GitStatus {
   untracked: string[];
   conflicted: string[];
   clean: boolean;
+}
+
+/** 变更指纹：staged+modified+untracked+conflicted 文件列表排序拼接，用于提交前审查提醒比对 */
+export function gitChangeFingerprint(status: GitStatus | null): string {
+  if (!status) return "";
+  return [...status.staged, ...status.modified, ...status.untracked, ...status.conflicted].sort().join("|");
 }
 
 export interface GitBranchInfo {
@@ -310,12 +362,13 @@ export const state = {
     loading: false,
     filePath: "",
   } as InlineCompletion,
-  pendingActionResolve: null as ((value: boolean) => void) | null,
   projectIndex: [] as ProjectIndexEntry[],
 
   searchVisible: false,
   problemsVisible: false,
   outlineVisible: false,
+  /** 概览面板（AI 用量统计）显隐 */
+  overviewVisible: false,
   commandPaletteVisible: false,
   commandItems: [] as CommandItem[],
   commandSelectedIndex: -1,
@@ -339,6 +392,8 @@ export const state = {
   lspStatusMessage: "" as string,
 
   gitStatusByRoot: {} as Record<string, GitStatus>,
+  /** 提交前审查提醒：rootId → 最近一次 AI 审查时的变更指纹；提交时比对指纹 */
+  gitReviewed: {} as Record<string, { fingerprint: string }>,
   gitPanelVisible: false,
   gitSelectedFileByRoot: {} as Record<string, { path: string; staged: boolean }>,
   gitDiffByRoot: {} as Record<string, string>,
@@ -678,6 +733,8 @@ declare global {
       readFileEncoded: (filePath: string) => Promise<{ content: string; encoding: string }>;
       readFileChunk: (filePath: string, offset: number, length: number) => Promise<{ content: string; totalSize: number; isEnd: boolean }>;
       writeFile: (filePath: string, content: string, encoding?: string) => Promise<{ ok: boolean; error?: string }>;
+      onAgentToolConfirm: (callback: (payload: { requestId: string; toolId: string; toolName: string; toolCallId?: string; args: Record<string, unknown> }) => void) => () => void;
+      agentToolConfirmResult: (payload: { requestId: string; allowed: boolean; result?: { ok: boolean; output?: string; error?: string } }) => Promise<{ ok: boolean }>;
       watchFile: (filePath: string) => Promise<void>;
       unwatchFile: (filePath: string) => void;
       onFileChanged: (callback: (payload: { filePath: string; deleted: boolean }) => void) => () => void;
@@ -748,6 +805,8 @@ declare global {
         identityId?: string;
         modelId?: string;
         attachments?: { name: string; text: string }[];
+        ideTools?: { roots: string[]; confirmed?: boolean };
+        noTools?: boolean;
       }) => Promise<{ success: boolean; error?: string }>;
       onEvent: (callback: (event: unknown) => void) => () => void;
       cancel: () => Promise<boolean>;

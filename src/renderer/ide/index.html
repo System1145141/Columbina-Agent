@@ -27,11 +27,24 @@
       </div>
     </header>
     <div class="ide__workspace">
+      <aside class="ide__solo-sessions" id="solo-session-panel" style="display: none;">
+        <div class="ide__solo-sessions-header">
+          <span>会话</span>
+          <div class="ide__solo-sessions-actions">
+            <button type="button" class="ide__solo-sessions-action" id="solo-session-new" title="新建会话">＋</button>
+            <button type="button" class="ide__solo-sessions-action" id="solo-session-copy" title="复制当前会话">⧉</button>
+            <button type="button" class="ide__solo-sessions-action" id="solo-session-rename" title="重命名当前会话">✎</button>
+            <button type="button" class="ide__solo-sessions-action" id="solo-session-clear" title="清空当前会话消息">🗑</button>
+          </div>
+        </div>
+        <div class="ide__solo-sessions-list" id="solo-session-list"></div>
+      </aside>
       <aside class="ide__sidebar" id="file-tree">
         <div class="ide__sidebar-header">
           <span class="ide__sidebar-title" id="sidebar-title">资源管理器</span>
           <div class="ide__sidebar-actions">
             <button type="button" class="ide__sidebar-action" id="search-toggle-btn" title="在文件夹中搜索 (Ctrl+Shift+F)">🔍</button>
+            <button type="button" class="ide__sidebar-action" id="overview-toggle-btn" title="AI 用量概览">📊</button>
             <button type="button" class="ide__sidebar-action" id="problems-toggle-btn" title="问题面板 (Ctrl+Shift+M)">⚠</button>
             <button type="button" class="ide__sidebar-action" id="outline-toggle-btn" title="大纲 (Ctrl+Shift+O)">☰</button>
             <button type="button" class="ide__sidebar-action" id="git-toggle-btn" title="源代码管理">🌿</button>
@@ -92,6 +105,13 @@
           </div>
         </div>
         <div class="ide__tree" id="tree-root"></div>
+        <div class="ide__overview" id="overview-panel" style="display: none;">
+          <div class="ide__overview-header">
+            <span>概览</span>
+            <span class="ide__overview-hint" id="overview-hint" title="当前 AI 会话的用量统计">会话指标</span>
+          </div>
+          <div class="ide__overview-body" id="overview-body"></div>
+        </div>
       </aside>
       <main class="ide__main">
         <div class="ide__tabbar" id="tab-bar"></div>
@@ -111,6 +131,13 @@
         <div class="ide__ai-header">
           <span>Columbina AI</span>
           <div class="ide__ai-header-actions">
+            <label class="ide__ai-mode-wrap" title="AI 工作模式：辅助（写操作逐条确认）/ Solo（文件写自动、高危仍确认）/ Solo+（全自动）">
+              <select id="ai-mode-select" class="ide__ai-mode-select">
+                <option value="assist">辅助</option>
+                <option value="solo">⚡Solo</option>
+                <option value="solo+">⚡Solo+</option>
+              </select>
+            </label>
             <button type="button" class="ide__ai-header-btn" id="ai-session-btn" title="会话管理（切换 / 新建 / 复制 / 重命名 / 删除）">▾ 会话</button>
             <button type="button" class="ide__ai-header-btn" id="ai-undo-btn" title="撤销上次修改" disabled>撤销</button>
             <button type="button" class="ide__ai-close" id="ai-close-btn" aria-label="关闭 AI 面板">×</button>
@@ -136,6 +163,7 @@
           <div class="ide__ai-input-row">
             <textarea id="ai-input" class="ide__ai-input" placeholder="询问关于代码的问题..." rows="2"></textarea>
             <button type="button" class="ide__ai-send" id="ai-send-btn">发送</button>
+            <button type="button" class="ide__ai-send ide__ai-stop" id="ai-stop-btn" title="停止当前 Agent 运行" style="display: none;">停止</button>
           </div>
         </div>
       </aside>

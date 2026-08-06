@@ -89,6 +89,12 @@ export function duplicateSession(sourceId?: string): AiSession | null {
     createdAt: Date.now(),
     updatedAt: Date.now(),
     messages: deepCopyMessages(source.messages),
+    historyIndexes: source.historyIndexes ? { ...source.historyIndexes } : undefined,
+    // 用量统计深拷贝：副本独立累积，不共享引用
+    stats: source.stats ? { ...source.stats } : undefined,
+    lastRun: source.lastRun
+      ? { usage: source.lastRun.usage ? { ...source.lastRun.usage } : undefined, durationMs: source.lastRun.durationMs }
+      : undefined,
   };
   state.aiSessions.unshift(copy);
   trimSessions();
@@ -99,8 +105,8 @@ export function duplicateSession(sourceId?: string): AiSession | null {
 function deepCopyMessages(messages: AiMessage[]): AiMessage[] {
   return messages.map((m) => ({
     ...m,
-    actions: m.actions ? m.actions.map((a) => ({ ...a })) : undefined,
-    actionResults: m.actionResults ? m.actionResults.map((r) => ({ ...r })) : undefined,
+    // fileTags 数组需深拷贝，避免复制会话后两会话共享同一数组
+    fileTags: m.fileTags ? m.fileTags.map((t) => ({ ...t })) : undefined,
   }));
 }
 
@@ -112,7 +118,6 @@ export function switchToSession(sessionId: string): boolean {
   state.aiMessages = session.messages;
   state.aiCurrentPlan = null;
   state.aiTaskPlanRunning = false;
-  state.pendingActionResolve = null;
   notify();
   return true;
 }
@@ -140,7 +145,6 @@ export function deleteSession(sessionId: string): void {
       state.aiMessages = [];
       state.aiCurrentPlan = null;
       state.aiTaskPlanRunning = false;
-      state.pendingActionResolve = null;
       notify();
     }
   } else {
@@ -151,11 +155,13 @@ export function deleteSession(sessionId: string): void {
 /** 清空当前会话消息（会话本身保留） */
 export function clearActiveSession(): void {
   const session = getActiveSession();
-  if (session) session.messages = [];
+  if (session) {
+    session.messages = [];
+    delete session.historyIndexes;
+  }
   state.aiMessages = [];
   state.aiCurrentPlan = null;
   state.aiTaskPlanRunning = false;
-  state.pendingActionResolve = null;
   notify();
 }
 

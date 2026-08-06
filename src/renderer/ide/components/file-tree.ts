@@ -23,6 +23,7 @@ import {
   detectLineEnding,
 } from "../services/file-service";
 import { showSearchPanel, toggleSearchPanel, hideSearchPanel } from "../services/layout";
+import { appendToAiInput, formatConversationBlock } from "../services/ai-context";
 import { relocateRoot, closeTabsForRoot } from "../services/workspace-service";
 import { openTerminalInDir } from "./terminal-panel";
 
@@ -117,6 +118,8 @@ function showTreeContextMenu(x: number, y: number, entry: IdeDirEntry) {
       items.push({ label: "新建文件", action: () => void promptCreate(entry.path, "file") });
       items.push({ label: "新建文件夹", action: () => void promptCreate(entry.path, "dir") });
       items.push({ label: "在集成终端中打开", action: () => void openTerminalInDir(entry.path) });
+    } else {
+      items.push({ label: "添加到对话（整个文件）", action: () => void addFileEntryToConversation(entry.path) });
     }
     items.push({ label: "重命名", action: () => void promptRename(entry) });
     items.push({ label: "移动到…", action: () => void promptMove(entry) });
@@ -159,6 +162,19 @@ function hideTreeContextMenu() {
   if (treeContextMenu) {
     treeContextMenu.remove();
     treeContextMenu = null;
+  }
+}
+
+/** 把文件树的某个文件（完整内容，按原编码读取）添加到对话 */
+async function addFileEntryToConversation(filePath: string): Promise<void> {
+  try {
+    const raw = await readFileEncoded(filePath);
+    const content = normalizeLineEndings(raw.content);
+    const ext = filePath.split(".").pop() || "";
+    appendToAiInput(formatConversationBlock(`整个文件: ${filePath}`, content, ext));
+  } catch (err) {
+    state.statusMessage = `读取文件失败: ${String(err)}`;
+    notify();
   }
 }
 

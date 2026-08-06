@@ -488,6 +488,7 @@ export async function applyRefactorChanges(
       filePath: targetPath,
       content: originalText,
       lineEnding: tab ? tab.lineEnding : detectLineEnding(originalText),
+      sessionId: state.activeAiSessionId || undefined,
     });
 
     if (tab && !isDiffTab) {

@@ -4,17 +4,22 @@ import {
   type AgentAction,
   type AgentActionResult,
   type AiContextScope,
-  type AiMessage,
   type AguiBaseEvent,
+  type AiMessage,
   type FileSnapshot,
   type AiTaskPlan,
   type AiTaskPlanStep,
   setAiCurrentPlan,
   setAiTaskPlanRunning,
   clearInlineCompletion,
+  setInlineCompletion,
+  type Tab,
   getRootForPath,
   getLspDiagnostics,
+  getGitStatusForRoot,
+  gitChangeFingerprint,
 } from "./state";
+import type { EditorView } from "@codemirror/view";
 import { ensureActiveSession } from "./ai-sessions";
 import { previewRenameSymbol, applyRefactorChanges } from "../components/lsp-integration";
 import { showRefactorPreview, type RefactorPreviewChange, type RefactorPreviewEdit } from "../components/refactor-preview";
@@ -32,10 +37,43 @@ import {
 } from "./file-service";
 import { queryGitStatus, getGitDiff } from "./git-service";
 
-let runCommandInTerminalImpl: ((command: string) => Promise<string | null>) | null = null;
+let runCommandInTerminalImpl: ((command: string, cwd?: string) => Promise<string | null>) | null = null;
 
-export function registerRunCommandInTerminal(fn: (command: string) => Promise<string | null>): void {
+export function registerRunCommandInTerminal(fn: (command: string, cwd?: string) => Promise<string | null>): void {
   runCommandInTerminalImpl = fn;
+}
+
+/**
+ * 停止机制：用户点 AI 面板「停止」后置位。
+ * 主进程 AGUI_CANCEL 取消 run 后 Observable 既不 complete 也不 error（columbina-agent 取消路径直接 return），
+ * 渲染层 callAgentStream 的 promise 会永久悬挂——所以必须由本模块主动结算挂起的流式调用。
+ */
+let aiStopRequested = false;
+let activeStreamSettle: {
+  resolve: (v: { content: string; reasoning: string }) => void;
+  reject: (e: unknown) => void;
+} | null = null;
+
+/** 请求停止当前 Agent run（停止按钮入口）：取消主进程 run + 结算渲染层挂起调用 */
+export function requestAgentStop(): void {
+  aiStopRequested = true;
+  window.agui?.cancel();
+  // 任务规划执行中：标记计划取消，阻止 executeTaskPlan 进入下一步
+  if (state.aiCurrentPlan) state.aiCurrentPlan.cancelled = true;
+  // 结算挂起的流式调用（主进程取消后不再发 AG-UI 事件）
+  if (activeStreamSettle) {
+    activeStreamSettle.resolve({ content: "", reasoning: "" });
+    activeStreamSettle = null;
+  }
+}
+
+function isAgentStopRequested(): boolean {
+  return aiStopRequested;
+}
+
+/** 供确认桥回调等外部模块检查停止态（Solo 自动批准遇停止必须立即拒绝，不再执行） */
+export function isStopRequested(): boolean {
+  return aiStopRequested;
 }
 
 export function getCurrentSelection(): string {
@@ -45,48 +83,142 @@ export function getCurrentSelection(): string {
   return state.editorView.state.doc.sliceString(from, to);
 }
 
-export function parseActions(content: string): AgentAction[] {
-  const actions: AgentAction[] = [];
-  const regex = /<action>([\s\S]*?)<\/action>/g;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(content)) !== null) {
-    try {
-      const raw = JSON.parse(match[1].trim()) as Record<string, unknown>;
-      const type = String(raw.type || "");
-      if (!AGENT_TOOLS.some((t) => t.name === type)) continue;
-      actions.push({
-        id: `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        type: type as AgentAction["type"],
-        filePath: typeof raw.filePath === "string" ? raw.filePath : undefined,
-        content: typeof raw.content === "string" ? raw.content : undefined,
-        query: typeof raw.query === "string" ? raw.query : undefined,
-        command: typeof raw.command === "string" ? raw.command : undefined,
-        line: typeof raw.line === "number" ? raw.line : undefined,
-        col: typeof raw.col === "number" ? raw.col : undefined,
-        newName: typeof raw.newName === "string" ? raw.newName : undefined,
-        edits: Array.isArray(raw.edits)
-          ? (raw.edits as { search: string; replace: string; occurrence?: number }[]).filter(
-              (e) => e && typeof e.search === "string" && typeof e.replace === "string"
-            )
-          : undefined,
-        pattern: typeof raw.pattern === "string" ? raw.pattern : undefined,
-        terminalId: typeof raw.terminalId === "string" ? raw.terminalId : undefined,
-        todoAction: typeof raw.todoAction === "string" ? (raw.todoAction as AgentAction["todoAction"]) : undefined,
-        items: Array.isArray(raw.items) ? raw.items.filter((i): i is string => typeof i === "string") : undefined,
-        index: typeof raw.index === "number" ? raw.index : undefined,
-        done: typeof raw.done === "boolean" ? raw.done : undefined,
-        pluginName: typeof raw.pluginName === "string" ? raw.pluginName : undefined,
-        pluginParams: typeof raw.pluginParams === "object" && raw.pluginParams !== null ? (raw.pluginParams as Record<string, unknown>) : undefined,
-      });
-    } catch {
-      // ignore invalid action JSON
-    }
-  }
-  return actions;
+export function stripActions(content: string): string {
+  // 仅用于清理旧版本会话消息中的 <action> 协议残留（协议已废弃，新消息不会再包含）
+  return content.replace(/<action>[\s\S]*?<\/action>/g, "").trim();
 }
 
-export function stripActions(content: string): string {
-  return content.replace(/<action>[\s\S]*?<\/action>/g, "").trim();
+// ── 会话历史「块索引 + recall」：基于 Reordering Context System 最小验证实现 ──
+// 策略：前 2 轮不优化（全文）；第 3、5、7…（奇数轮）完成后调用一次 LLM，
+// 把旧轮次总结成索引（固定区），最新一轮保留全文（待定区）；偶数轮不优化，
+// 保留最近两轮全文。需要更早轮次细节时模型用 [recall:b轮次号] 召回。
+
+interface HistoryTurn {
+  seq: number;
+  userMsgId: string;
+  userText: string;
+  assistantText: string;
+}
+
+/** 任务规划的执行步骤消息（不计入对话轮次计数） */
+function isPlanStepText(text: string): boolean {
+  return /^步骤\s*\d+\/\d+/.test((text || "").trim());
+}
+
+/** 提取回复中的 [recall:b轮次号] 标记（可多个） */
+export function parseRecallTags(text: string): Set<number> {
+  const ids = new Set<number>();
+  const re = /\[recall:([^\]]*)\]/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    for (const part of m[1].split(/[,，\s]+/)) {
+      const n = parseInt(part.replace(/^b/i, ""), 10);
+      if (!Number.isNaN(n)) ids.add(n);
+    }
+  }
+  return ids;
+}
+
+export function stripRecallTags(text: string): string {
+  return text.replace(/\[recall:[^\]]*\]/gi, "").trim();
+}
+
+/** 从当前会话历史（aiMessages）配对出（用户 → 助手）轮次 */
+function buildHistoryTurns(): HistoryTurn[] {
+  const turns: HistoryTurn[] = [];
+  let cur: HistoryTurn | null = null;
+  for (const msg of state.aiMessages) {
+    if (msg.role === "user") {
+      cur = { seq: turns.length + 1, userMsgId: msg.id, userText: msg.content || "", assistantText: "" };
+      turns.push(cur);
+    } else if (msg.role === "model" && cur) {
+      if (msg.error) continue;
+      const text = stripActions(msg.content || "");
+      cur.assistantText = cur.assistantText ? `${cur.assistantText}\n${text}` : text;
+    }
+  }
+  return turns;
+}
+
+/** 当前会话的 LLM 摘要索引（seq → 索引行）；不存在时初始化 */
+function getSessionIndexes(): Record<number, string> {
+  const session = state.aiSessions.find((s) => s.id === state.activeAiSessionId);
+  if (!session) return {};
+  if (!session.historyIndexes) session.historyIndexes = {};
+  return session.historyIndexes;
+}
+
+/** 对话轮次数（排除任务规划执行步骤） */
+function countDialogTurns(): number {
+  return state.aiMessages.filter((m) => m.role === "user" && !isPlanStepText(m.content || "")).length;
+}
+
+let summarizeInFlight = false;
+
+/**
+ * 奇数轮（3、5、7…）完成后触发：对「尚无索引的旧轮次」生成 LLM 摘要索引。
+ * 摘要调用直接复用本轮首次调用的完整 prompt 作为前缀（该前缀刚被缓存），
+ * 只在末尾追加摘要指令 —— 前缀部分按命中价计费，仅指令 token 为新增成本。
+ * 偶数轮不触发；摘要失败静默跳过，下一次奇数轮会补上（该轮保持全文）。
+ */
+async function maybeSummarizeHistory(firstPrompt: string): Promise<void> {
+  if (summarizeInFlight) return;
+  summarizeInFlight = true;
+  try {
+    const dialogTurns = countDialogTurns();
+    if (dialogTurns < 3 || dialogTurns % 2 === 0) return;
+    const indexes = getSessionIndexes();
+    const turns = buildHistoryTurns();
+    const toSummarize = turns.filter((t) => !indexes[t.seq]);
+    if (toSummarize.length === 0) return;
+    // 以 firstPrompt 为前缀（缓存命中），仅末尾追加摘要指令；模型从完整上下文中提取各轮内容
+    const summarizePrompt = `${firstPrompt}\n\n【摘要任务】请针对以上对话中的以下轮次各生成一行简短摘要：${toSummarize.map((t) => `轮次${t.seq}`).join("、")}。\n摘要要求：保留用户核心诉求与最终结论；提及关键实体（文件路径、函数/符号名、命令、数字参数）；每行不超过 80 字。\n输出格式（严格每行一条，除此之外不要输出任何内容）：\n轮次<序号>: <摘要>`;
+    try {
+      const { content: sum } = await callAgentStream(summarizePrompt, { tools: "none" });
+      let updated = 0;
+      for (const line of sum.split("\n")) {
+        const m = line.match(/^轮次(\d+):\s*(.+)$/);
+        if (m) {
+          const n = Number(m[1]);
+          if (toSummarize.some((t) => t.seq === n)) {
+            indexes[n] = `轮次${n}: ${m[2].trim()}`;
+            updated++;
+          }
+        }
+      }
+      if (updated > 0) notify();
+    } catch {
+      // 摘要失败不阻塞对话；该轮保持全文，下次奇数轮再尝试
+    }
+  } finally {
+    summarizeInFlight = false;
+  }
+}
+
+interface HistoryContext {
+  indexText: string;
+  pendingText: string;
+  fullTurns: Map<number, HistoryTurn>;
+}
+
+/** 构建历史上下文：有索引的轮次进固定区索引（外部存储），无索引的轮次保留全文（待定区） */
+function buildHistoryContext(excludeMsgId?: string): HistoryContext | null {
+  const indexes = getSessionIndexes();
+  const turns = buildHistoryTurns().filter((t) => t.userMsgId !== excludeMsgId);
+  if (turns.length === 0) return null;
+  const indexed = turns.filter((t) => indexes[t.seq]);
+  const pending = turns.filter((t) => !indexes[t.seq]);
+  const fullTurns = new Map<number, HistoryTurn>();
+  for (const t of turns) fullTurns.set(t.seq, t);
+  const indexText = indexed.length
+    ? `【历史上下文】（此前对话摘要，完整内容已移出，需要细节时用 [recall:b轮次号] 召回）\n${indexed.map((t) => indexes[t.seq]).join("\n")}`
+    : "";
+  const pendingText = pending.length
+    ? `【最近对话（完整内容，可直接使用）】\n${pending
+        .map((t) => `轮次${t.seq}:\n[用户] ${t.userText}\n[助手] ${t.assistantText}`)
+        .join("\n\n---\n\n")}`
+    : "";
+  return { indexText, pendingText, fullTurns };
 }
 
 /** 按身份缓存的人格包（避免每次对话重复 IPC） */
@@ -170,27 +302,47 @@ export async function setAgentModel(modelId: string): Promise<void> {
   }
 }
 
+/** 原生 tool-call 参数 → AgentAction（字段名与主进程工具 schema 对齐） */
+export function nativeArgsToAction(toolId: string, args: Record<string, unknown>): AgentAction {
+  const action: AgentAction = {
+    id: `native-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    type: toolId as AgentAction["type"],
+  };
+  // agentConfirmed：确认桥卡片已把关，跳过执行函数内部的二次确认弹窗
+  return Object.assign(action, args, { agentConfirmed: true }) as AgentAction;
+}
+
+/** 原生工具确认卡片的操作标签（工具展示名 + 关键参数） */
+export function formatNativeToolLabel(toolName: string, args: Record<string, unknown>): string {
+  const p = args.filePath || args.pattern || args.query || args.newName;
+  const cmd = args.command;
+  if (typeof p === "string" && p) return `${toolName}: ${p}`;
+  if (typeof cmd === "string" && cmd) return `${toolName}: ${cmd}`;
+  return toolName;
+}
+
 export function buildToolsPrompt(): string {
   const baseTools = AGENT_TOOLS.filter((t) => t.name !== "plugin");
-  const lines = baseTools.map((t, i) => `${i + 1}. ${t.name}: ${t.description}`);
+  // 描述取首行（去掉 JSON 示例——工具已原生化为 function calling，不再用 <action> 文本协议）
+  const lines = baseTools.map((t, i) => `${i + 1}. ${t.name}: ${t.description.split("\n")[0]}`);
   const pluginToolLines: string[] = [];
   for (const tool of state.pluginTools) {
-    const paramsDesc = Object.entries(tool.parameters || {})
-      .map(([key, p]) => `${key}: ${p.type}`)
-      .join(", ");
-    pluginToolLines.push(`- ${tool.name}: ${tool.description}\n   { "type": "plugin", "pluginName": "${tool.name}", "pluginParams": { ${paramsDesc ? `${paramsDesc}` : ""} } }`);
+    pluginToolLines.push(`- ${tool.name}: ${tool.description}`);
   }
   if (pluginToolLines.length > 0) {
     lines.push(`${baseTools.length + 1}. plugin: 调用插件提供的工具\n${pluginToolLines.join("\n")}`);
   }
 
-  return `\n\n你可以使用以下工具来操作项目代码。当需要读取、修改、搜索文件或运行命令时，在回复末尾插入一个或多个 <action>{...}</action> JSON 标记。每个 action 都需要用户确认后才会执行，执行结果会再次发给你。\n\n可用工具：\n${lines.join("\n")}\n\n注意：\n- 不要一次输出过多内容；优先分析再行动。\n- 写文件前最好先读取目标文件。\n- 回复中除了 action 标记外，可以用自然语言向用户说明你的计划。`;
-}
+  // Solo 模式感知：告知模型写操作自动执行，可以更果断（不必每步停下来问用户）
+  const aiMode = state.ideSettings.aiMode || "assist";
+  const confirmNote =
+    aiMode === "assist"
+      ? "写操作（write_file / edit_file / delete_file / run_command / rename_symbol / todo 等）执行前会弹出确认卡片，用户确认后才会真正执行，执行结果会自动返回给你。"
+      : aiMode === "solo"
+        ? "Solo 模式：文件写操作（write_file / edit_file / rename_symbol / generate_tests / todo 等）会自动执行、无需确认；delete_file / run_command / stop_command 仍需用户确认。大胆持续执行，不要停下来询问用户意见。"
+        : "Solo+ 模式：一切工具调用（含删除文件与运行命令）都会自动执行、无需确认。大胆持续执行，不要停下来询问用户意见。";
 
-export function formatActionLabel(action: AgentAction): string {
-  const tool = AGENT_TOOLS.find((t) => t.name === action.type);
-  if (tool) return tool.formatLabel(action);
-  return "未知操作";
+  return `\n\n你可以使用以下工具来操作项目代码（全部为原生工具调用，直接调用即可，无需输出任何标记）：\n${lines.join("\n")}\n\n注意：\n- ${confirmNote}\n- 写文件前最好先读取目标文件；优先分析再行动，不要一次输出过多内容。`;
 }
 
 const MAX_SNAPSHOTS = 50;
@@ -209,15 +361,19 @@ export async function saveSnapshot(filePath: string): Promise<void> {
       filePath,
       content: normalizeLineEndings(raw),
       lineEnding: detectLineEnding(raw),
+      sessionId: state.activeAiSessionId || undefined,
     });
   } catch {
-    state.fileSnapshots.set(filePath, { filePath, content: "", lineEnding: "lf" });
+    state.fileSnapshots.set(filePath, { filePath, content: "", lineEnding: "lf", sessionId: state.activeAiSessionId || undefined });
   }
 }
 
-/** 检测项目测试框架（读取 package.json 的依赖与 scripts） */
-export async function detectTestFramework(rootPath: string): Promise<string> {
-  if (!rootPath) return "未定位到项目根目录，无法检测测试框架（建议生成 vitest 风格测试）";
+/** 检测项目测试框架（读取 package.json 的依赖与 scripts）；返回结构化信息供运行测试闭环使用 */
+export async function detectTestFramework(rootPath: string): Promise<{ framework: string; runCommand: string; scripts: Record<string, string> }> {
+  const fallback = { framework: "未检测到常见测试框架（建议使用 vitest 风格测试）", runCommand: "npx vitest run <测试文件路径>", scripts: {} };
+  if (!rootPath) {
+    return { framework: "未定位到项目根目录，无法检测测试框架（建议生成 vitest 风格测试）", runCommand: fallback.runCommand, scripts: {} };
+  }
   try {
     const raw = await readFile(`${rootPath}/package.json`);
     const pkg = JSON.parse(raw) as {
@@ -233,17 +389,92 @@ export async function detectTestFramework(rootPath: string): Promise<string> {
     if (deps["@vue/test-utils"]) found.push("@vue/test-utils");
     if (deps["@testing-library/react"]) found.push("@testing-library/react");
     if (deps["@testing-library/vue"]) found.push("@testing-library/vue");
-    const framework = found.length > 0 ? found.join(" + ") : "未检测到常见测试框架（建议使用 vitest 风格测试）";
-    const runCmd = found.includes("vitest")
+    const runCommand = found.includes("vitest")
       ? "npx vitest run <测试文件路径>"
       : found.includes("jest")
         ? "npx jest <测试文件路径>"
         : found.includes("mocha")
           ? "npx mocha <测试文件路径>"
           : "npx vitest run <测试文件路径>";
-    return `项目测试框架: ${framework}\n推荐运行命令: ${runCmd}\npackage.json scripts:\n${JSON.stringify(pkg.scripts || {}, null, 2)}`;
+    return {
+      framework: found.length > 0 ? found.join(" + ") : fallback.framework,
+      runCommand,
+      scripts: pkg.scripts || {},
+    };
   } catch {
-    return "未找到 package.json，无法检测测试框架（建议生成 vitest 风格测试，运行命令 npx vitest run <测试文件路径>）";
+    return fallback;
+  }
+}
+
+/** 生成测试框架信息的描述文本（generate_tests 工具返回给模型） */
+export async function describeTestFramework(rootPath: string): Promise<string> {
+  const info = await detectTestFramework(rootPath);
+  return `项目测试框架: ${info.framework}\n推荐运行命令: ${info.runCommand}\npackage.json scripts:\n${JSON.stringify(info.scripts, null, 2)}`;
+}
+
+/** 测试文件路径匹配（.test.ts / .spec.tsx / .test.js / .spec.mjs 等） */
+export function isTestFilePath(filePath: string): boolean {
+  return /\.(test|spec)\.[cm]?[jt]sx?$/i.test(filePath);
+}
+
+// ── Solo 模式运行统计（防护：单轮写操作上限 + 连续失败回退）──
+const SOLO_MAX_WRITES_PER_RUN = 10;
+const SOLO_MAX_CONSECUTIVE_FAILURES = 3;
+let soloRunStats = { writes: 0, consecutiveFailures: 0 };
+
+/** 每个 run 开始前重置 Solo 统计 */
+export function resetSoloRunStats(): void {
+  soloRunStats = { writes: 0, consecutiveFailures: 0 };
+}
+
+/** 是否为写类工具（计入单轮写操作上限；generate_tests/review_changes 等只读工具不计） */
+export function isSoloWriteTool(toolName: string): boolean {
+  return [
+    "write_file",
+    "edit_file",
+    "delete_file",
+    "rename_symbol",
+    "run_command",
+    "stop_command",
+    "todo",
+    "plugin",
+  ].includes(toolName);
+}
+
+/** Solo 自动执行前调用：写操作计数 +1；返回是否已达上限（后续操作应转回确认卡） */
+export function soloWriteLimitReached(): boolean {
+  return soloRunStats.writes >= SOLO_MAX_WRITES_PER_RUN;
+}
+
+export function recordSoloWrite(): void {
+  soloRunStats.writes++;
+}
+
+/** Solo 自动执行后记录结果；返回 true 表示连续失败达上限，应停止 run */
+export function recordSoloToolResult(ok: boolean): boolean {
+  if (ok) {
+    soloRunStats.consecutiveFailures = 0;
+  } else {
+    soloRunStats.consecutiveFailures++;
+    if (soloRunStats.consecutiveFailures >= SOLO_MAX_CONSECUTIVE_FAILURES) return true;
+  }
+  return false;
+}
+
+/** 测试运行闭环：检测框架 → 构造命令 → 集成终端运行（目标 root 目录），返回 terminalId 供查看输出 */
+export async function runTestForFile(filePath: string): Promise<{ ok: boolean; output: string }> {
+  const root = getRootForPath(filePath);
+  if (!root) return { ok: false, output: `文件不在任何工作区内: ${filePath}` };
+  const info = await detectTestFramework(root.path);
+  // 文件路径加引号，防止路径含空格（Windows 常见）被 shell 拆解
+  const command = info.runCommand.replace(/<测试文件路径>/, `"${filePath}"`);
+  if (!runCommandInTerminalImpl) return { ok: false, output: "终端尚未就绪，无法运行测试" };
+  try {
+    const terminalId = await runCommandInTerminalImpl(command, root.path);
+    if (!terminalId) return { ok: false, output: "无法启动集成终端" };
+    return { ok: true, output: `已在终端 ${terminalId} 运行: ${command}` };
+  } catch (err) {
+    return { ok: false, output: `运行测试失败: ${err instanceof Error ? err.message : String(err)}` };
   }
 }
 
@@ -419,7 +650,7 @@ async function executeGenerateTests(action: AgentAction): Promise<AgentActionRes
     const root = getRootForPath(target);
     const rootPath = root?.path || "";
     const raw = await readFile(target);
-    const framework = await detectTestFramework(rootPath);
+    const framework = await describeTestFramework(rootPath);
     return {
       actionId: action.id,
       ok: true,
@@ -502,7 +733,7 @@ async function executeEditFile(action: AgentAction): Promise<AgentActionResult> 
   const isDiffTab = tab?.kind === "diff";
   let originalText: string;
   let content: string;
-  let lineEnding: "lf" | "crlf";
+  let lineEnding: Tab["lineEnding"];
   if (tab && !isDiffTab) {
     originalText = tab.currentContent;
     content = tab.currentContent;
@@ -563,7 +794,7 @@ async function executeEditFile(action: AgentAction): Promise<AgentActionResult> 
       state.editorView.dispatch({ changes: { from: 0, to: state.editorView.state.doc.length, insert: result } });
     }
   }
-  state.refactorUndoStack.push({ label: `编辑 ${basename(action.filePath)}`, snapshots: [{ filePath: action.filePath, content: originalText, lineEnding }] });
+  state.refactorUndoStack.push({ label: `编辑 ${basename(action.filePath)}`, snapshots: [{ filePath: action.filePath, content: originalText, lineEnding, sessionId: state.activeAiSessionId || undefined }] });
   if (state.refactorUndoStack.length > 20) state.refactorUndoStack.shift();
   notify();
   return { actionId: action.id, ok: true, output: `已应用 ${previewEdits.length} 处编辑到 ${action.filePath}（可用「撤销上次重构」回滚）` };
@@ -571,13 +802,14 @@ async function executeEditFile(action: AgentAction): Promise<AgentActionResult> 
 
 async function executeDeleteFile(action: AgentAction): Promise<AgentActionResult> {
   if (!action.filePath) return { actionId: action.id, ok: false, error: "缺少 filePath" };
-  if (!confirm(`确定删除文件 ${action.filePath} 吗？删除后可撤销（恢复文件内容）。`)) {
+  // 原生 tool-call 确认桥已把关（agentConfirmed），跳过内部 confirm 避免二次确认
+  if (!action.agentConfirmed && !confirm(`确定删除文件 ${action.filePath} 吗？删除后可撤销（恢复文件内容）。`)) {
     return { actionId: action.id, ok: false, output: "用户已取消删除" };
   }
   let snapshot: FileSnapshot;
   try {
     const raw = await readFile(action.filePath);
-    snapshot = { filePath: action.filePath, content: normalizeLineEndings(raw), lineEnding: detectLineEnding(raw) };
+    snapshot = { filePath: action.filePath, content: normalizeLineEndings(raw), lineEnding: detectLineEnding(raw), sessionId: state.activeAiSessionId || undefined };
   } catch {
     return { actionId: action.id, ok: false, error: `文件不存在或无法读取: ${action.filePath}` };
   }
@@ -757,22 +989,22 @@ export async function executeAction(action: AgentAction): Promise<AgentActionRes
   return tool.execute(action);
 }
 
-export function requestActionConfirmation(): Promise<boolean> {
-  return new Promise((resolve) => {
-    state.pendingActionResolve = resolve;
-  });
-}
-
-export function resolveActionConfirmation(confirmed: boolean): void {
-  if (state.pendingActionResolve) {
-    state.pendingActionResolve(confirmed);
-    state.pendingActionResolve = null;
-  }
-}
-
 export function updateUndoButton(): void {
   // Handled by ai-panel component via state subscription
   notify();
+}
+
+/** 系统消息写入快照所属会话（找不到该会话时回退当前会话），避免撤销结果串到别的会话 */
+function pushAgentNoticeToSession(sessionId: string | undefined, content: string): void {
+  const msg: AiMessage = { id: `s-${Date.now()}`, role: "model", content };
+  if (sessionId) {
+    const session = state.aiSessions.find((s) => s.id === sessionId);
+    if (session) {
+      session.messages.push(msg);
+      return;
+    }
+  }
+  state.aiMessages.push(msg);
 }
 
 export async function undoLastWrite(): Promise<void> {
@@ -800,7 +1032,7 @@ export async function undoLastWrite(): Promise<void> {
       }
       state.fileSnapshots.delete(last.filePath);
       notify();
-      state.aiMessages.push({ id: `s-${Date.now()}`, role: "model", content: `已撤销对 ${last.filePath} 的修改` });
+      pushAgentNoticeToSession(last.sessionId, `已撤销对 ${last.filePath} 的修改`);
       notify();
     } else {
       alert(`撤销失败: ${result.error || "未知错误"}`);
@@ -843,11 +1075,10 @@ export async function undoLastRefactor(): Promise<boolean> {
     }
   }
   notify();
-  state.aiMessages.push({
-    id: `s-${Date.now()}`,
-    role: "model",
-    content: failed > 0 ? `撤销重构「${group.label}」部分失败（${failed} 个文件）` : `已撤销重构「${group.label}」`,
-  });
+  pushAgentNoticeToSession(
+    group.snapshots[0]?.sessionId,
+    failed > 0 ? `撤销重构「${group.label}」部分失败（${failed} 个文件）` : `已撤销重构「${group.label}」`
+  );
   notify();
   return failed === 0;
 }
@@ -898,10 +1129,27 @@ export async function buildAiContext(scope: AiContextScope, query?: string): Pro
   return parts.join("\n\n");
 }
 
-export async function callAgentStream(prompt: string): Promise<{ content: string }> {
+/**
+ * 发起一次 Agent run（流式）。
+ * @param tools "full"（默认，含需确认的写工具）/ "read"（仅只读工具，自动执行无确认卡片）/ "none"（不注入 IDE 工具）
+ */
+export async function callAgentStream(prompt: string, opts?: { tools?: "full" | "read" | "none" }): Promise<{ content: string; reasoning: string }> {
   return new Promise((resolve, reject) => {
     let content = "";
+    let reasoning = "";
     let resolved = false;
+
+    // 注册挂起的流式调用：用户点「停止」时由 requestAgentStop 主动结算，
+    // 否则主进程取消 run 后（Observable 既不 complete 也不 error）本 promise 会永久悬挂
+    const settleResolve = (v: { content: string; reasoning: string }) => {
+      activeStreamSettle = null;
+      resolve(v);
+    };
+    const settleReject = (e: unknown) => {
+      activeStreamSettle = null;
+      reject(e);
+    };
+    activeStreamSettle = { resolve: settleResolve, reject: settleReject };
 
     state.aiEventUnsub?.();
     state.aiEventUnsub = window.agui?.onEvent((rawEvent) => {
@@ -910,16 +1158,22 @@ export async function callAgentStream(prompt: string): Promise<{ content: string
         case "TEXT_MESSAGE_CONTENT":
           if (event.delta) content += event.delta;
           break;
+        case "REASONING_MESSAGE_CONTENT":
+        case "REASONING_MESSAGE_CHUNK":
+        case "THINKING_TEXT_MESSAGE_CONTENT":
+          // 思维链（DeepSeek reasoning_content 等）：模型不返回时为空
+          if (event.delta) reasoning += event.delta;
+          break;
         case "RUN_FINISHED":
           if (!resolved) {
             resolved = true;
-            resolve({ content });
+            activeStreamSettle?.resolve({ content, reasoning });
           }
           break;
         case "RUN_ERROR":
           if (!resolved) {
             resolved = true;
-            reject(new Error(event.content || "请求失败"));
+            activeStreamSettle?.reject(new Error(event.content || "请求失败"));
           }
           break;
       }
@@ -929,11 +1183,22 @@ export async function callAgentStream(prompt: string): Promise<{ content: string
       messages: [{ role: "user", content: prompt }],
       style: "chat",
       modelId: state.aiModelId || undefined,
+      // IDE 模式：主进程注入原生工具（只读自动执行 + 写操作经确认桥）；
+      // tools="none" 时显式 noTools，避免回退到全局工具注册表（含写盘/shell 工具）
+      noTools: opts?.tools === "none",
+      ...(opts?.tools === "none"
+        ? {}
+        : {
+            ideTools: {
+              roots: state.roots.map((r) => r.path),
+              confirmed: opts?.tools !== "read",
+            },
+          }),
     }).then((ack) => {
       if (!ack?.success) {
-        reject(new Error(ack?.error || "Agent 启动失败"));
+        settleReject(new Error(ack?.error || "Agent 启动失败"));
       }
-    }).catch(reject);
+    }).catch(settleReject);
   });
 }
 
@@ -943,89 +1208,124 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
   state.aiMessages.push({ id: userMsgId, role: "user", content: userText });
   notify();
 
+  // 上一轮停止标记残留清零
+  aiStopRequested = false;
+  // Solo 模式防护统计：每个 run 重置（写操作上限 / 连续失败计数）
+  resetSoloRunStats();
   state.aiRunning = true;
   notify();
 
+  // 记录首轮 prompt：摘要调用以它为前缀（前缀缓存命中，见 Reordering Context System 验证）。
+  // 声明在 try 外：摘要优化在 try/catch/finally 之后执行，需函数级作用域。
+  let firstPrompt = "";
+  // 审查完成标记：仅当 run 正常结束（未被停止/取消/异常）时才记录 git 审查指纹
+  let gitReviewCompleted = false;
+
   try {
     let round = 0;
+    let recallAttempts = 0;
     const initialContext = await buildAiContext(scope, userText);
     const persona = await buildPersonaPrompt(userText);
-    let prompt = `${persona ? persona + "\n\n---\n\n" : ""}你是一名资深的编程助手，正在帮助用户在 IDE 中工作。请根据以下上下文回答用户问题。${buildToolsPrompt()}\n\n${initialContext}\n\n用户问题:\n${userText}`;
+    // 历史上下文：更早轮次进索引（recall 召回），最近一轮保留完整内容
+    const hist = buildHistoryContext(userMsgId);
+    let historySection = "";
+    if (hist) {
+      historySection = [
+        hist.indexText,
+        hist.pendingText,
+        "历史规则：若回答需要【历史上下文】中某轮次的细节，请在回复开头输出 [recall:b轮次号]（可多个，如 [recall:b1,b3]），我会召回后重新回答；最近一轮完整内容可直接使用，无需召回。",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+    }
+    // 上下文基础（人格 + 历史 + 工具说明 + 场景上下文 + 用户问题）：
+    // 多轮工具调用时，第二轮起主进程是全新 run（无 IDE 上下文），必须完整复用，否则模型丢失身份与历史
+    const contextBase = `${persona ? persona + "\n\n---\n\n" : ""}${historySection ? historySection + "\n\n---\n\n" : ""}你是一名资深的编程助手，正在帮助用户在 IDE 中工作。请根据以下上下文回答用户问题。${buildToolsPrompt()}\n\n${initialContext}\n\n用户问题:\n${userText}`;
+    let prompt = contextBase;
+    firstPrompt = prompt;
 
     while (round < maxRounds) {
-      if (isCancelled?.()) break;
+      if (isCancelled?.() || isAgentStopRequested()) break;
       round++;
       const modelMsgId = `m-${Date.now()}-${round}`;
       state.aiCurrentMessageId = modelMsgId;
       state.aiMessages.push({ id: modelMsgId, role: "model", content: "", thinking: true });
       notify();
 
-      const { content: rawContent } = await callAgentStream(prompt);
-      if (isCancelled?.()) {
+      const { content: rawContent, reasoning } = await callAgentStream(prompt);
+      if (isCancelled?.() || isAgentStopRequested()) {
         const modelMsg = state.aiMessages.find((m) => m.id === modelMsgId);
         if (modelMsg) {
-          modelMsg.content = "(已取消)";
+          modelMsg.content = rawContent || "(已停止)";
           modelMsg.thinking = false;
         }
         notify();
         break;
       }
-      const actions = parseActions(rawContent);
-      const cleanContent = stripActions(rawContent);
+
+      // recall 处理：模型请求历史轮次的完整内容 → 注入后重新回答（最多 2 次）
+      const recallIds = parseRecallTags(rawContent);
+      if (recallIds.size > 0 && recallAttempts < 2) {
+        const recalled: string[] = [];
+        for (const id of recallIds) {
+          const t = hist?.fullTurns.get(id);
+          if (t) recalled.push(`轮次${t.seq}:\n[用户] ${t.userText}\n[助手] ${t.assistantText}`);
+        }
+        if (recalled.length > 0) {
+          recallAttempts++;
+          prompt = `${prompt}\n\n【已按请求召回的历史内容】\n${recalled.join("\n\n---\n\n")}\n\n请基于以上召回内容重新回答用户问题。`;
+          const modelMsg = state.aiMessages.find((m) => m.id === modelMsgId);
+          if (modelMsg) {
+            modelMsg.content = "";
+            modelMsg.thinking = true;
+            modelMsg.thinkingContent = "";
+          }
+          notify();
+          continue;
+        }
+      }
+
+      const cleanContent = stripRecallTags(stripActions(rawContent));
 
       const modelMsg = state.aiMessages.find((m) => m.id === modelMsgId);
       if (modelMsg) {
-        modelMsg.content = cleanContent || (actions.length > 0 ? "我计划执行以下操作:" : "");
+        modelMsg.content = cleanContent;
         modelMsg.thinking = false;
-        modelMsg.actions = actions.length > 0 ? actions : undefined;
+        modelMsg.thinkingContent = reasoning || undefined;
       }
       notify();
 
-      if (actions.length === 0) break;
-      if (isCancelled?.()) break;
-
-      const confirmed = await requestActionConfirmation();
-      if (!confirmed) {
-        for (const action of actions) action.rejected = true;
-        if (modelMsg) {
-          modelMsg.actionResults = actions.map((a) => ({ actionId: a.id, ok: false, error: "用户已拒绝" }));
-        }
-        notify();
-        break;
-      }
-
-      for (const action of actions) action.confirmed = true;
-      notify();
-
-      const results: AgentActionResult[] = [];
-      for (const action of actions) {
-        if (isCancelled?.()) break;
-        const result = await executeAction(action);
-        results.push(result);
-      }
-      if (modelMsg) {
-        modelMsg.actionResults = results;
-      }
-      notify();
-
-      if (isCancelled?.()) break;
-
-      const resultText = results
-        .map((r) => {
-          const action = actions.find((a) => a.id === r.actionId);
-          return `Action (${action?.type}): ${r.ok ? "成功" : "失败"}\n${r.output || r.error || ""}`;
-        })
-        .join("\n\n---\n\n");
-      prompt = `请继续。你刚才请求执行的操作结果如下：\n\n${resultText}\n\n请根据结果继续回答用户问题，或执行下一步操作。${buildToolsPrompt()}`;
+      // <action> 文本协议已废弃：工具调用全部走主进程原生 function calling
+      // （确认桥把关、TOOL_CALL 事件流式展示、结果自动回填模型），模型输出即最终回答，单轮结束
+      gitReviewCompleted = true;
+      break;
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     state.aiMessages.push({ id: `e-${Date.now()}`, role: "model", content: errMsg, error: true });
     notify();
   } finally {
+    // 清理主进程残留 run：确认卡超时/异常路径下渲染层已结束但主进程 run 可能仍在跑
+    // （AGUI_CANCEL 幂等：正常结束时 activeRuns 已空；maybeSummarizeHistory 的 run 在 finally 之后才启动）
+    window.agui?.cancel();
     state.aiRunning = false;
     state.aiCurrentMessageId = "";
-    state.pendingActionResolve = null;
+    // Solo 统计随 run 结束清零，避免残留请求污染下一 run
+    resetSoloRunStats();
+    aiStopRequested = false;
+    notify();
+  }
+
+  // 奇数轮（3、5、7…）完成后触发历史摘要优化（不阻塞 UI，摘要异步完成）
+  await maybeSummarizeHistory(firstPrompt);
+
+  // 提交前审查提醒：AI 审查（Git 变更上下文 / Git 面板「AI 审查」）正常完成后记录各 root 的变更指纹，
+  // 提交时比对指纹，未审查或有新变更时提示先审查；被停止/异常中断的审查不记录
+  if (scope === "git" && gitReviewCompleted) {
+    for (const root of state.roots) {
+      const status = getGitStatusForRoot(root.id);
+      state.gitReviewed[root.id] = { fingerprint: gitChangeFingerprint(status) };
+    }
     notify();
   }
 }
@@ -1084,7 +1384,7 @@ export async function generateTaskPlan(goal: string, scope: AiContextScope): Pro
   const context = scope === "project" ? await buildAiContext("project", goal) : await buildAiContext("file", goal);
   const persona = await buildPersonaPrompt(goal);
   const prompt = `${persona ? persona + "\n\n---\n\n" : ""}${buildTaskPlanPrompt(goal, scope)}\n\n${context}`;
-  const { content } = await callAgentStream(prompt);
+  const { content } = await callAgentStream(prompt, { tools: "read" });
   const parsed = parseTaskPlan(content);
   if (!parsed || !parsed.steps || parsed.steps.length === 0) return null;
 
@@ -1116,6 +1416,12 @@ export async function runAgentPlan(goal: string, scope: AiContextScope) {
   try {
     const plan = await generateTaskPlan(goal, scope);
     if (!plan) {
+      // 用户点「停止」导致计划生成中断：不再回退普通对话
+      if (isAgentStopRequested()) {
+        state.aiMessages.push({ id: `s-${Date.now()}`, role: "model", content: "任务规划已停止。" });
+        notify();
+        return;
+      }
       state.aiMessages.push({ id: `e-${Date.now()}`, role: "model", content: "无法生成任务计划，将按普通对话处理。" });
       notify();
       await runAgentTurn(goal, scope, 3);
@@ -1130,6 +1436,8 @@ export async function runAgentPlan(goal: string, scope: AiContextScope) {
     notify();
   } finally {
     setAiTaskPlanRunning(false);
+    // 与 runAgentTurn finally 对称：停止标记在规划路径（未进入 runAgentTurn）也可能被置位，需清零
+    aiStopRequested = false;
     notify();
   }
 }
@@ -1239,7 +1547,6 @@ export function cancelScheduledCompletion(): void {
 export async function triggerInlineCompletion(view: EditorView): Promise<void> {
   const cursor = view.state.selection.main.head;
   const doc = view.state.doc;
-  const line = doc.lineAt(cursor);
   const prefix = doc.sliceString(Math.max(0, cursor - 2000), cursor);
   const suffix = doc.sliceString(cursor, Math.min(doc.length, cursor + 200));
   const filePath = state.activeTabId || "";
@@ -1264,7 +1571,7 @@ ${suffix}
 
 请只输出要插入的代码:`;
 
-    const { content } = await callAgentStream(prompt);
+    const { content } = await callAgentStream(prompt, { tools: "none" });
     const text = content.trim();
     if (!text) {
       clearInlineCompletion();

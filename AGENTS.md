@@ -21,8 +21,11 @@
 - 右侧 AI 面板，支持「当前文件 / 当前选区 / 整个项目 / Git 变更」四种上下文提问；输入区新增「模型」下拉，可选已保存的模型（与聊天模式共享 `modelConfig`，按身份各自记忆所选模型，切换哥伦比娅/桑多涅时自动联动）。
 - 多会话管理：新建 / 复制 / 重命名 / 删除 / 清空；会话随工作区持久化（每会话 200 条消息、总数上限 30 个，超限淘汰最久未更新者），重开 IDE 自动恢复；无题会话自动以首条消息命名；Agent 运行中禁止切换会话。
 - 面板显示 Agent 思考过程与操作结果，操作确认卡片逐条展示，可撤销。
+- **右键「添加到对话」**：编辑器选区（带文件与行号标注）、终端选区、文件树整个文件，均可一键插入 AI 输入框（`【添加到对话｜来源】` + 代码块，语言高亮），自动打开 AI 面板并聚焦；独立 `ai-context.ts` 模块避免组件循环依赖。
+- **界面为分隔线布局（无气泡）**：用户消息纯文本 + 分隔线；助手消息 =「深度思考」可折叠块（流式累积 AG-UI `REASONING_MESSAGE_CONTENT` 思维链，模型不返回 reasoning 时隐藏）+ 涉及文件标签（write/edit/delete 高亮为已修改）+ 正文；**正文与思维链均流式增量渲染**（订阅 AG-UI 事件逐字更新，`<action>`/`[recall]` 标记实时剥离，不污染显示）。
+- **真实 tool-call 流式**：IDE 模式全部 16 个工具原生化为主进程原生 function calling——渲染层随每次 run 传工作区 roots（`AguiRunInput.ideTools`，`confirmed=false` 时仅只读工具用于摘要/规划等后台 run），主进程 `buildIdeTools` 构建 ToolDefinition 注入 FC 循环；AI 面板订阅 `TOOL_CALL_START/RESULT/END` 事件流式展示调用过程（⏳ 运行中 → ✓/✗ 结果预览）。**只读工具**（read_file / search_files / list_dir / list_files，risk=fs-read）自动执行、无需确认；**写操作工具**（write_file / edit_file / delete_file / run_command / rename_symbol / generate_tests / review_changes / get_diagnostics / check_command_status / stop_command / todo / plugin）声明 `needsConfirm`，FC 循环执行前经**确认桥**（`toolApprovalHandler`）向 AI 面板弹确认卡片，用户点「确认执行/拒绝」后由渲染层执行既有逻辑（快照撤销 / 标签同步 / diff 预览 / LSP / 终端 / todo）并回填结果（120s 未响应自动拒绝，run 取消/出错时清空悬挂请求）；`<action>` 文本协议已完全废弃（解析、确认卡、消息 actions/actionResults 字段与渲染均已删除，工具调用完全走原生 function calling + 确认桥；`stripActions` 仅保留用于清理旧版本会话消息残留）。
 
-**Agent 工具集（16 种，全部需用户确认后才执行）**
+**Agent 工具集（16 种；read_file / search_files / list_dir / list_files 自动执行，其余经确认卡片把关后执行）**
 
 | 工具 | 能力 |
 |------|------|
@@ -45,6 +48,15 @@
 
 - 工具实现改为**注册表驱动**：`AGENT_TOOLS` 注册表（name / description / formatLabel / execute），`executeAction` 查表执行、`buildToolsPrompt` 与 `formatActionLabel` 自动生成——新增工具只需注册一项，无需改动解析与提示词拼接。
 
+**Solo Mode（vibe coding）**
+- 三态 AI 工作模式（`ideSettings.aiMode`，面板头部下拉切换 + 持久化）：**辅助**（默认，写操作逐条确认）/ **Solo**（文件写操作自动执行，delete_file / run_command / stop_command 高危白名单仍确认）/ **Solo+**（一切工具调用自动执行）。
+- 实现：确认桥收到请求后按模式自动批准（Solo/Solo+ 跳过确认卡片，直接走 `executeAction`，快照撤销 / 标签同步 / diff / LSP / 终端逻辑 100% 复用）；主进程确认请求携带 `toolCallId`，工具行标记「⚡ 自动执行」。
+- 防护：单轮写操作上限 10 次（超限转回确认卡，只读工具不受限）；连续 3 次工具失败自动停止；停止按钮一键终止（主进程工具循环 + 渲染层回调双重停止检查）；撤销栈 / refactorUndoStack 兜底。
+- 提示词按模式变化：Solo 下告知模型写操作自动执行、大胆持续执行；辅助模式提示词与原先逐字一致。
+- 状态栏「⚡ Solo / ⚡ Solo+」徽章 + 面板金色边框视觉标识；Solo 模式渲染层重试上限 5 → 10。
+- **概览面板（侧栏 📊）**：当前 AI 会话的用量统计——上下文窗口（最近一轮输入 tokens）+ 平均命中/本次命中（缓存命中率，DeepSeek prompt_cache_* / Anthropic cache_read 前缀缓存）/ 运行时间 / 请求数 / 累积与本次 tokens。数据链路：adapter 解析 hit/miss → columbina-agent 每轮累加 → RUN_FINISHED 事件透传 usage + durationMs → 渲染层按发起时会话（RUN_STARTED 快照）累计到 AiSession.stats/lastRun，随会话持久化；会话复制/工作区恢复深拷贝。供应商未上报缓存字段时命中率显示「—」。
+- **Solo 专属布局**（自动跟随 aiMode，切回辅助恢复）：左侧会话管理常驻列（新建/复制/重命名/清空/删除，复用 ai-sessions 服务）｜ 中间 AI 聊天 + 编辑器（可拖拽分隔条调整比例，双击恢复 50%；无打开文件时编辑器自动收起、聊天全宽）｜ 右侧资源管理器（原左侧栏整体右移）。实现：DOM 移动 + `ide--solo-layout` CSS 重排，组件状态零损失；聊天为主视图（标题栏 AI 开关与面板 × 隐藏）；切回辅助时还原进入前的 AI 面板显隐偏好。
+
 **任务规划与多轮执行**
 - 复杂需求先输出任务计划（3-8 步），用户可确认、修改或取消；每完成一步 Agent 自动进入下一步，直到任务完成。
 - 命令面板「AI: 规划并执行任务」入口。
@@ -60,14 +72,17 @@
 **测试生成**
 - `generate_tests` 读取项目 package.json 自动检测 vitest / jest / mocha / @vue/test-utils / @testing-library 并给出运行命令；返回目标文件内容与框架信息，Agent 生成测试代码后用 write_file 写入。
 - 命令面板「AI: 为当前文件生成测试」一键入口；无框架时回退 vitest 风格。
+- **测试运行闭环**：Agent 写入/编辑测试文件（`.test.*` / `.spec.*`）成功后，AI 面板消息出现「🧪 运行测试」按钮 → 检测框架构造命令（`npx vitest run <文件>` 等，路径加引号防空格）→ 在文件所属 root 目录的集成终端运行（按 cwd 复用终端，否则新建）→ 终端展示输出；`detectTestFramework` 返回结构化 `{ framework, runCommand, scripts }`。
 
 **代码审查**
 - `review_changes` 遍历所有工作区 Root 的 git status，合并已暂存/已修改/未跟踪/冲突文件（上限 15 个、总量 60k 字符截断），未跟踪文件直接读内容、其余取未暂存+已暂存 diff，Agent 按高/中/低严重程度输出问题清单。
 - 三个入口：Git 面板提交区「AI 审查」按钮、AI 面板「Git 变更」上下文、命令面板「AI: 审查代码变更」。
+- **提交前审查提醒**：AI 审查（Git 变更上下文）正常完成后记录各 root 的变更指纹（staged+modified+untracked+conflicted 文件列表）；Git 提交时比对指纹，未审查或审查后有新变更时弹窗提示先审查（可仍直接提交）；被停止/异常的审查不记录指纹。
 
 **上下文与记忆**
 - 项目级轻量 RAG：异步队列索引项目文件摘要，Agent 能理解项目结构。
 - 结合现有 L0/L1/L2 记忆，Agent 记得用户编码习惯与项目决策。
+- **跨轮历史上下文（块索引 + recall）**：基于「Reordering Context System」最小实验验证（正确召回率 67% 且 0 误触发）落地。AI 面板同一会话内，前 2 轮保留全文不优化；**第 3、5、7…（奇数轮）完成后调用一次 LLM** 把旧轮次总结成一行索引（固定区，含核心诉求/结论/涉及文件符号命令），最新一轮保留全文（待定区）；偶数轮不优化，保留最近两轮全文。摘要索引随会话持久化（`AiSession.historyIndexes`，复制会话携带、清空会话重置）。模型需要更早轮次细节时输出 `[recall:b轮次号]`，系统注入对应轮次完整内容后重新回答（最多 2 次）。任务规划的执行步骤不计入轮次计数，且各步骤之间自动共享该历史。
 
 **人格角色扮演（哥伦比娅 / 桑多涅）**
 - 复用聊天/协作模式（chat / sidebar / tasks）的 prompts 体系：`identity.md`（身份设定）+ `soul.md`（核心人格与性格）+ `canon_quotes.md`（原作台词，语气基准）+ `styles/01_default.md`（默认风格）+ `tone-rules.md`（语气硬约束：句式禁止、自称「人家/我」、句尾「呀/啦/呢/吗/♪」、优先回应情绪）。
@@ -126,16 +141,14 @@
 1. **自动错误修复**：LSP 诊断到错误时 AI 面板显示「一键修复」，Agent 读取相关文件、生成修复 patch，用户确认后应用。
 2. **自然语言生成完整代码**：AI 面板输入需求生成完整代码文件，支持多文件生成与目录结构建议。
 3. **更多跨文件重构类型**：提取函数、移动文件（基于 LSP 引用分析，diff 预览 + 可整体撤销）。
-4. **测试运行闭环**：生成测试后可一键运行（集成终端）并回传结果。
-5. **提交前审查提醒**：Git 提交前若存在未审查的变更，提示先进行 AI 审查（与 Git 面板集成）。
-6. **人格深化**：支持多风格切换（styles/*.md）、世界书按需召回（embedding 匹配）、与 Live2D 表情/状态栏心情联动。
+4. **人格深化**：支持多风格切换（styles/*.md）、世界书按需召回（embedding 匹配）、与 Live2D 表情/状态栏心情联动。
 
 ### 工程化：稳定性与发布
 
-7. **自动化测试**：Vitest 单元测试（file-service / state / workspace-service / git-service / lsp-client）+ 主进程集成测试（Git、LSP、文件监听）+ Playwright 渲染进程关键交互；核心服务覆盖率 > 60%。
-8. **错误监控与日志**：捕获主/渲染进程未处理异常与 unhandledRejection，日志落盘 `userData/logs`。
-9. **发布流水线**：electron-builder + GitHub Actions 自动构建 Windows / macOS / Linux 安装包，可选 auto-update。
-10. **设置导出/导入**：导出 settings / workspaces / 快捷键为 JSON，支持导入恢复。
+5. **自动化测试**：Vitest 单元测试（file-service / state / workspace-service / git-service / lsp-client）+ 主进程集成测试（Git、LSP、文件监听）+ Playwright 渲染进程关键交互；核心服务覆盖率 > 60%。
+6. **错误监控与日志**：捕获主/渲染进程未处理异常与 unhandledRejection，日志落盘 `userData/logs`。
+7. **发布流水线**：electron-builder + GitHub Actions 自动构建 Windows / macOS / Linux 安装包，可选 auto-update。
+8. **设置导出/导入**：导出 settings / workspaces / 快捷键为 JSON，支持导入恢复。
 
 ### 后续可选
 
@@ -145,3 +158,7 @@
 - 项目记忆跨设备同步，Agent 在不同设备上保持一致。
 
 完成后 Columbina-IDE 将具备完整的日常开发工作流支持，并逐步向可扩展、可发布的 AI 原生 IDE 演进。
+
+## Notes
+
+- 每次修改文件后，都视为一次git变更，需要写变更内容

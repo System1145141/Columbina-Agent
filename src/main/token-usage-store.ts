@@ -85,13 +85,15 @@ function flushNow(): void {
 
 // ── public API ──
 
-/** 记录一次 API 调用的 token 用量（异步累加到当天）。 */
-export function recordUsage(input: number, output: number, requests = 1): void {
+/** 记录一次 API 调用的 token 用量（异步累加到当天）。hit/miss 为缓存命中/未命中 tokens。 */
+export function recordUsage(input: number, output: number, requests = 1, hit = 0, miss = 0): void {
   const store = ensureLoaded();
   const key = todayKey();
   const day = store.days[key] ?? { input: 0, output: 0, hit: 0, miss: 0, requests: 0 };
   day.input += Math.max(0, Math.round(input || 0));
   day.output += Math.max(0, Math.round(output || 0));
+  day.hit += Math.max(0, Math.round(hit || 0));
+  day.miss += Math.max(0, Math.round(miss || 0));
   day.requests += Math.max(0, requests);
   store.days[key] = day;
   scheduleFlush();
