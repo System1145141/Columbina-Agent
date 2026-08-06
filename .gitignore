@@ -78,3 +78,5 @@ dist/renderer/ide/index.html
 .qoder/
 .reasonix/
 reasonix.toml
+# electron-builder 安装包输出
+release/
