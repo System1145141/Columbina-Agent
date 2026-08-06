@@ -317,10 +317,14 @@ function sendLspNotification(languageId: string, workspacePath: string, notifica
   sendJsonRpc(session, { jsonrpc: "2.0", method: notification.method, params: notification.params });
 }
 
-export function setupLspIpc(): void {
+export function setupLspIpc(isPathAllowed?: (p: string) => boolean): void {
   ipcMain.handle(IPC.IDE_LSP_START, async (_event, languageId: unknown, workspacePath: unknown, customConfig: unknown) => {
     if (typeof languageId !== "string" || typeof workspacePath !== "string") {
       return { ok: false, error: "参数类型错误" };
+    }
+    // 工作区路径必须在允许范围内（安全默认：拒绝工作区外启动语言服务器）
+    if (isPathAllowed && !isPathAllowed(workspacePath)) {
+      return { ok: false, error: "工作区路径不在允许范围内" };
     }
     const raw =
       typeof customConfig === "object" && customConfig !== null
@@ -330,6 +334,23 @@ export function setupLspIpc(): void {
       raw && typeof raw.command === "string" && raw.command.trim() !== ""
         ? { command: raw.command, args: Array.isArray(raw.args) ? (raw.args as string[]) : [] }
         : undefined;
+    if (config) {
+      const cmd = config.command;
+      const hasSeparator = cmd.includes("/") || cmd.includes("\\");
+      // 自定义命令安全规则：纯命令名（走 PATH / node_modules/.bin 解析）或工作区内的绝对路径；
+      // 禁止相对路径（可含 ../ 逃逸）与工作区外绝对路径（可 spawn 任意可执行文件）
+      if (cmd === "." || cmd === "..") {
+        return { ok: false, error: "自定义 LSP 命令无效" };
+      }
+      if (hasSeparator) {
+        if (!path.isAbsolute(cmd)) {
+          return { ok: false, error: "自定义 LSP 命令必须是纯命令名或绝对路径" };
+        }
+        if (isPathAllowed && !isPathAllowed(cmd)) {
+          return { ok: false, error: "自定义 LSP 命令必须在工作区内" };
+        }
+      }
+    }
     return startLanguageServer(languageId, workspacePath, config);
   });
 

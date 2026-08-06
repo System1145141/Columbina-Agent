@@ -45,6 +45,8 @@ import type { StickerConfigItem } from "../shared/sticker-types";
 import { initReranker, getRerankerInstallStatus } from "./rag/reranker";
 import { setupLspIpc, stopAllLanguageServers } from "./lsp-manager";
 import { setupGitIpc } from "./git-service";
+import { detectFileEncoding, decodeFileBuffer, encodeFileString } from "./file-encoding";
+import { isFileEncoding } from "../shared/file-encoding";
 import { memoryStore } from "./memory/memory-store"
 import type { L0Profile, L1Profile } from "./memory/memory-types";
 import { registerChatsIpc } from "./chats/chats-ipc";
@@ -55,7 +57,7 @@ import { synthesize as customCloudSynthesize } from "./tts/custom-cloud-engine";
 import { synthesize as mimoSynthesize } from "./tts/mimo-engine";
 import { synthesizeByEngine } from "./tts/tts-dispatcher";
 import { startOpener, stopOpener, setLive2dWindow, reloadManifest, handleBubbleClick, handleChatWindowOpened, testFire } from "./opener/opener-runner";
-import { registerAgUiIpc, type AguiRunInput } from "./agui-bridge";
+import { registerAgUiIpc, cancelRunsForWindow, type AguiRunInput } from "./agui-bridge";
 import { setWeatherConfig, setSearchConfig, loadTodos, onTodosChange, setKuuhenkiSettings } from "./orchestrator/built-in-tools";
 import { registerRecallHistoryTool } from "./orchestrator/history-tools";
 import { registerDocumentTools } from "./orchestrator/document-tools";
@@ -1914,6 +1916,24 @@ function buildSystemPrompt(styleFile: string, identityId?: string, lang = "cn"):
 }
 
 /**
+ * IDE 专用人格段：复用 loadPromptFile 组装 identity + soul + canon_quotes + 默认风格。
+ * 与聊天模式的 buildSystemPrompt 不同：不含 system.md（其聊天规则/todo_write/文档工具
+ * 指引与 IDE 编程场景冲突），语气规则由渲染进程单独注入。
+ */
+function buildIdePersonaPrompt(identityId: string, lang = "cn"): string {
+  const parts: string[] = [];
+  const identity = loadPromptFile("identity.md", identityId, lang);
+  if (identity) parts.push(identity);
+  const soul = loadPromptFile("soul.md", identityId, lang);
+  if (soul) parts.push(soul);
+  const canon = loadPromptFile("canon_quotes.md", identityId, lang);
+  if (canon) parts.push(canon);
+  const style = loadPromptFile("styles/01_default.md", identityId, lang);
+  if (style) parts.push(style);
+  return parts.join("\n\n---\n\n");
+}
+
+/**
  * /命令拦截：命中 /skill-id（且 skill 存在+启用）则返回 system 激活段
  * （正文注入 system，user message 原样，不污染 memory，见 spec 6.3）。
  * 命中但 skill 不存在/未启用 → 改写该 user 消息为提示，返回 ""。
@@ -2463,7 +2483,10 @@ function createWindow(): void {
     return { provider: s.provider, baseUrl: s.baseUrl, model: s.model, apiKey: s.apiKey };
   });
 
+  const mainWc = mainWindow.webContents;
   mainWindow.on("closed", () => {
+    // 窗口关闭时取消该窗口发起的 AG-UI run，防止继续消耗 token
+    cancelRunsForWindow(mainWc);
     mainWindow = null;
   });
 }
@@ -2576,7 +2599,10 @@ function createIdeWindow(): void {
     ideWindow?.show();
   });
 
+  const ideWc = ideWindow.webContents;
   ideWindow.on("closed", () => {
+    // 窗口关闭时取消该窗口发起的 AG-UI run（含悬挂的工具确认卡），防止残留 run 消耗 token
+    cancelRunsForWindow(ideWc);
     cleanupIdeSubprocesses();
     ideWindow = null;
   });
@@ -3054,6 +3080,22 @@ ipcMain.handle(IPC.IDE_COPY_TEXT, (_event, text: unknown) => {
   return false;
 });
 
+ipcMain.handle(IPC.IDE_WATCH_FILE, (_event, filePath: unknown) => {
+  if (typeof filePath !== "string" || filePath.length === 0) return;
+  try {
+    const st = fs.statSync(filePath);
+    watchedFiles.set(filePath, { mtimeMs: st.mtimeMs, size: st.size });
+  } catch {
+    // 文件尚不存在，跳过
+  }
+});
+
+ipcMain.on(IPC.IDE_UNWATCH_FILE, (_event, filePath: unknown) => {
+  if (typeof filePath === "string") {
+    watchedFiles.delete(filePath);
+  }
+});
+
 // 渲染进程同步工作区 roots 到主进程，用于文件操作 IPC 的路径校验
 ipcMain.on(IPC.IDE_SET_WORKSPACE_ROOTS, (_event, roots: unknown) => {
   if (!Array.isArray(roots)) return;
@@ -3090,6 +3132,18 @@ ipcMain.handle(IPC.IDE_READ_FILE, async (_event, filePath: unknown) => {
     throw new Error(err?.message || "读取失败");
   }
 });
+ipcMain.handle(IPC.IDE_READ_FILE_ENCODED, async (_event, filePath: unknown) => {
+  if (typeof filePath !== "string") throw new Error("Invalid path");
+  if (!isPathWithinWorkspace(filePath)) throw new Error("路径不在工作区内");
+  try {
+    const buffer = fs.readFileSync(filePath);
+    const encoding = detectFileEncoding(buffer);
+    const content = decodeFileBuffer(buffer, encoding);
+    return { content, encoding };
+  } catch (err: any) {
+    throw new Error(err?.message || "读取失败");
+  }
+});
 ipcMain.handle(IPC.IDE_READ_FILE_CHUNK, async (_event, filePath: unknown, offset: unknown, length: unknown) => {
   if (typeof filePath !== "string") throw new Error("Invalid path");
   if (!isPathWithinWorkspace(filePath)) throw new Error("路径不在工作区内");
@@ -3110,11 +3164,16 @@ ipcMain.handle(IPC.IDE_READ_FILE_CHUNK, async (_event, filePath: unknown, offset
     throw new Error(err?.message || "读取失败");
   }
 });
-ipcMain.handle(IPC.IDE_WRITE_FILE, async (_event, filePath: unknown, content: unknown) => {
+ipcMain.handle(IPC.IDE_WRITE_FILE, async (_event, filePath: unknown, content: unknown, encoding: unknown) => {
   if (typeof filePath !== "string" || typeof content !== "string") return { ok: false, error: "Invalid args" };
   if (!isPathWithinWorkspace(filePath)) return { ok: false, error: "路径不在工作区内" };
   try {
-    fs.writeFileSync(filePath, content, "utf8");
+    if (isFileEncoding(encoding)) {
+      fs.writeFileSync(filePath, encodeFileString(content, encoding));
+    } else {
+      fs.writeFileSync(filePath, content, "utf8");
+    }
+    syncWatchedFileBaseline(filePath); // 自身写入不触发外部变更通知
     return { ok: true };
   } catch (err: any) {
     return { ok: false, error: err?.message || "写入失败" };
@@ -3151,7 +3210,7 @@ ipcMain.handle(IPC.IDE_MOVE, async (_event, sourcePath: unknown, targetDir: unkn
   }
 });
 
-setupLspIpc();
+setupLspIpc((p: string) => isPathWithinWorkspace(p));
 setupGitIpc();
 
 ipcMain.handle(IPC.IDE_GET_MEMORY_CONTEXT, async (_event, query: unknown) => {
@@ -3163,6 +3222,16 @@ ipcMain.handle(IPC.IDE_GET_MEMORY_CONTEXT, async (_event, query: unknown) => {
     console.error("[Columbina IDE] buildMemoryContext failed:", err?.message || err);
     return "";
   }
+});
+
+ipcMain.handle(IPC.IDE_LOAD_PERSONA, async (_event, identityId: unknown, lang: unknown) => {
+  const id = typeof identityId === "string" ? identityId : "columbina";
+  const promptLang = typeof lang === "string" ? lang : "cn";
+  const identityName = id === "sandrone" ? "桑多涅" : "哥伦比娅";
+  // 人格核心：身份 + 灵魂 + 原作台词 + 默认风格（不含 system.md 的聊天规则与 markdown 禁令）
+  const persona = buildIdePersonaPrompt(id, promptLang);
+  const toneRules = loadPromptFile("tone-rules.md", undefined, promptLang);
+  return { identityName, persona, toneRules };
 });
 
 ipcMain.handle(IPC.IDE_CREATE_FILE, async (_event, dirPath: unknown, fileName: unknown) => {
@@ -3392,6 +3461,10 @@ interface IdeSearchResult {
   line: number;
   column: number;
   text: string;
+  /** 匹配到的原始文本（用于替换预览） */
+  matchText?: string;
+  /** 匹配长度（字符数，用于精确替换定位） */
+  matchLength?: number;
 }
 
 const IDE_SEARCH_IGNORE_DIRS = new Set(["node_modules", ".git", "dist", "build", ".cache", "coverage"]);
@@ -3435,14 +3508,20 @@ function searchInDirectory(
         for (let i = 0; i < lines.length && results.length < maxResults; i++) {
           const lineText = lines[i];
           regex.lastIndex = 0;
-          const match = regex.exec(lineText);
-          if (match) {
+          let match: RegExpExecArray | null;
+          // 收集该行的全部匹配（正则已带 g/gi 标志）
+          while ((match = regex.exec(lineText)) !== null) {
             results.push({
               filePath: fullPath,
               line: i + 1,
               column: match.index + 1,
+              matchText: match[0],
+              matchLength: match[0].length,
               text: lineText.trim(),
             });
+            if (results.length >= maxResults) break;
+            // 空匹配时推进游标，避免死循环
+            if (match[0].length === 0) regex.lastIndex++;
           }
         }
       } catch {
@@ -3454,6 +3533,10 @@ function searchInDirectory(
 
 ipcMain.handle(IPC.IDE_SEARCH_FILES, async (_event, folderPath: unknown, query: unknown, options: unknown) => {
   if (typeof folderPath !== "string" || typeof query !== "string" || query.length === 0) return [];
+  if (!isPathWithinWorkspace(folderPath)) {
+    console.error("[Columbina IDE] searchFiles blocked: folder outside workspace");
+    return [];
+  }
   const opts = typeof options === "object" && options !== null ? (options as Record<string, unknown>) : {};
   const caseSensitive = opts.caseSensitive === true;
   const wholeWord = opts.wholeWord === true;
@@ -3479,10 +3562,127 @@ ipcMain.handle(IPC.IDE_SEARCH_FILES, async (_event, folderPath: unknown, query: 
   return results;
 });
 
+/** 简单的 glob → 正则转换（支持 ** 任意层级、* 文件名片段、? 单字符；按相对路径匹配） */
+function globToRegex(glob: string): RegExp {
+  let re = "";
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === "*") {
+      if (glob[i + 1] === "*") {
+        i++;
+        re += "(?:.*/)?";
+      } else {
+        re += "[^/]*";
+      }
+    } else if (c === "?") {
+      re += "[^/]";
+    } else if ("\\^$.[]{}|+".includes(c)) {
+      re += "\\" + c;
+    } else {
+      re += c;
+    }
+  }
+  return new RegExp(`^${re}$`);
+}
+
+const IDE_LIST_FILES_MAX = 200;
+
+function listFilesMatching(dirPath: string, regex: RegExp, baseRel: string, out: string[]): void {
+  if (out.length >= IDE_LIST_FILES_MAX) return;
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dirPath, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (out.length >= IDE_LIST_FILES_MAX) break;
+    if (entry.name.startsWith(".")) continue;
+    const rel = baseRel ? `${baseRel}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      if (IDE_SEARCH_IGNORE_DIRS.has(entry.name)) continue;
+      listFilesMatching(path.join(dirPath, entry.name), regex, rel, out);
+    } else if (entry.isFile() && regex.test(rel)) {
+      out.push(rel);
+    }
+  }
+}
+
+ipcMain.handle(IPC.IDE_LIST_FILES, async (_event, rootPath: unknown, pattern: unknown) => {
+  if (typeof rootPath !== "string" || typeof pattern !== "string" || pattern.length === 0) return [];
+  if (!isPathWithinWorkspace(rootPath)) {
+    console.error("[Columbina IDE] listFiles blocked: folder outside workspace");
+    return [];
+  }
+  let regex: RegExp;
+  try {
+    regex = globToRegex(pattern);
+  } catch {
+    return [];
+  }
+  const out: string[] = [];
+  try {
+    listFilesMatching(rootPath, regex, "", out);
+  } catch {
+    // 忽略遍历错误
+  }
+  return out;
+});
+
 const ideTerminals = new Map<string, pty.IPty>();
 
 // 主进程维护的工作区 roots 集合，用于文件操作 IPC 的路径校验
 const ideWorkspaceRoots = new Set<string>();
+
+// 已打开编辑器文件的外部变更监听：记录文件 mtime+size，轮询比对以发现外部修改
+const watchedFiles = new Map<string, { mtimeMs: number; size: number }>();
+
+function broadcastIdeFileChanged(filePath: string, deleted: boolean): void {
+  ideWindow?.webContents.send(IPC.IDE_FILE_CHANGED, { filePath, deleted });
+}
+
+/** 同步某文件的监听基准（IDE 自身写入或改名/移动后调用，避免误报） */
+function syncWatchedFileBaseline(filePath: string): void {
+  if (!watchedFiles.has(filePath)) return;
+  try {
+    const st = fs.statSync(filePath);
+    watchedFiles.set(filePath, { mtimeMs: st.mtimeMs, size: st.size });
+  } catch {
+    // 文件不存在
+  }
+}
+
+/** 将监听记录从旧路径迁移到新路径（rename / move 后调用） */
+function migrateWatchedFile(oldPath: string, newPath: string): void {
+  const prev = watchedFiles.get(oldPath);
+  if (!prev) return;
+  watchedFiles.delete(oldPath);
+  try {
+    const st = fs.statSync(newPath);
+    watchedFiles.set(newPath, { mtimeMs: st.mtimeMs, size: st.size });
+  } catch {
+    watchedFiles.set(newPath, prev);
+  }
+}
+
+function refreshWatchedFiles(): void {
+  if (watchedFiles.size === 0) return;
+  for (const [filePath, prev] of [...watchedFiles]) {
+    try {
+      const st = fs.statSync(filePath);
+      if (st.mtimeMs !== prev.mtimeMs || st.size !== prev.size) {
+        watchedFiles.set(filePath, { mtimeMs: st.mtimeMs, size: st.size });
+        broadcastIdeFileChanged(filePath, false);
+      }
+    } catch {
+      // 文件已被删除
+      watchedFiles.delete(filePath);
+      broadcastIdeFileChanged(filePath, true);
+    }
+  }
+}
+
+setInterval(refreshWatchedFiles, 2000);
 
 function cleanupIdeSubprocesses(): void {
   // 清理所有 pty 终端进程
@@ -3507,20 +3707,56 @@ function normalizePathSeparator(p: string): string {
   return p.replace(/\\/g, "/");
 }
 
-function isPathWithinWorkspace(targetPath: string): boolean {
-  if (ideWorkspaceRoots.size === 0) {
-    // 工作区为空时不强制限制（兼容老配置加载流程）
-    return true;
-  }
-  const resolved = path.resolve(targetPath);
-  const normalized = normalizePathSeparator(resolved);
-  for (const root of ideWorkspaceRoots) {
-    const normalizedRoot = normalizePathSeparator(path.resolve(root));
-    if (normalized === normalizedRoot || normalized.startsWith(normalizedRoot + "/")) {
-      return true;
+/**
+ * 解析路径的真实路径用于 symlink 逃逸防护：文件不存在时逐级向上找最近存在的祖先
+ * 做 realpath，再拼回剩余部分（覆盖"写入尚不存在的新文件"场景）。解析失败返回 null。
+ */
+function safeRealpath(p: string): string | null {
+  let cur = p;
+  const suffix: string[] = [];
+  for (let i = 0; i < 128; i++) {
+    try {
+      return path.join(fs.realpathSync(cur), ...suffix);
+    } catch {
+      const parent = path.dirname(cur);
+      if (parent === cur) return null;
+      suffix.unshift(path.basename(cur));
+      cur = parent;
     }
   }
-  return false;
+  return null;
+}
+
+function isPathWithinWorkspace(targetPath: string): boolean {
+  if (ideWorkspaceRoots.size === 0) {
+    // 没有打开任何工作区时拒绝所有路径操作（安全默认：不放行）
+    return false;
+  }
+  // roots 的两种形式：原始路径（用户所选，可能本身是 symlink）与其真实路径
+  const rootsResolved = Array.from(ideWorkspaceRoots).map((r) => path.resolve(r));
+  const rootsReal = rootsResolved.map((r) => {
+    try {
+      return fs.realpathSync(r);
+    } catch {
+      return r;
+    }
+  });
+  const resolved = path.resolve(targetPath);
+  const normalized = normalizePathSeparator(resolved);
+  // 1) 字符串前缀校验用原始 roots：root 本身是 symlink 时，用户路径前缀就是 symlink 路径
+  const rootHit = rootsResolved.some((root) => {
+    const normalizedRoot = normalizePathSeparator(root);
+    return normalized === normalizedRoot || normalized.startsWith(normalizedRoot + "/");
+  });
+  if (!rootHit) return false;
+  // 2) 真实路径校验：拒绝符号链接指向工作区外的逃逸
+  const real = safeRealpath(resolved);
+  if (real === null) return true; // 路径不存在且无法解析祖先：字符串校验已通过，交给后续 IO 报错
+  const normalizedReal = normalizePathSeparator(real);
+  return rootsReal.some((root) => {
+    const normalizedRoot = normalizePathSeparator(root);
+    return normalizedReal === normalizedRoot || normalizedReal.startsWith(normalizedRoot + "/");
+  });
 }
 
 function getDefaultShell(): string {
@@ -3542,7 +3778,14 @@ function sendTerminalExit(id: string, exitCode?: number) {
 
 ipcMain.handle(IPC.IDE_TERMINAL_CREATE, async (_event, cwd: unknown) => {
   const shell = getDefaultShell();
-  const workDir = typeof cwd === "string" && cwd.length > 0 ? cwd : process.cwd();
+  // cwd 必须位于工作区内，否则回退到第一个工作区根目录（防止在任意目录启动 shell）
+  const firstRoot = ideWorkspaceRoots.size > 0 ? Array.from(ideWorkspaceRoots)[0] : "";
+  let workDir = process.cwd();
+  if (typeof cwd === "string" && cwd.length > 0) {
+    workDir = isPathWithinWorkspace(cwd) ? cwd : firstRoot || workDir;
+  } else if (firstRoot) {
+    workDir = firstRoot;
+  }
   const id = `term-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
     const term = pty.spawn(shell, [], {

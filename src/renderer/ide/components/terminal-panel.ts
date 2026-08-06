@@ -4,6 +4,7 @@ import "@xterm/xterm/css/xterm.css";
 import { state, getActiveRootPath } from "../services/state";
 import { registerTerminalToggle } from "../services/layout";
 import { registerRunCommandInTerminal } from "../services/agent-bridge";
+import { appendToAiInput, formatConversationBlock } from "../services/ai-context";
 
 const terminalPanelEl = document.getElementById("terminal-panel") as HTMLElement;
 const terminalTabsEl = document.getElementById("terminal-tabs") as HTMLElement;
@@ -19,6 +20,8 @@ interface TerminalTab {
   fitAddon: FitAddon;
   container: HTMLElement;
   tabEl: HTMLElement;
+  /** 终端启动目录（用于按目录复用终端，测试运行闭环） */
+  cwd?: string;
 }
 
 const terminalTabs = new Map<string, TerminalTab>();
@@ -84,6 +87,13 @@ async function createTerminalTab(cwd?: string): Promise<TerminalTab | null> {
   term.loadAddon(fit);
   term.open(container);
 
+  // 终端选区 → 「添加到对话」右键菜单
+  container.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    const sel = tab.term.getSelection();
+    if (sel) showTerminalContextMenu(e.clientX, e.clientY, sel);
+  });
+
   const tab: TerminalTab = { id: "", pid: 0, term, fitAddon: fit, container, tabEl: document.createElement("div") };
 
   term.onData((data) => {
@@ -107,6 +117,7 @@ async function createTerminalTab(cwd?: string): Promise<TerminalTab | null> {
     return null;
   }
   tab.id = created.id;
+  tab.cwd = cwd;
   tab.pid = created.pid;
 
   const tabEl = document.createElement("div");
@@ -188,16 +199,64 @@ function toggleTerminalPanel() {
   else showTerminalPanel();
 }
 
-async function runCommandInTerminal(command: string): Promise<void> {
+// 终端选区右键菜单
+let terminalContextMenu: HTMLElement | null = null;
+
+function showTerminalContextMenu(x: number, y: number, selection: string) {
+  hideTerminalContextMenu();
+  const menu = document.createElement("div");
+  menu.className = "ide__context-menu";
+  menu.style.left = `${x}px`;
+  menu.style.top = `${y}px`;
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "ide__context-menu-item";
+  btn.textContent = "添加到对话（终端选区）";
+  btn.addEventListener("click", () => {
+    hideTerminalContextMenu();
+    appendToAiInput(formatConversationBlock("终端选区", selection));
+  });
+  menu.appendChild(btn);
+
+  document.body.appendChild(menu);
+  terminalContextMenu = menu;
+
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) menu.style.left = `${window.innerWidth - rect.width - 8}px`;
+  if (rect.bottom > window.innerHeight) menu.style.top = `${window.innerHeight - rect.height - 8}px`;
+}
+
+function hideTerminalContextMenu() {
+  if (terminalContextMenu) {
+    terminalContextMenu.remove();
+    terminalContextMenu = null;
+  }
+}
+
+async function runCommandInTerminal(command: string, cwd?: string): Promise<string | null> {
   state.terminalVisible = true;
   terminalPanelEl.style.display = "flex";
-  if (terminalTabs.size === 0) {
-    const tab = await createTerminalTab(getActiveRootPath() || undefined);
-    if (tab) window.ide?.terminalInput(tab.id, command + "\r");
-    return;
+  let tab: TerminalTab | null = null;
+  if (cwd) {
+    // 指定目录时优先复用该目录的终端（测试运行闭环：确保在正确的项目目录执行，避免多 root 混淆）
+    tab = [...terminalTabs.values()].find((t) => t.cwd === cwd) ?? null;
   }
-  const tab = activeTerminalId ? terminalTabs.get(activeTerminalId) : undefined;
-  if (tab) window.ide?.terminalInput(tab.id, command + "\r");
+  if (!tab) {
+    if (terminalTabs.size === 0) {
+      tab = await createTerminalTab(cwd || getActiveRootPath() || undefined);
+    } else if (cwd) {
+      // 活动终端目录不符：新建目标目录的终端
+      tab = await createTerminalTab(cwd);
+    } else {
+      tab = activeTerminalId ? terminalTabs.get(activeTerminalId) ?? null : null;
+    }
+  }
+  if (!tab) return null;
+  window.ide?.terminalInput(tab.id, command + "\r");
+  // 记录为 Agent 追踪的终端（供 check_command_status / stop_command 使用）
+  state.agentTerminals[tab.id] = { running: true, lastOutput: state.agentTerminals[tab.id]?.lastOutput || "" };
+  return tab.id;
 }
 
 /** 在指定目录新建一个集成终端（供文件树右键菜单调用） */
@@ -214,14 +273,25 @@ export function initTerminalPanel(): void {
   terminalAddBtn.addEventListener("click", () => void createTerminalTab(getActiveRootPath() || undefined));
   terminalToggleBtn.addEventListener("click", () => void toggleTerminalPanel());
   terminalCloseBtn.addEventListener("click", hideTerminalPanel);
+  document.addEventListener("click", (e) => {
+    if (terminalContextMenu && !terminalContextMenu.contains(e.target as Node)) {
+      hideTerminalContextMenu();
+    }
+  });
 
   // 全局订阅：所有终端的输出与退出事件按 id 分发到对应标签
   window.ide?.onTerminalData(({ id, data }) => {
     terminalTabs.get(id)?.term.write(data);
+    const t = state.agentTerminals[id];
+    if (t) {
+      t.lastOutput = (t.lastOutput + data).slice(-8000);
+    }
   });
   window.ide?.onTerminalExit(({ id }) => {
     const tab = terminalTabs.get(id);
     if (tab) tab.term.writeln("\r\n[进程已退出]");
+    const t = state.agentTerminals[id];
+    if (t) t.running = false;
   });
 
   window.addEventListener("resize", () => {

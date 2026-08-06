@@ -41,6 +41,14 @@ function renderTabs() {
       }
     });
 
+    // 中键点击关闭标签
+    btn.addEventListener("auxclick", (e) => {
+      if (e.button === 1) {
+        e.preventDefault();
+        void closeTab(tab.id);
+      }
+    });
+
     btn.addEventListener("dragstart", (e) => {
       state.draggedTabId = tab.id;
       e.dataTransfer?.setData("text/plain", tab.id);

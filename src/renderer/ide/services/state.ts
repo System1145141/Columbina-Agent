@@ -7,6 +7,10 @@ export interface IdeSearchResult {
   line: number;
   column: number;
   text: string;
+  /** 匹配到的原始文本（用于替换预览） */
+  matchText?: string;
+  /** 匹配长度（字符数，用于精确替换定位） */
+  matchLength?: number;
 }
 
 export interface IdeDirEntry {
@@ -28,6 +32,8 @@ export interface Tab {
   currentContent: string;
   modified: boolean;
   lineEnding: "crlf" | "lf" | "mixed" | "unknown";
+  /** 文件编码（"utf-8" | "utf-8-bom" | "utf-16le" | "utf-16be" | "gb18030"），打开时自动探测，保存时按此编码写盘 */
+  encoding: string;
   largeFile?: boolean;
   fullSize?: number;
   loadedFull?: boolean;
@@ -44,8 +50,19 @@ export interface IdeSettings {
   theme: "dark" | "light";
   fontSize: number;
   tabSize: number;
+  /** 缩进使用空格（false = 制表符） */
+  insertSpaces?: boolean;
+  /** 是否开启自动保存（编辑停止后延时保存、失焦兜底保存） */
+  autoSave?: boolean;
   /** 自定义语言服务器配置，key 为语言 ID（如 typescript / python）；未配置的语言使用内置映射 */
   languageServers?: Record<string, LanguageServerConfig>;
+  /** Agent 人格身份：columbina（哥伦比娅）/ sandrone（桑多涅） */
+  agentIdentity?: "columbina" | "sandrone";
+  /**
+   * AI 工作模式：assist（辅助，写操作逐条确认）/ solo（Solo，文件写自动执行，高危仍确认）/
+   * solo+（全自动，一切写操作与命令自动执行）。纯 vibe coding 模式，靠撤销栈与停止按钮兜底。
+   */
+  aiMode?: "assist" | "solo" | "solo+";
 }
 
 export interface WorkspaceRoot {
@@ -55,15 +72,61 @@ export interface WorkspaceRoot {
   missing?: boolean;
 }
 
+/** 原生 tool-call（function calling）的调用记录：主进程自动执行，渲染层流式展示 */
+export interface AiToolCall {
+  id: string;
+  name: string;
+  status: "running" | "done" | "error";
+  /** 结果摘要（截断后的工具输出预览，持久化时控制体积） */
+  resultPreview?: string;
+}
+
 export interface AiMessage {
   id: string;
   role: "user" | "model";
   content: string;
   thinking?: boolean;
+  /** 思维链内容（REASONING 事件流式累积；模型不返回 reasoning 时为空） */
+  thinkingContent?: string;
   toolName?: string;
+  /** 本轮原生 tool-call 调用序列（TOOL_CALL_START/RESULT/END 事件流式累积） */
+  toolCalls?: AiToolCall[];
+  /** 涉及文件标签（确认桥执行 write/edit/delete 等操作时记录，write/edit/delete 标记为已修改） */
+  fileTags?: { name: string; modified: boolean }[];
+  /** 测试文件写入成功后标记：AI 面板显示「运行测试」按钮（测试运行闭环） */
+  runTestTarget?: { filePath: string; name: string; status?: string };
   error?: boolean;
-  actions?: AgentAction[];
-  actionResults?: AgentActionResult[];
+}
+
+/** AI 会话用量统计（概览面板数据源，随会话持久化） */
+export interface AiSessionStats {
+  requests: number;
+  durationMs: number;
+  input: number;
+  output: number;
+  hit: number;
+  miss: number;
+}
+
+/** 最近一轮 run 的用量快照（概览面板「本次」指标） */
+export interface AiLastRun {
+  usage?: { input: number; output: number; hit?: number; miss?: number };
+  durationMs?: number;
+}
+
+/** Agent 会话：一个可切换/复制/重命名的独立对话上下文 */
+export interface AiSession {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  messages: AiMessage[];
+  /** 会话历史轮次的 LLM 摘要索引（seq → 索引行）；无索引的轮次保留全文（最近 1-2 轮） */
+  historyIndexes?: Record<number, string>;
+  /** 会话级 AI 用量统计（RUN_FINISHED 事件累积；旧会话无此字段显示 0） */
+  stats?: AiSessionStats;
+  /** 最近一轮 run 的用量快照（「本次命中 / 本次 tokens」） */
+  lastRun?: AiLastRun;
 }
 
 export interface AguiBaseEvent {
@@ -77,15 +140,48 @@ export interface AguiBaseEvent {
 
 export interface AgentAction {
   id: string;
-  type: "read_file" | "write_file" | "search_files" | "run_command" | "plugin";
+  type:
+    | "read_file"
+    | "write_file"
+    | "search_files"
+    | "run_command"
+    | "rename_symbol"
+    | "generate_tests"
+    | "review_changes"
+    | "edit_file"
+    | "delete_file"
+    | "list_dir"
+    | "list_files"
+    | "get_diagnostics"
+    | "check_command_status"
+    | "stop_command"
+    | "todo"
+    | "plugin";
   filePath?: string;
   content?: string;
   query?: string;
   command?: string;
+  /** rename_symbol：符号位置（1 基）与新名称 */
+  line?: number;
+  col?: number;
+  newName?: string;
+  /** edit_file：多块精确替换（occurrence 1 基，缺省替换全部） */
+  edits?: { search: string; replace: string; occurrence?: number }[];
+  /** list_files：glob 模式（相对 root） */
+  pattern?: string;
+  /** check_command_status / stop_command：终端 id */
+  terminalId?: string;
+  /** todo：动作与数据 */
+  todoAction?: "replace" | "mark" | "clear";
+  items?: string[];
+  index?: number;
+  done?: boolean;
   pluginName?: string;
   pluginParams?: Record<string, unknown>;
   confirmed?: boolean;
   rejected?: boolean;
+  /** 原生 tool-call 确认桥已把关（跳过执行函数内部的二次确认弹窗） */
+  agentConfirmed?: boolean;
 }
 
 export interface AgentActionResult {
@@ -99,6 +195,14 @@ export interface FileSnapshot {
   filePath: string;
   content: string;
   lineEnding: Tab["lineEnding"];
+  /** 创建快照时的活跃 AI 会话 id：撤销结果消息应写入该会话，而非当前会话 */
+  sessionId?: string;
+}
+
+/** 一次跨文件重构（如符号重命名）的整体撤销快照组 */
+export interface RefactorUndoGroup {
+  label: string;
+  snapshots: FileSnapshot[];
 }
 
 export interface InlineChatSuggestion {
@@ -143,6 +247,12 @@ export interface GitStatus {
   clean: boolean;
 }
 
+/** 变更指纹：staged+modified+untracked+conflicted 文件列表排序拼接，用于提交前审查提醒比对 */
+export function gitChangeFingerprint(status: GitStatus | null): string {
+  if (!status) return "";
+  return [...status.staged, ...status.modified, ...status.untracked, ...status.conflicted].sort().join("|");
+}
+
 export interface GitBranchInfo {
   name: string;
   current: boolean;
@@ -180,6 +290,17 @@ export interface ProjectIndexEntry {
   keywords: string[];
 }
 
+/** LSP documentSymbol 转换后的大纲符号节点（行/列为 1 基） */
+export interface OutlineSymbol {
+  name: string;
+  detail?: string;
+  /** LSP SymbolKind 数值 */
+  kind: number;
+  line: number;
+  col: number;
+  children: OutlineSymbol[];
+}
+
 export interface CommandItem {
   id: string;
   label: string;
@@ -188,7 +309,7 @@ export interface CommandItem {
   run: () => void | Promise<void>;
 }
 
-export type AiContextScope = "file" | "selection" | "project";
+export type AiContextScope = "file" | "selection" | "project" | "git";
 
 export const state = {
   roots: [] as WorkspaceRoot[],
@@ -207,18 +328,32 @@ export const state = {
     theme: "dark" as "dark" | "light",
     fontSize: 13,
     tabSize: 2,
+    insertSpaces: true,
+    autoSave: true,
+    agentIdentity: "columbina" as "columbina" | "sandrone",
   } as IdeSettings,
 
   draggedTabId: "",
 
   aiPanelVisible: false,
   aiMessages: [] as AiMessage[],
+  /** 当前 Agent 使用的模型 id（与聊天模式共享，按身份持久化）；空串 = 跟随全局默认 */
+  aiModelId: "",
+  /** 多会话：所有 Agent 会话（切换/复制/重命名/删除）；aiMessages 恒为当前会话的消息数组 */
+  aiSessions: [] as AiSession[],
+  activeAiSessionId: "" as string,
   aiRunning: false,
   aiCurrentMessageId: "",
   aiEventUnsub: null as (() => void) | null,
   aiCurrentPlan: null as AiTaskPlan | null,
   aiTaskPlanRunning: false,
+  /** Agent 的待办清单（todo 工具），AI 面板展示 */
+  aiTodos: [] as { id: string; text: string; done: boolean }[],
+  /** 终端运行状态（check_command_status / stop_command 工具）：id → 运行状态与最近输出 */
+  agentTerminals: {} as Record<string, { running: boolean; lastOutput: string }>,
   fileSnapshots: new Map<string, FileSnapshot>(),
+  /** 跨文件重构的整体撤销栈（FIFO，上限 20 组） */
+  refactorUndoStack: [] as RefactorUndoGroup[],
   inlineCompletion: {
     active: false,
     text: "",
@@ -227,15 +362,27 @@ export const state = {
     loading: false,
     filePath: "",
   } as InlineCompletion,
-  pendingActionResolve: null as ((value: boolean) => void) | null,
   projectIndex: [] as ProjectIndexEntry[],
 
   searchVisible: false,
   problemsVisible: false,
+  outlineVisible: false,
+  /** 概览面板（AI 用量统计）显隐 */
+  overviewVisible: false,
   commandPaletteVisible: false,
   commandItems: [] as CommandItem[],
   commandSelectedIndex: -1,
   fileCommandItems: [] as CommandItem[],
+
+  /** 大纲面板：当前文件的符号树与版本号（版本号变化时面板重渲染） */
+  outlineSymbols: [] as OutlineSymbol[],
+  outlineFilePath: "" as string,
+  outlineVersion: 0,
+
+  /** 文件级语言模式覆盖（filePath → languageId，如 "typescript" / "plaintext"） */
+  fileLanguageOverrides: {} as Record<string, string>,
+  /** 自增版本号：语言模式等编辑器重建信号变化时 +1，触发编辑器按新配置重建 */
+  editorRecreateVersion: 0,
 
   promptResolve: null as ((value: string | null) => void) | null,
 
@@ -245,6 +392,8 @@ export const state = {
   lspStatusMessage: "" as string,
 
   gitStatusByRoot: {} as Record<string, GitStatus>,
+  /** 提交前审查提醒：rootId → 最近一次 AI 审查时的变更指纹；提交时比对指纹 */
+  gitReviewed: {} as Record<string, { fingerprint: string }>,
   gitPanelVisible: false,
   gitSelectedFileByRoot: {} as Record<string, { path: string; staged: boolean }>,
   gitDiffByRoot: {} as Record<string, string>,
@@ -365,6 +514,62 @@ function syncWorkspaceRootsToMain(): void {
   } catch {
     // 主进程可能未就绪，忽略
   }
+}
+
+/** 扩展名 → 语言 ID（与 LSP 语言服务器映射一致；md 等无 LSP 的语言不进此表） */
+export const EXT_TO_LANGUAGE_ID: Record<string, string> = {
+  ts: "typescript",
+  tsx: "typescript",
+  js: "javascript",
+  jsx: "javascript",
+  json: "json",
+  css: "css",
+  scss: "scss",
+  less: "less",
+  html: "html",
+  htm: "html",
+  py: "python",
+};
+
+/** 状态栏语言模式菜单：语言 ID → 显示名 */
+export const LANGUAGE_MODES: { id: string; label: string }[] = [
+  { id: "typescript", label: "TypeScript" },
+  { id: "javascript", label: "JavaScript" },
+  { id: "json", label: "JSON" },
+  { id: "css", label: "CSS" },
+  { id: "scss", label: "SCSS" },
+  { id: "less", label: "LESS" },
+  { id: "html", label: "HTML" },
+  { id: "markdown", label: "Markdown" },
+  { id: "python", label: "Python" },
+  { id: "plaintext", label: "纯文本" },
+];
+
+function extOf(filePath: string): string {
+  const name = filePath.replace(/\\/g, "/").split("/").pop() || "";
+  const idx = name.lastIndexOf(".");
+  return idx > 0 ? name.slice(idx + 1).toLowerCase() : "";
+}
+
+function languageLabelOf(languageId: string): string {
+  return LANGUAGE_MODES.find((m) => m.id === languageId)?.label || languageId;
+}
+
+/** 获取文件的当前语言模式显示名（优先文件级覆盖，其次按扩展名推导） */
+export function getLanguageLabel(filePath: string): string {
+  const override = state.fileLanguageOverrides[filePath];
+  if (override) return languageLabelOf(override);
+  const id = EXT_TO_LANGUAGE_ID[extOf(filePath)];
+  if (id) return languageLabelOf(id);
+  const ext = extOf(filePath);
+  return ext ? ext.toUpperCase() : "纯文本";
+}
+
+/** 获取文件的当前语言 ID（覆盖优先；纯文本返回 null） */
+export function getLanguageIdForFile(filePath: string): string | null {
+  const override = state.fileLanguageOverrides[filePath];
+  if (override) return override === "plaintext" ? null : override;
+  return EXT_TO_LANGUAGE_ID[extOf(filePath)] || null;
 }
 
 export function setRoots(roots: WorkspaceRoot[]): void {
@@ -525,16 +730,24 @@ declare global {
       copyText: (text: string) => Promise<boolean>;
       readDir: (dirPath: string) => Promise<IdeDirEntry[]>;
       readFile: (filePath: string) => Promise<string>;
+      readFileEncoded: (filePath: string) => Promise<{ content: string; encoding: string }>;
       readFileChunk: (filePath: string, offset: number, length: number) => Promise<{ content: string; totalSize: number; isEnd: boolean }>;
-      writeFile: (filePath: string, content: string) => Promise<{ ok: boolean; error?: string }>;
+      writeFile: (filePath: string, content: string, encoding?: string) => Promise<{ ok: boolean; error?: string }>;
+      onAgentToolConfirm: (callback: (payload: { requestId: string; toolId: string; toolName: string; toolCallId?: string; args: Record<string, unknown> }) => void) => () => void;
+      agentToolConfirmResult: (payload: { requestId: string; allowed: boolean; result?: { ok: boolean; output?: string; error?: string } }) => Promise<{ ok: boolean }>;
+      watchFile: (filePath: string) => Promise<void>;
+      unwatchFile: (filePath: string) => void;
+      onFileChanged: (callback: (payload: { filePath: string; deleted: boolean }) => void) => () => void;
       getFileInfo: (filePath: string) => Promise<{ isDirectory: boolean; size: number }>;
       searchFiles: (
         folderPath: string,
         query: string,
         options?: { caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean; maxResults?: number }
       ) => Promise<IdeSearchResult[]>;
+      listFiles: (rootPath: string, pattern: string) => Promise<string[]>;
       move: (sourcePath: string, targetDir: string) => Promise<{ ok: boolean; error?: string }>;
       getMemoryContext: (query: string) => Promise<string>;
+      loadPersona: (identityId: string, lang?: string) => Promise<{ identityName: string; persona: string; toneRules: string }>;
       createFile: (dirPath: string, fileName: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
       createDir: (dirPath: string, dirName: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
       delete: (targetPath: string) => Promise<{ ok: boolean; error?: string }>;
@@ -592,9 +805,20 @@ declare global {
         identityId?: string;
         modelId?: string;
         attachments?: { name: string; text: string }[];
+        ideTools?: { roots: string[]; confirmed?: boolean };
+        noTools?: boolean;
       }) => Promise<{ success: boolean; error?: string }>;
       onEvent: (callback: (event: unknown) => void) => () => void;
       cancel: () => Promise<boolean>;
+    };
+    modelConfig?: {
+      get: () => Promise<{
+        models?: { id: string; nickname?: string; model?: string; provider?: string }[];
+        defaultModelId?: string;
+        selectedModelIds?: Record<string, string>;
+        connected?: boolean;
+      }>;
+      saveSelectedModelIds: (selectedModelIds: Record<string, string>) => Promise<unknown>;
     };
   }
 }

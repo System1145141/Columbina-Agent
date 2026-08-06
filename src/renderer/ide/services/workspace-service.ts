@@ -9,8 +9,9 @@ import {
   createWorkspaceRoot,
   type WorkspaceRoot,
   type AiMessage,
+  type AiSession,
 } from "./state";
-import { openFile, basename } from "./file-service";
+import { openFile, basename, unwatchAllOpenTabs } from "./file-service";
 import { showAiPanel, hideAiPanel, showSearchPanel, hideSearchPanel, showGitPanel, hideGitPanel } from "./layout";
 import { showTerminalPanel, hideTerminalPanel } from "../components/terminal-panel";
 
@@ -30,6 +31,8 @@ interface WorkspaceData {
   panels?: WorkspacePanelState;
   bounds?: { x: number; y: number; width: number; height: number };
   aiMessages?: AiMessage[];
+  aiSessions?: AiSession[];
+  activeAiSessionId?: string;
 }
 
 /** 每个工作区最多持久化的 Agent 会话消息条数 */
@@ -43,6 +46,32 @@ function isPathUnderRoot(filePath: string, rootPath: string): boolean {
   const normFile = normalizePath(filePath);
   const normRoot = normalizePath(rootPath);
   return normFile === normRoot || normFile.startsWith(normRoot + "/");
+}
+
+/**
+ * 消息截断后对齐历史索引的 seq 编号：
+ * 截断只丢最老消息，被丢弃的 user 消息数即 seq 偏移量（buildHistoryTurns 按 user 消息计数）。
+ * 旧 seq <= 偏移量的索引对应已丢弃轮次，删除；其余重编号并同步索引行内的「轮次N:」前缀。
+ * 修复：消息 slice(-MAX) 截断后 historyIndexes 若不修剪，recall 会召回错误轮次。
+ */
+function alignHistoryIndexes(
+  allMessages: AiMessage[],
+  keptMessages: AiMessage[],
+  indexes?: Record<number, string>
+): Record<number, string> | undefined {
+  if (!indexes || Object.keys(indexes).length === 0) return indexes;
+  const dropped = allMessages
+    .slice(0, Math.max(0, allMessages.length - keptMessages.length))
+    .filter((m) => m.role === "user").length;
+  if (dropped <= 0) return indexes;
+  const next: Record<number, string> = {};
+  for (const [k, v] of Object.entries(indexes)) {
+    const oldSeq = Number(k);
+    if (!Number.isFinite(oldSeq) || oldSeq <= dropped) continue;
+    const newSeq = oldSeq - dropped;
+    next[newSeq] = v.replace(/^轮次\d+:/, `轮次${newSeq}:`);
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
 }
 
 function collectWorkspaceState(): Record<string, unknown> {
@@ -63,6 +92,19 @@ function collectWorkspaceState(): Record<string, unknown> {
       searchVisible: state.searchVisible,
       gitVisible: state.gitPanelVisible,
     },
+    aiSessions: state.aiSessions.map((s) => ({
+      id: s.id,
+      title: s.title,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+      messages: s.messages.slice(-MAX_PERSISTED_AI_MESSAGES),
+      // 消息截断后同步对齐索引 seq，防止 recall 召回错误轮次
+      historyIndexes: alignHistoryIndexes(s.messages, s.messages.slice(-MAX_PERSISTED_AI_MESSAGES), s.historyIndexes),
+      stats: s.stats ? { ...s.stats } : undefined,
+      lastRun: s.lastRun ? { usage: s.lastRun.usage ? { ...s.lastRun.usage } : undefined, durationMs: s.lastRun.durationMs } : undefined,
+    })),
+    activeAiSessionId: state.activeAiSessionId,
+    // 兼容旧版本 IDE 读取：仅保留当前会话消息
     aiMessages: state.aiMessages.slice(-MAX_PERSISTED_AI_MESSAGES),
   };
 }
@@ -100,6 +142,7 @@ async function applyWorkspace(data: WorkspaceData, filePath?: string): Promise<v
   state.projectIndex = [];
   state.expandedDirs = new Set((data.expandedDirs || []).filter((p) => typeof p === "string"));
 
+  unwatchAllOpenTabs();
   state.tabs.clear();
   state.activeTabId = "";
 
@@ -123,9 +166,47 @@ async function applyWorkspace(data: WorkspaceData, filePath?: string): Promise<v
   }
 
   // 恢复该工作区的 Agent 会话历史；任务规划为执行期状态，切换工作区时重置
-  state.aiMessages = Array.isArray(data.aiMessages) ? (data.aiMessages as AiMessage[]) : [];
   state.aiCurrentPlan = null;
   state.aiTaskPlanRunning = false;
+  if (Array.isArray(data.aiSessions) && data.aiSessions.length > 0) {
+    state.aiSessions = (data.aiSessions as AiSession[]).map((s) => ({
+      id: s.id,
+      title: s.title || "会话",
+      createdAt: typeof s.createdAt === "number" ? s.createdAt : 0,
+      updatedAt: typeof s.updatedAt === "number" ? s.updatedAt : 0,
+      messages: Array.isArray(s.messages) ? s.messages : [],
+      // 旧版本数据：消息被截断过但索引未同步修剪，无法对齐旧 seq → 清空索引（下次奇数轮重新摘要）
+      historyIndexes:
+        s.historyIndexes && typeof s.historyIndexes === "object" && (s.messages as AiMessage[]).length < MAX_PERSISTED_AI_MESSAGES
+          ? s.historyIndexes
+          : undefined,
+      stats: s.stats && typeof s.stats === "object" ? { ...s.stats } : undefined,
+      lastRun: s.lastRun && typeof s.lastRun === "object" ? { usage: s.lastRun.usage ? { ...s.lastRun.usage } : undefined, durationMs: s.lastRun.durationMs } : undefined,
+    }));
+    const activeId =
+      typeof data.activeAiSessionId === "string" && state.aiSessions.some((s) => s.id === data.activeAiSessionId)
+        ? data.activeAiSessionId
+        : state.aiSessions[0]?.id || "";
+    state.activeAiSessionId = activeId;
+    const active = state.aiSessions.find((s) => s.id === activeId) || state.aiSessions[0];
+    state.aiMessages = active ? active.messages : [];
+  } else {
+    // 旧版本数据只有 aiMessages：迁移为默认会话
+    state.aiSessions = [];
+    state.activeAiSessionId = "";
+    state.aiMessages = Array.isArray(data.aiMessages) ? (data.aiMessages as AiMessage[]) : [];
+    if (state.aiMessages.length > 0) {
+      const legacy: AiSession = {
+        id: "s_default",
+        title: "会话 1",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        messages: state.aiMessages,
+      };
+      state.aiSessions = [legacy];
+      state.activeAiSessionId = legacy.id;
+    }
+  }
 
   applyPanels(data.panels);
   notify();

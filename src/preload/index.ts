@@ -72,7 +72,7 @@ contextBridge.exposeInMainWorld("chat", chatApi);
 // AG-UI 事件流：发起一次 agent run，通过 onEvent 回调收 AG-UI 标准事件，
 // 返回 Promise<{success,error}> 表示整轮结束。onEvent 返回的取消订阅函数用于停止监听。
 const aguiApi = {
-  run: (input: { messages: unknown[]; style: string; sessionId?: string; identityId?: string; modelId?: string; attachments?: { name: string; text: string }[] }) =>
+  run: (input: { messages: unknown[]; style: string; sessionId?: string; identityId?: string; modelId?: string; attachments?: { name: string; text: string }[]; ideTools?: { roots: string[]; confirmed?: boolean }; noTools?: boolean }) =>
     ipcRenderer.invoke(IPC.AGUI_RUN, input) as Promise<{ success: boolean; error?: string }>,
   onEvent: (callback: (event: unknown) => void) => {
     const listener = (_e: unknown, event: unknown) => {
@@ -154,14 +154,34 @@ const ideApi = {
   copyText: (text: string) => ipcRenderer.invoke(IPC.IDE_COPY_TEXT, text) as Promise<boolean>,
   readDir: (dirPath: string) => ipcRenderer.invoke(IPC.IDE_READ_DIR, dirPath),
   readFile: (filePath: string) => ipcRenderer.invoke(IPC.IDE_READ_FILE, filePath),
+  readFileEncoded: (filePath: string) =>
+    ipcRenderer.invoke(IPC.IDE_READ_FILE_ENCODED, filePath) as Promise<{ content: string; encoding: string }>,
   readFileChunk: (filePath: string, offset: number, length: number) =>
     ipcRenderer.invoke(IPC.IDE_READ_FILE_CHUNK, filePath, offset, length) as Promise<{ content: string; totalSize: number; isEnd: boolean }>,
-  writeFile: (filePath: string, content: string) => ipcRenderer.invoke(IPC.IDE_WRITE_FILE, filePath, content),
+  writeFile: (filePath: string, content: string, encoding?: string) => ipcRenderer.invoke(IPC.IDE_WRITE_FILE, filePath, content, encoding),
+  // 原生工具确认桥：主进程 FC 循环内 needsConfirm 工具执行前 → 渲染层弹确认卡片
+  onAgentToolConfirm: (callback: (payload: { requestId: string; toolId: string; toolName: string; args: Record<string, unknown> }) => void) => {
+    const listener = (_e: unknown, payload: { requestId: string; toolId: string; toolName: string; args: Record<string, unknown> }) => callback(payload);
+    ipcRenderer.on(IPC.IDE_AGENT_TOOL_CONFIRM_REQUEST, listener);
+    return () => ipcRenderer.off(IPC.IDE_AGENT_TOOL_CONFIRM_REQUEST, listener);
+  },
+  agentToolConfirmResult: (payload: { requestId: string; allowed: boolean; result?: { ok: boolean; output?: string; error?: string } }) =>
+    ipcRenderer.invoke(IPC.IDE_AGENT_TOOL_CONFIRM_RESOLVE, payload),
+  watchFile: (filePath: string) => ipcRenderer.invoke(IPC.IDE_WATCH_FILE, filePath) as Promise<void>,
+  unwatchFile: (filePath: string) => ipcRenderer.send(IPC.IDE_UNWATCH_FILE, filePath),
+  onFileChanged: (callback: (payload: { filePath: string; deleted: boolean }) => void) => {
+    const listener = (_e: unknown, payload: { filePath: string; deleted: boolean }) => callback(payload);
+    ipcRenderer.on(IPC.IDE_FILE_CHANGED, listener);
+    return () => ipcRenderer.off(IPC.IDE_FILE_CHANGED, listener);
+  },
   getFileInfo: (filePath: string) => ipcRenderer.invoke(IPC.IDE_GET_FILE_INFO, filePath),
   searchFiles: (folderPath: string, query: string, options?: { caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean; maxResults?: number }) =>
     ipcRenderer.invoke(IPC.IDE_SEARCH_FILES, folderPath, query, options),
+  listFiles: (rootPath: string, pattern: string) => ipcRenderer.invoke(IPC.IDE_LIST_FILES, rootPath, pattern) as Promise<string[]>,
   move: (sourcePath: string, targetDir: string) => ipcRenderer.invoke(IPC.IDE_MOVE, sourcePath, targetDir) as Promise<{ ok: boolean; error?: string }>,
   getMemoryContext: (query: string) => ipcRenderer.invoke(IPC.IDE_GET_MEMORY_CONTEXT, query) as Promise<string>,
+  loadPersona: (identityId: string, lang?: string) =>
+    ipcRenderer.invoke(IPC.IDE_LOAD_PERSONA, identityId, lang) as Promise<{ identityName: string; persona: string; toneRules: string }>,
   createFile: (dirPath: string, fileName: string) => ipcRenderer.invoke(IPC.IDE_CREATE_FILE, dirPath, fileName) as Promise<{ ok: boolean; path?: string; error?: string }>,
   createDir: (dirPath: string, dirName: string) => ipcRenderer.invoke(IPC.IDE_CREATE_DIR, dirPath, dirName) as Promise<{ ok: boolean; path?: string; error?: string }>,
   delete: (targetPath: string) => ipcRenderer.invoke(IPC.IDE_DELETE, targetPath) as Promise<{ ok: boolean; error?: string }>,

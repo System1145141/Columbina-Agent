@@ -220,12 +220,17 @@ export const IPC = {
   IDE_TOGGLE_MAXIMIZE: "ide:toggle-maximize",
   IDE_PICK_FOLDER: "ide:pick-folder",     // 选择文件夹
   IDE_COPY_TEXT: "ide:copy-text",         // 复制文本到剪贴板
+  IDE_WATCH_FILE: "ide:watch-file",       // 注册监听文件外部变更
+  IDE_UNWATCH_FILE: "ide:unwatch-file",   // 注销文件监听
+  IDE_FILE_CHANGED: "ide:file-changed",   // 文件外部变更通知（主进程 → 渲染进程）
   IDE_READ_DIR: "ide:read-dir",           // 读取目录
-  IDE_READ_FILE: "ide:read-file",         // 读取文件内容
+  IDE_READ_FILE: "ide:read-file",         // 读取文件内容（UTF-8）
+  IDE_READ_FILE_ENCODED: "ide:read-file-encoded", // 读取文件内容并自动探测编码
   IDE_READ_FILE_CHUNK: "ide:read-file-chunk", // 分块读取文件内容
-  IDE_WRITE_FILE: "ide:write-file",       // 写入文件内容
+  IDE_WRITE_FILE: "ide:write-file",       // 写入文件内容（可指定编码）
   IDE_GET_FILE_INFO: "ide:get-file-info", // 获取文件信息
   IDE_SEARCH_FILES: "ide:search-files",   // 项目内文本搜索
+  IDE_LIST_FILES: "ide:list-files",       // 按 glob 模式列出文件
   IDE_TERMINAL_CREATE: "ide:terminal-create", // 创建终端
   IDE_TERMINAL_INPUT: "ide:terminal-input",   // 向终端发送输入
   IDE_TERMINAL_RESIZE: "ide:terminal-resize", // 调整终端大小
@@ -234,6 +239,7 @@ export const IPC = {
   IDE_TERMINAL_EXIT: "ide:terminal-exit",     // 主进程 → 渲染进程：终端退出
   IDE_MOVE: "ide:move",                       // 移动文件/文件夹到目标目录
   IDE_GET_MEMORY_CONTEXT: "ide:get-memory-context", // 获取 L0/L1/L2 记忆上下文
+  IDE_LOAD_PERSONA: "ide:load-persona",       // 加载 Agent 人格提示词（身份 + 语气规则）
   IDE_CREATE_FILE: "ide:create-file",         // 新建文件
   IDE_CREATE_DIR: "ide:create-dir",           // 新建文件夹
   IDE_DELETE: "ide:delete",                   // 删除文件/文件夹
@@ -275,6 +281,8 @@ export const IPC = {
   IDE_GET_WORKSPACE_STATE: "ide:get-workspace-state", // 获取当前/上次工作区状态
   IDE_RELOCATE_ROOT: "ide:relocate-root",             // 重新定位缺失的 Root 文件夹
   IDE_SET_WORKSPACE_ROOTS: "ide:set-workspace-roots", // 渲染进程同步工作区 roots（用于主进程路径校验）
+  IDE_AGENT_TOOL_CONFIRM_REQUEST: "ide:agent-tool-confirm-request", // 主进程 → 渲染进程：原生工具确认请求（写操作确认卡片）
+  IDE_AGENT_TOOL_CONFIRM_RESOLVE: "ide:agent-tool-confirm-resolve", // 渲染进程 → 主进程：确认结果 + 执行结果
 
   // call window (voice call)
   CALL_OPEN: "call:open",                 // sidebar → main：打开通话窗口

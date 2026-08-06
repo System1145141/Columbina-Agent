@@ -3,6 +3,7 @@ import {
   subscribe,
   notify,
   getGitStatusForRoot,
+  gitChangeFingerprint,
   getGitSelectedFileForRoot,
   getGitDiffForRoot,
   removeGitRootData,
@@ -17,7 +18,8 @@ import {
   type GitLogEntry,
   type Tab,
 } from "../services/state";
-import { toggleGitPanel } from "../services/layout";
+import { toggleGitPanel, toggleAiPanel } from "../services/layout";
+import { runAgentTurn } from "../services/agent-bridge";
 import { openFile, readFile, basename } from "../services/file-service";
 import { showPromptDialog } from "./file-tree";
 import {
@@ -163,6 +165,7 @@ async function openChangesTab(rootId: string, filePath: string): Promise<void> {
     currentContent: current,
     modified: false,
     lineEnding: "lf",
+    encoding: "utf-8",
     diffBaseContent: head.ok ? head.content : "",
   };
   addTab(tab);
@@ -178,6 +181,18 @@ async function doCommit(rootId: string, message: string): Promise<void> {
     state.statusMessage = `【${root.name}】没有已暂存的文件可以提交`;
     notify();
     return;
+  }
+  // 提交前审查提醒：未审查或自上次审查后有新变更时，提示先进行 AI 审查
+  const reviewed = state.gitReviewed[rootId];
+  if (!reviewed || reviewed.fingerprint !== gitChangeFingerprint(status)) {
+    const proceed = confirm(
+      `【${root.name}】有未审查的变更。\n\n建议先进行 AI 审查（Git 面板「AI 审查」按钮或命令面板「AI: 审查代码变更」）。\n\n点击「确定」仍然直接提交，点击「取消」中止提交。`
+    );
+    if (!proceed) {
+      state.statusMessage = `【${root.name}】已中止提交：建议先进行 AI 审查`;
+      notify();
+      return;
+    }
   }
   state.gitLoading = true;
   notify();
@@ -1118,6 +1133,20 @@ function renderGitRoot(root: WorkspaceRoot): HTMLElement {
   commitRow.appendChild(input);
   commitRow.appendChild(btn);
   rootEl.appendChild(commitRow);
+
+  const reviewRow = document.createElement("div");
+  reviewRow.className = "ide__git-commit";
+  const reviewBtn = document.createElement("button");
+  reviewBtn.type = "button";
+  reviewBtn.className = "ide__git-commit-btn";
+  reviewBtn.textContent = "AI 审查";
+  reviewBtn.title = "让 Agent 审查当前变更文件，按严重程度输出问题清单";
+  reviewBtn.addEventListener("click", () => {
+    toggleAiPanel();
+    void runAgentTurn("请审查当前 Git 变更文件（未提交的改动），按严重程度（高/中/低）输出问题清单，并给出修复建议。", "git");
+  });
+  reviewRow.appendChild(reviewBtn);
+  rootEl.appendChild(reviewRow);
 
   return rootEl;
 }

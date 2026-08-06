@@ -17,6 +17,7 @@ import {
   ColumbinaAgent,
   type ColumbinaRunOptions,
   type ColumbinaRunResult,
+  type ToolApprovalRequest,
 } from "./orchestrator/columbina-agent";
 import { indexConversationTurn } from "./orchestrator/history-tools";
 import type { RelationshipChannel } from "./relationship/relationship-log";
@@ -34,6 +35,17 @@ export interface AguiRunInput {
   identityId?: string;
   /** 指定使用的模型 ID（模型列表中的 id）。不传时使用全局默认模型。 */
   modelId?: string;
+  /**
+   * IDE 模式：以原生 function calling 注入 IDE 工具。
+   * roots 为当前工作区根目录，用于相对路径解析与越界校验。
+   * confirmed 为 false 时仅注入只读工具（自动执行，无确认卡片），用于摘要/规划等后台 run。
+   */
+  ideTools?: { roots: string[]; confirmed?: boolean };
+  /**
+   * 显式要求不注入任何工具（优先级最高，覆盖 ideTools）。
+   * 用于幽灵补全 / 摘要等后台 run：避免回退到全局工具注册表（含写盘/shell 工具）。
+   */
+  noTools?: boolean;
 }
 
 /** 调用方（index.ts）注入：把输入转成 agent 需要的 options（含 system prompt 拼接）。 */
@@ -49,8 +61,83 @@ export type OnRunFinishedFn = (result: ColumbinaRunResult, latestUserText: strin
 /** 调用方注入：拿聊天窗口（广播副作用用，可空）。 */
 export type GetChatWindowFn = () => { webContents: WebContents; isDestroyed(): boolean } | null;
 
-/** 单次对话的活跃订阅（用于取消）。键 = runId。 */
-const activeRuns = new Map<string, Subscription>();
+/** 单次对话的活跃订阅（用于取消）。键 = runId；值含发起窗口，取消时按窗口过滤。 */
+const activeRuns = new Map<string, { sub: Subscription; sender: WebContents }>();
+
+// ── 工具确认桥：FC 循环内 needsConfirm 工具执行前，向发起 run 的窗口弹确认卡片 ──
+interface PendingToolApproval {
+  resolve: (v: { allowed: boolean; output?: string }) => void;
+  timer: NodeJS.Timeout;
+}
+const pendingToolApprovals = new Map<string, PendingToolApproval>();
+const TOOL_APPROVAL_TIMEOUT_MS = 120_000; // 120s 未响应自动拒绝
+
+/** 渲染层确认结果回传（allowed + 确认后的执行结果文本）。 */
+function registerToolApprovalResolveIpc(): void {
+  ipcMain.handle(
+    IPC.IDE_AGENT_TOOL_CONFIRM_RESOLVE,
+    (
+      _event,
+      payload: {
+        requestId?: string;
+        allowed?: boolean;
+        result?: { ok?: boolean; output?: string; error?: string };
+      },
+    ) => {
+      const requestId = payload?.requestId || "";
+      const pending = pendingToolApprovals.get(requestId);
+      if (!pending) return { ok: false };
+      pendingToolApprovals.delete(requestId);
+      clearTimeout(pending.timer);
+      if (payload.allowed) {
+        pending.resolve({
+          allowed: true,
+          output: payload.result?.ok ? payload.result.output : `[执行失败] ${payload.result?.error || "未知错误"}`,
+        });
+      } else {
+        pending.resolve({ allowed: false });
+      }
+      return { ok: true };
+    },
+  );
+}
+
+/** 向发起 run 的窗口发送确认请求并等待结果；窗口销毁/超时自动拒绝。 */
+function requestToolApproval(
+  sender: WebContents,
+  req: ToolApprovalRequest,
+): Promise<{ allowed: boolean; output?: string }> {
+  return new Promise((resolve) => {
+    const requestId = `tool-approve-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    if (sender.isDestroyed()) {
+      resolve({ allowed: false });
+      return;
+    }
+    const timer = setTimeout(() => {
+      pendingToolApprovals.delete(requestId);
+      console.warn("[AgUiBridge] 工具确认超时（" + TOOL_APPROVAL_TIMEOUT_MS + "ms），自动拒绝:", req.toolId);
+      resolve({ allowed: false });
+    }, TOOL_APPROVAL_TIMEOUT_MS);
+    pendingToolApprovals.set(requestId, { resolve, timer });
+    sender.send(IPC.IDE_AGENT_TOOL_CONFIRM_REQUEST, {
+      requestId,
+      toolCallId: req.toolCallId,
+      toolId: req.toolId,
+      toolName: req.toolName,
+      toolDescription: req.toolDescription,
+      args: req.args,
+    });
+  });
+}
+
+/** 清空所有未响应的确认请求（run 取消/出错时调用，避免悬挂）。 */
+function flushPendingToolApprovals(): void {
+  for (const [, p] of pendingToolApprovals) {
+    clearTimeout(p.timer);
+    p.resolve({ allowed: false });
+  }
+  pendingToolApprovals.clear();
+}
 
 let buildOptionsFn: BuildOptionsFn | null = null;
 let getChatWindowFn: GetChatWindowFn = () => null;
@@ -62,6 +149,23 @@ let getChatWindowFn: GetChatWindowFn = () => null;
  * @param onRunFinished agent 跑完的副作用（记忆/sticker 等）
  * @param getChatWindow 聊天窗口（事件要发到这里）
  */
+/**
+ * 取消指定窗口发起的所有活跃 run（窗口关闭时调用，防止 run 继续消耗 token、
+ * 悬挂确认卡等满 120s 超时）。幂等：没有匹配 run 时为 no-op。
+ */
+export function cancelRunsForWindow(sender: WebContents): void {
+  // 用稳定数字 id 比较（webContents 实例销毁后引用仍可比对，id 生命周期内唯一）
+  const senderId = sender.id;
+  for (const [runId, entry] of activeRuns) {
+    if (entry.sender.id !== senderId) continue;
+    entry.sub.unsubscribe();
+    activeRuns.delete(runId);
+  }
+  // 确认桥只在 IDE run 注入（ideTools && confirmed !== false），聊天 run 无挂起确认，
+  // 且当前仅一个 IDE 窗口，全量 flush 安全
+  flushPendingToolApprovals();
+}
+
 export function registerAgUiIpc(
   buildOptions: BuildOptionsFn,
   onRunFinished: OnRunFinishedFn,
@@ -69,6 +173,8 @@ export function registerAgUiIpc(
 ): void {
   buildOptionsFn = buildOptions;
   getChatWindowFn = getChatWindow;
+  // 工具确认桥的结果回传处理器（渲染层 agentToolConfirmResult → 主进程 resolve）
+  registerToolApprovalResolveIpc();
 
   const onFinished = onRunFinished;
   ipcMain.handle(IPC.AGUI_RUN, async (event: IpcMainInvokeEvent, rawInput: unknown) => {
@@ -76,14 +182,18 @@ export function registerAgUiIpc(
       throw new Error("AG-UI 桥未初始化");
     }
     const input = rawInput as AguiRunInput;
+    // 事件转发目标：优先用 invoke 的 sender（发起 run 的窗口），兜底用聊天窗口
+    const sender = event.sender;
     const { options, latestUserText } = await buildOptionsFn(input);
+    // IDE 模式：注入工具确认桥（needsConfirm 工具先经渲染层确认卡片把关）。
+    // 仅只读工具的后台 run（confirmed === false）不需要确认桥。
+    if (input.ideTools && input.ideTools.confirmed !== false) {
+      options.toolApprovalHandler = (req) => requestToolApproval(sender, req);
+    }
 
     const threadId = `thread-${Date.now()}`;
     const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const agent = new ColumbinaAgent({ threadId, description: "Columbina 主聊天" });
-
-    // 事件转发目标：优先用 invoke 的 sender（发起 run 的窗口），兜底用聊天窗口
-    const sender = event.sender;
 
     const send = (baseEvent: unknown): void => {
       const targets: WebContents[] = [];
@@ -143,7 +253,7 @@ export function registerAgUiIpc(
         }
       },
     });
-    activeRuns.set(runId, sub);
+    activeRuns.set(runId, { sub, sender });
 
     // invoke 立刻返回 ack，不等 Observable 结束。
     // 终态（RUN_FINISHED/RUN_ERROR）由事件流承载，渲染端据此 offEvent + 收尾。
@@ -151,11 +261,8 @@ export function registerAgUiIpc(
     return { success: true, runId };
   });
 
-  ipcMain.handle(IPC.AGUI_CANCEL, () => {
-    for (const sub of activeRuns.values()) {
-      sub.unsubscribe();
-    }
-    activeRuns.clear();
+  ipcMain.handle(IPC.AGUI_CANCEL, (event) => {
+    cancelRunsForWindow(event.sender);
     return true;
   });
 }

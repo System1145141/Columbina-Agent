@@ -1,0 +1,51 @@
+appId: com.system1145141.columbina
+productName: Columbina-IDE
+directories:
+  output: release
+
+# 打进 asar 的文件：编译产物 + 运行时资源（app.getAppPath() 读取）
+files:
+  - dist/**                # main / preload / renderer / shared-i18n
+  - src/shared/i18n/**     # 运行时 i18n fallback
+  - prompts/**             # 人格提示词（运行时必须）
+  - skills/**              # 内置 skills
+  - assets/**              # Live2D 模型 / 托盘图标
+  - game-recipes/**
+  - "!models/**"           # 模型太大，走 extraResources
+  - "!experiments/**"
+  - "!docs/**"
+  - "!examples/**"
+  - "!**/*.map"
+
+# 原生模块不能放 asar（node-pty 等需要 fs 直接访问）
+asarUnpack:
+  - "**/node_modules/node-pty/**"
+  - "**/node_modules/@lancedb/lancedb/**"
+  - "**/node_modules/@node-rs/jieba/**"
+  - "**/node_modules/sharp/**"
+
+# 大模型放 resources 目录，代码已有 process.resourcesPath 兜底（rag/model-status.ts）
+extraResources:
+  - from: models
+    to: models
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: assets/tray-icon.ico
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+
+mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+  category: public.app-category.developer-tools
+  # 注意：mac 需要 .icns 图标（当前仅 .ico，打包会用默认图标）
+
+linux:
+  target: [AppImage, deb]
+  category: Development
+  maintainer: System1145141

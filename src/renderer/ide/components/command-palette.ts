@@ -13,7 +13,7 @@ import {
   findReferences,
   formatDocument,
 } from "./lsp-integration";
-import { runAgentPlan } from "../services/agent-bridge";
+import { runAgentPlan, undoLastRefactor, runAgentTurn } from "../services/agent-bridge";
 import {
   toggleSearchPanel,
   toggleProblemsPanel,
@@ -21,8 +21,12 @@ import {
   toggleIdeTheme,
   changeEditorFontSize,
   toggleAiPanel,
+  toggleAutoSave,
+  toggleOutlinePanel,
+  toggleAgentIdentity,
 } from "../services/layout";
 import { saveWorkspace, openWorkspace } from "../services/workspace-service";
+import { getRecentFiles } from "../services/recent-files";
 
 const commandPanelEl = document.getElementById("command-panel") as HTMLElement;
 const commandInputEl = document.getElementById("command-input") as HTMLInputElement;
@@ -61,6 +65,12 @@ function getBaseCommands(): CommandItem[] {
       icon: "📄",
       shortcut: "Ctrl+P",
       run: () => showQuickOpen(),
+    },
+    {
+      id: "recent-files",
+      label: "最近打开的文件",
+      icon: "🕘",
+      run: () => void showRecentFilesCommand(),
     },
     {
       id: "save-file",
@@ -114,6 +124,39 @@ function getBaseCommands(): CommandItem[] {
       },
     },
     {
+      id: "undo-last-refactor",
+      label: "撤销上次重构",
+      icon: "↩",
+      run: () => void undoLastRefactor(),
+    },
+    {
+      id: "ai-generate-tests",
+      label: "AI: 为当前文件生成测试",
+      icon: "🧪",
+      run: () => {
+        toggleAiPanel();
+        void runAgentTurn(
+          "请为当前打开的文件生成单元测试：先用 generate_tests 工具获取文件内容与项目测试框架，再生成覆盖核心逻辑和边界情况的测试代码，用 write_file 写入合适的测试文件，并给出运行命令。",
+          "file"
+        );
+      },
+    },
+    {
+      id: "ai-review-changes",
+      label: "AI: 审查代码变更",
+      icon: "🔎",
+      run: () => {
+        toggleAiPanel();
+        void runAgentTurn("请审查当前 Git 变更文件（未提交的改动），按严重程度（高/中/低）输出问题清单，并给出修复建议。", "git");
+      },
+    },
+    {
+      id: "toggle-agent-identity",
+      label: "切换 Agent 身份",
+      icon: "🎭",
+      run: () => void toggleAgentIdentity(),
+    },
+    {
       id: "toggle-search",
       label: "切换搜索面板",
       icon: "🔍",
@@ -128,11 +171,24 @@ function getBaseCommands(): CommandItem[] {
       run: () => toggleProblemsPanel(),
     },
     {
+      id: "toggle-outline",
+      label: "切换大纲",
+      icon: "☰",
+      shortcut: "Ctrl+Shift+O",
+      run: () => toggleOutlinePanel(),
+    },
+    {
       id: "toggle-terminal",
       label: "切换终端",
       icon: "⌨️",
       shortcut: "Ctrl+`",
       run: () => toggleTerminalPanel(),
+    },
+    {
+      id: "toggle-autosave",
+      label: state.ideSettings.autoSave ? "关闭自动保存" : "开启自动保存",
+      icon: "💾",
+      run: () => void toggleAutoSave(),
     },
     {
       id: "toggle-theme",
@@ -155,6 +211,34 @@ function getBaseCommands(): CommandItem[] {
       run: () => changeEditorFontSize(-1),
     },
   ];
+}
+
+function isPathUnderRoot(filePath: string, rootPath: string): boolean {
+  const fp = filePath.replace(/\\/g, "/");
+  const rp = rootPath.replace(/\\/g, "/");
+  return fp === rp || fp.startsWith(rp.endsWith("/") ? rp : rp + "/");
+}
+
+function recentFileLabel(path: string): string {
+  const root = getRootForPath(path);
+  return root ? path.replace(root.path.replace(/\\/g, "/") + "/", "") : path;
+}
+
+function buildRecentFileCommands(): Promise<CommandItem[]> {
+  return getRecentFiles().then((entries) =>
+    entries
+      // 仅展示当前工作区内的最近文件（工作区外文件无法通过 IDE 路径校验打开）
+      .filter((e) => state.roots.some((r) => isPathUnderRoot(e.path, r.path)))
+      .map((e) => ({
+        id: `recent-file:${e.path}`,
+        label: recentFileLabel(e.path),
+        icon: "🕘",
+        run: () => {
+          void openFile(e.path);
+          hideCommandPalette();
+        },
+      }))
+  );
 }
 
 async function showQuickOpen() {
@@ -185,24 +269,59 @@ async function showQuickOpen() {
   state.commandSelectedIndex = -1;
   renderCommandList();
 
-  const files: import("../services/state").IdeDirEntry[] = [];
-  for (const root of state.roots) {
-    files.push(...(await collectFilesForQuickOpen(root.path)));
+  const [recentItems, files] = await Promise.all([
+    buildRecentFileCommands(),
+    (async () => {
+      const all: import("../services/state").IdeDirEntry[] = [];
+      for (const root of state.roots) {
+        all.push(...(await collectFilesForQuickOpen(root.path)));
+      }
+      return all;
+    })(),
+  ]);
+
+  const recentPaths = new Set(recentItems.map((c) => c.id.replace(/^recent-file:/, "")));
+  const fileItems = files
+    .filter((f) => !recentPaths.has(f.path))
+    .map((f) => {
+      const root = getRootForPath(f.path);
+      const label = root ? f.path.replace(root.path.replace(/\\/g, "/") + "/", "") : f.path;
+      return {
+        id: `file:${f.path}`,
+        label,
+        icon: "📄",
+        run: () => {
+          void openFile(f.path);
+          hideCommandPalette();
+        },
+      };
+    });
+
+  state.fileCommandItems = [...recentItems, ...fileItems];
+  state.commandItems = [...recentItems, ...fileItems].slice(0, 50);
+  state.commandSelectedIndex = state.commandItems.length > 0 ? 0 : -1;
+  renderCommandList();
+}
+
+/** 命令面板「最近打开的文件」：仅展示最近文件列表 */
+async function showRecentFilesCommand() {
+  state.commandPaletteVisible = true;
+  commandPanelEl.style.display = "flex";
+  commandInputEl.placeholder = "最近打开的文件";
+  commandInputEl.value = "";
+  commandInputEl.focus();
+  state.fileCommandItems = [];
+
+  const recent = await buildRecentFileCommands();
+  if (recent.length === 0) {
+    recent.push({
+      id: "__no-recent-files__",
+      label: "暂无最近打开的文件",
+      icon: "",
+      run: () => {},
+    });
   }
-  state.fileCommandItems = files.map((f) => {
-    const root = getRootForPath(f.path);
-    const label = root ? f.path.replace(root.path.replace(/\\/g, "/") + "/", "") : f.path;
-    return {
-      id: `file:${f.path}`,
-      label,
-      icon: "📄",
-      run: () => {
-        void openFile(f.path);
-        hideCommandPalette();
-      },
-    };
-  });
-  state.commandItems = state.fileCommandItems.slice(0, 50);
+  state.commandItems = recent;
   state.commandSelectedIndex = state.commandItems.length > 0 ? 0 : -1;
   renderCommandList();
 }

@@ -1,7 +1,7 @@
 import { EditorView, keymap, lineNumbers, WidgetType, Decoration, ViewPlugin, ViewUpdate } from "@codemirror/view";
 import { EditorState, StateEffect, StateField, EditorSelection, type SelectionRange } from "@codemirror/state";
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
-import { foldGutter, foldKeymap } from "@codemirror/language";
+import { foldGutter, foldKeymap, indentUnit } from "@codemirror/language";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
@@ -10,8 +10,9 @@ import { html } from "@codemirror/lang-html";
 import { markdown } from "@codemirror/lang-markdown";
 import { defaultKeymap, indentWithTab } from "@codemirror/commands";
 import { state, subscribe, notify, type InlineChatState } from "../services/state";
-import { saveTab, getFileExtension, loadFullFile } from "../services/file-service";
-import { callAgentStream } from "../services/agent-bridge";
+import { saveTab, getFileExtension, loadFullFile, readFile, normalizeLineEndings } from "../services/file-service";
+import { callAgentStream, buildPersonaPrompt } from "../services/agent-bridge";
+import { appendToAiInput, formatConversationBlock } from "../services/ai-context";
 import {
   lspExtension,
   notifyLspOpen,
@@ -184,9 +185,71 @@ const inlineChatPlugin = ViewPlugin.fromClass(
 let lastActiveTabId = "";
 let lastTheme = state.ideSettings.theme;
 let lastFontSize = state.ideSettings.fontSize;
+let lastTabSize = state.ideSettings.tabSize;
+let lastInsertSpaces = state.ideSettings.insertSpaces !== false;
+let lastRecreateVersion = 0;
 let currentLspFile = "";
 
+// 自动保存：编辑停止 800ms 后触发，失焦（flushAutoSave）时兜底
+const AUTO_SAVE_DELAY = 800;
+let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleAutoSave(tabId: string): void {
+  if (autoSaveTimer) clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => {
+    autoSaveTimer = null;
+    const tab = state.tabs.get(tabId);
+    if (!tab || tab.kind === "diff" || !tab.modified) return;
+    // 超大文件未完整加载时不自动保存，避免静默覆盖磁盘完整文件
+    if (tab.largeFile && !tab.loadedFull) return;
+    if (state.activeTabId === tabId && state.editorView) {
+      saveCurrentEditorToTab(tabId);
+    }
+    void saveTab(tabId);
+  }, AUTO_SAVE_DELAY);
+}
+
+/** 失焦/关闭前兜底保存：清空待执行的自动保存并立即保存 */
+export function flushAutoSave(): void {
+  if (autoSaveTimer) {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = null;
+  }
+  if (!state.ideSettings.autoSave) return;
+  const tabId = state.activeTabId;
+  if (!tabId) return;
+  const tab = state.tabs.get(tabId);
+  if (!tab || !tab.modified || tab.kind === "diff") return;
+  if (tab.largeFile && !tab.loadedFull) return;
+  saveCurrentEditorToTab(tabId);
+  void saveTab(tabId);
+}
+
 function detectLanguage(filePath: string) {
+  const override = state.fileLanguageOverrides[filePath];
+  if (override === "plaintext") return [];
+  if (override) {
+    switch (override) {
+      case "typescript":
+        return javascript({ typescript: true, jsx: true });
+      case "javascript":
+        return javascript({ typescript: false, jsx: true });
+      case "json":
+        return json();
+      case "css":
+      case "scss":
+      case "less":
+        return css();
+      case "html":
+      case "htm":
+        return html();
+      case "markdown":
+      case "md":
+        return markdown();
+      default:
+        return [];
+    }
+  }
   const ext = getFileExtension(filePath);
   switch (ext) {
     case "js":
@@ -340,6 +403,8 @@ function doCreateEditor(initialContent = "", filePath = ""): EditorView | null {
     lineNumbers(),
     isLight ? [] : oneDark,
     editorTheme,
+    EditorState.tabSize.of(state.ideSettings.tabSize),
+    indentUnit.of(state.ideSettings.insertSpaces === false ? "\t" : "  ".repeat(state.ideSettings.tabSize)),
     keymap.of([
       ...searchKeymap,
       ...foldKeymap,
@@ -406,6 +471,9 @@ function doCreateEditor(initialContent = "", filePath = ""): EditorView | null {
         if (currentLspFile) {
           notifyLspChange(currentLspFile, update.state.doc.toString());
         }
+        if (state.ideSettings.autoSave && tab.kind !== "diff") {
+          scheduleAutoSave(tab.id);
+        }
         notify();
       }
       if (update.selectionSet) {
@@ -438,6 +506,11 @@ function destroyEditor(): void {
 }
 
 export function saveCurrentTab(): void {
+  // 手动保存时取消待执行的自动保存，避免重复写入
+  if (autoSaveTimer) {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = null;
+  }
   if (state.activeTabId) {
     // Make sure current editor content is saved to state first
     saveCurrentEditorToTab(state.activeTabId);
@@ -451,13 +524,21 @@ export function saveCurrentTab(): void {
 
 function onStateChange(): void {
   const activeTab = state.activeTabId ? state.tabs.get(state.activeTabId) : null;
-  const settingsChanged = lastTheme !== state.ideSettings.theme || lastFontSize !== state.ideSettings.fontSize;
+  const settingsChanged =
+    lastTheme !== state.ideSettings.theme ||
+    lastFontSize !== state.ideSettings.fontSize ||
+    lastTabSize !== state.ideSettings.tabSize ||
+    lastInsertSpaces !== (state.ideSettings.insertSpaces !== false) ||
+    lastRecreateVersion !== state.editorRecreateVersion;
 
   if (lastActiveTabId !== state.activeTabId || settingsChanged) {
     saveCurrentEditorToTab(lastActiveTabId);
     lastActiveTabId = state.activeTabId;
     lastTheme = state.ideSettings.theme;
     lastFontSize = state.ideSettings.fontSize;
+    lastTabSize = state.ideSettings.tabSize;
+    lastInsertSpaces = state.ideSettings.insertSpaces !== false;
+    lastRecreateVersion = state.editorRecreateVersion;
 
     if (activeTab) {
       if (activeTab.kind === "diff") {
@@ -529,7 +610,9 @@ function showEditorContextMenu(x: number, y: number) {
     items.push({ label: "询问 Columbina", action: () => openInlineChat() });
     items.push({ label: "解释选中代码", action: () => { openInlineChat(); void runInlineChat("解释这段代码"); } });
     items.push({ label: "重构选中代码", action: () => { openInlineChat(); void runInlineChat("重构这段代码，提高可读性"); } });
+    items.push({ label: "添加到对话（选中代码）", action: () => addSelectedToConversation() });
   }
+  items.push({ label: "添加到对话（整个文件）", action: () => void addFileToConversation() });
 
   for (const item of items) {
     const btn = document.createElement("button");
@@ -556,6 +639,38 @@ function hideEditorContextMenu() {
     editorContextMenu.remove();
     editorContextMenu = null;
   }
+}
+
+/** 把当前编辑器选区添加到对话（来源标注含文件与行号） */
+function addSelectedToConversation(): void {
+  const view = state.editorView;
+  if (!view) return;
+  const { from, to } = view.state.selection.main;
+  if (from === to) return;
+  const text = view.state.sliceDoc(from, to);
+  const filePath = state.activeTabId || "";
+  const lineStart = view.state.doc.lineAt(from).number;
+  const lineEnd = view.state.doc.lineAt(to).number;
+  const source = filePath
+    ? `代码选区: ${filePath} 行 ${lineStart}-${lineEnd}`
+    : `代码选区 行 ${lineStart}-${lineEnd}`;
+  appendToAiInput(formatConversationBlock(source, text, detectLanguage(filePath)));
+}
+
+/** 把当前打开文件（完整内容）添加到对话；读取失败时回退到编辑器当前内容 */
+async function addFileToConversation(): Promise<void> {
+  const filePath = state.activeTabId || "";
+  const lang = detectLanguage(filePath);
+  let content = state.editorView?.state.doc.toString() ?? "";
+  if (filePath) {
+    try {
+      const raw = await readFile(filePath);
+      content = normalizeLineEndings(raw);
+    } catch {
+      // 读取失败（如 diff 标签无真实文件）时使用编辑器当前内容
+    }
+  }
+  appendToAiInput(formatConversationBlock(`整个文件: ${filePath || "未命名"}`, content, lang));
 }
 
 async function promptRenameSymbol() {
@@ -689,7 +804,8 @@ async function runInlineChat(instruction: string) {
   try {
     const filePath = state.activeTabId ? state.tabs.get(state.activeTabId)?.filePath : "";
     const context = filePath ? `当前文件: ${filePath}` : "";
-    const prompt = `${context ? context + "\n\n" : ""}你是一名资深编程助手，正在 IDE 中帮助用户修改选中的代码。
+    const persona = await buildPersonaPrompt(instruction);
+    const prompt = `${persona ? persona + "\n\n---\n\n" : ""}${context ? context + "\n\n" : ""}你是一名资深编程助手，正在 IDE 中帮助用户修改选中的代码。
 
 用户指令: ${instruction}
 
@@ -708,7 +824,8 @@ async function runInlineChat(instruction: string) {
 新代码
 <<<end>>>`;
 
-    const { content } = await callAgentStream(prompt);
+    // Inline Chat 用 <<<>>> 文本协议交互，不注入 IDE 工具（工具会诱导模型偏离协议输出，导致空修改）
+    const { content } = await callAgentStream(prompt, { tools: "none" });
     const { explanation, blocks } = parseSearchReplaceBlocks(content);
     const { modified, errors } = applySearchReplace(chatState.selectedText, blocks);
 

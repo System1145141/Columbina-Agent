@@ -19,6 +19,8 @@ import {
   type Tab,
   type WorkspaceRoot,
 } from "./state";
+import { fileEncodingLabel } from "../../../shared/file-encoding";
+import { recordRecentFile, removeRecentFile } from "./recent-files";
 
 export function basename(filePath: string): string {
   return filePath.replace(/\\/g, "/").split("/").pop() || filePath;
@@ -86,16 +88,26 @@ export async function readDir(dirPath: string): Promise<IdeDirEntry[]> {
   return (await window.ide!.readDir(dirPath)) || [];
 }
 
+/** 按 glob 模式列出 root 下的相对路径文件（如 src/**\/*.ts，上限 200） */
+export async function listFiles(rootPath: string, pattern: string): Promise<string[]> {
+  return (await window.ide!.listFiles(rootPath, pattern)) || [];
+}
+
 export async function readFile(filePath: string): Promise<string> {
   return window.ide!.readFile(filePath);
+}
+
+/** 读取文件内容并自动探测编码（UTF-8 / UTF-8 BOM / UTF-16 / GB18030） */
+export async function readFileEncoded(filePath: string): Promise<{ content: string; encoding: string }> {
+  return window.ide!.readFileEncoded(filePath);
 }
 
 export async function readFileChunk(filePath: string, offset: number, length: number): Promise<{ content: string; totalSize: number; isEnd: boolean }> {
   return window.ide!.readFileChunk(filePath, offset, length);
 }
 
-export async function writeFile(filePath: string, content: string): Promise<{ ok: boolean; error?: string }> {
-  return window.ide!.writeFile(filePath, content);
+export async function writeFile(filePath: string, content: string, encoding?: string): Promise<{ ok: boolean; error?: string }> {
+  return window.ide!.writeFile(filePath, content, encoding);
 }
 
 export async function getFileInfo(filePath: string): Promise<{ isDirectory: boolean; size: number }> {
@@ -139,6 +151,7 @@ export async function copyText(text: string): Promise<boolean> {
 }
 
 export async function loadDirectory(dirPath: string): Promise<void> {
+  unwatchAllOpenTabs();
   const root = createWorkspaceRoot(dirPath);
   setRoots([root]);
   setActiveRoot(root.id);
@@ -169,6 +182,7 @@ export async function openFile(filePath: string, anchorLine = 1, anchorCol = 1):
   if (state.tabs.has(filePath)) {
     state.pendingAnchor = { line: anchorLine, col: anchorCol };
     setActiveTab(filePath);
+    void recordRecentFile(filePath);
     notify();
     return;
   }
@@ -176,6 +190,7 @@ export async function openFile(filePath: string, anchorLine = 1, anchorCol = 1):
   try {
     const info = await getFileInfo(filePath);
     let rawContent: string;
+    let encoding = "utf-8";
     let largeFile = false;
     let fullSize: number | undefined;
     let loadedFull = true;
@@ -186,8 +201,11 @@ export async function openFile(filePath: string, anchorLine = 1, anchorCol = 1):
       largeFile = true;
       fullSize = chunk.totalSize;
       loadedFull = chunk.isEnd;
+      // 大文件懒加载路径暂按 UTF-8 处理（超大文件几乎都是 UTF-8 文本）
     } else {
-      rawContent = await readFile(filePath);
+      const encoded = await readFileEncoded(filePath);
+      rawContent = encoded.content;
+      encoding = encoded.encoding;
     }
 
     const lineEnding = detectLineEnding(rawContent);
@@ -200,6 +218,7 @@ export async function openFile(filePath: string, anchorLine = 1, anchorCol = 1):
       currentContent: content,
       modified: false,
       lineEnding,
+      encoding,
       largeFile,
       fullSize,
       loadedFull,
@@ -207,6 +226,8 @@ export async function openFile(filePath: string, anchorLine = 1, anchorCol = 1):
     addTab(tab);
     state.pendingAnchor = { line: anchorLine, col: anchorCol };
     setActiveTab(filePath);
+    registerFileWatch(filePath);
+    void recordRecentFile(filePath);
     notify();
   } catch (err) {
     state.statusMessage = `读取失败: ${String(err)}`;
@@ -218,12 +239,14 @@ export async function loadFullFile(tabId: string): Promise<boolean> {
   const tab = state.tabs.get(tabId);
   if (!tab || !tab.largeFile) return false;
   try {
-    const rawContent = await readFile(tab.filePath);
+    const encoded = await readFileEncoded(tab.filePath);
+    const rawContent = encoded.content;
     tab.initialContent = normalizeLineEndings(rawContent);
     tab.currentContent = tab.initialContent;
     tab.modified = false;
     tab.loadedFull = true;
     tab.lineEnding = detectLineEnding(rawContent);
+    tab.encoding = encoded.encoding;
     notify();
     return true;
   } catch (err) {
@@ -240,6 +263,8 @@ export async function openFileAt(filePath: string, line: number, col: number): P
 export async function saveTab(tabId: string): Promise<boolean> {
   const tab = state.tabs.get(tabId);
   if (!tab) return false;
+  // diff 标签是只读对比视图，不参与保存
+  if (tab.kind === "diff") return true;
 
   if (tab.largeFile && !tab.loadedFull) {
     const load = confirm(`"${tab.fileName}" 为超大文件且尚未完整加载，保存将覆盖磁盘上的完整文件。\n\n建议先加载完整文件再编辑。是否现在加载完整文件？`);
@@ -255,7 +280,7 @@ export async function saveTab(tabId: string): Promise<boolean> {
   if (content === tab.initialContent && !tab.modified) return true;
 
   const output = encodeLineEndings(content, tab.lineEnding);
-  const result = await writeFile(tab.filePath, output);
+  const result = await writeFile(tab.filePath, output, tab.encoding);
   if (result.ok) {
     markTabSaved(tabId);
     notify();
@@ -264,6 +289,32 @@ export async function saveTab(tabId: string): Promise<boolean> {
     alert(`保存失败: ${result.error || "未知错误"}`);
     return false;
   }
+}
+
+/** 切换标签的文件编码：标记为已修改，保存时按新编码重写磁盘字节 */
+export function changeTabEncoding(tabId: string, encoding: string): void {
+  const tab = state.tabs.get(tabId);
+  if (!tab || tab.kind === "diff") return;
+  if (tab.encoding === encoding) return;
+  tab.encoding = encoding;
+  if (tab.currentContent === tab.initialContent) {
+    tab.modified = true;
+  }
+  state.statusMessage = `编码已切换为 ${fileEncodingLabel(encoding)}，保存后生效`;
+  notify();
+}
+
+/** 切换标签的行尾（CRLF/LF）：标记为已修改，保存时按新行尾写盘 */
+export function changeTabLineEnding(tabId: string, lineEnding: Tab["lineEnding"]): void {
+  const tab = state.tabs.get(tabId);
+  if (!tab || tab.kind === "diff") return;
+  if (tab.lineEnding === lineEnding) return;
+  tab.lineEnding = lineEnding;
+  if (tab.currentContent === tab.initialContent) {
+    tab.modified = true;
+  }
+  state.statusMessage = `行尾已切换为 ${lineEndingLabel(lineEnding)}，保存后生效`;
+  notify();
 }
 
 export async function closeTab(tabId: string): Promise<void> {
@@ -285,6 +336,7 @@ export async function closeTab(tabId: string): Promise<void> {
         state.isClosing = false;
         if (ok) {
           closeTabState(tabId);
+          unregisterFileWatch(tab.filePath);
           notify();
         }
       } catch {
@@ -295,6 +347,7 @@ export async function closeTab(tabId: string): Promise<void> {
   }
 
   closeTabState(tabId);
+  unregisterFileWatch(tab.filePath);
   notify();
 }
 
@@ -304,6 +357,8 @@ export async function refreshAfterRename(oldPath: string, newPath: string | unde
   // Update any open tab path
   if (!isDirectory && state.tabs.has(oldPath)) {
     updateTabPath(oldPath, newPath, basename(newPath));
+    unregisterFileWatch(oldPath);
+    registerFileWatch(newPath);
   }
   // Notify so tree can refresh
   notify();
@@ -313,8 +368,105 @@ export async function refreshAfterRename(oldPath: string, newPath: string | unde
 export async function refreshAfterDelete(filePath: string, isDirectory: boolean): Promise<void> {
   if (!isDirectory && state.tabs.has(filePath)) {
     closeTabState(filePath);
+    unregisterFileWatch(filePath);
+    void removeRecentFile(filePath);
   }
   notify();
+}
+
+// ── 外部文件变更监听 ──
+
+function registerFileWatch(filePath: string): void {
+  try {
+    void window.ide?.watchFile?.(filePath);
+  } catch {
+    // 忽略注册失败
+  }
+}
+
+function unregisterFileWatch(filePath: string, force = false): void {
+  // 若仍有文件标签引用同一路径（例如并排 diff 视图被关闭而文件标签仍打开），保留监听
+  if (!force) {
+    const stillReferenced = Array.from(state.tabs.values()).some((t) => t.filePath === filePath && t.kind !== "diff");
+    if (stillReferenced) return;
+  }
+  try {
+    window.ide?.unwatchFile?.(filePath);
+  } catch {
+    // 忽略注销失败
+  }
+}
+
+export function unwatchAllOpenTabs(): void {
+  for (const tab of state.tabs.values()) {
+    unregisterFileWatch(tab.filePath, true);
+  }
+}
+
+/** 注册主进程 → 渲染进程的外部变更通知，处理已打开文件的自动重载/关闭 */
+export function initFileWatcher(): void {
+  window.ide?.onFileChanged?.(({ filePath, deleted }) => {
+    void handleExternalFileChanged(filePath, deleted);
+  });
+}
+
+async function handleExternalFileChanged(filePath: string, deleted: boolean): Promise<void> {
+  const tab = state.tabs.get(filePath);
+  if (!tab || tab.kind === "diff") return;
+
+  if (deleted) {
+    if (tab.modified) {
+      state.statusMessage = `文件已在外部被删除: ${tab.fileName}（本地未保存修改已保留）`;
+      notify();
+      return;
+    }
+    closeTabState(filePath);
+    unregisterFileWatch(filePath);
+    void removeRecentFile(filePath);
+    state.statusMessage = `文件已在外部被删除: ${tab.fileName}`;
+    notify();
+    return;
+  }
+
+  // 本地有未保存修改时不做覆盖，避免丢失用户输入
+  if (tab.modified) {
+    state.statusMessage = `文件已被外部修改: ${tab.fileName}（本地未保存修改已保留，保存将覆盖）`;
+    notify();
+    return;
+  }
+
+  try {
+    let rawContent: string;
+    if (tab.largeFile && !tab.loadedFull) {
+      const chunk = await readFileChunk(filePath, 0, LARGE_FILE_INITIAL_SIZE);
+      rawContent = chunk.content;
+      tab.fullSize = chunk.totalSize;
+    } else {
+      const encoded = await readFileEncoded(filePath);
+      rawContent = encoded.content;
+      tab.encoding = encoded.encoding;
+    }
+    const content = normalizeLineEndings(rawContent);
+    tab.initialContent = content;
+    tab.currentContent = content;
+    tab.modified = false;
+    tab.lineEnding = detectLineEnding(rawContent);
+
+    // 当前激活标签直接同步到编辑器，并保留光标位置
+    if (state.editorView && state.activeTabId === tab.id) {
+      const view = state.editorView;
+      const prevHead = view.state.selection.main.head;
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: content },
+        selection: { anchor: Math.min(prevHead, content.length) },
+      });
+      state.statusMessage = `已从磁盘重新加载: ${tab.fileName}`;
+    }
+    notify();
+  } catch (err) {
+    state.statusMessage = `重新加载文件失败: ${String(err)}`;
+    notify();
+  }
 }
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".cache", ".vscode", ".idea"]);
