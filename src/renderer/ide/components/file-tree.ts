@@ -23,7 +23,7 @@ import {
   detectLineEnding,
 } from "../services/file-service";
 import { showSearchPanel, toggleSearchPanel, hideSearchPanel } from "../services/layout";
-import { appendToAiInput, formatConversationBlock } from "../services/ai-context";
+import { addContextRef, detectLanguageName } from "../services/ai-context";
 import { relocateRoot, closeTabsForRoot } from "../services/workspace-service";
 import { openTerminalInDir } from "./terminal-panel";
 
@@ -170,8 +170,12 @@ async function addFileEntryToConversation(filePath: string): Promise<void> {
   try {
     const raw = await readFileEncoded(filePath);
     const content = normalizeLineEndings(raw.content);
-    const ext = filePath.split(".").pop() || "";
-    appendToAiInput(formatConversationBlock(`整个文件: ${filePath}`, content, ext));
+    addContextRef({
+      source: `整个文件: ${filePath}`,
+      filePath,
+      language: detectLanguageName(filePath),
+      content,
+    });
   } catch (err) {
     state.statusMessage = `读取文件失败: ${String(err)}`;
     notify();

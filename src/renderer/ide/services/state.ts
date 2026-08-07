@@ -130,6 +130,20 @@ export interface AiStreamSegment {
   resultPreview?: string;
 }
 
+/** AI 输入框的引用附件（「添加到对话」卡片：编辑器选区/终端选区/整个文件） */
+export interface AiContextRef {
+  id: string;
+  /** 来源标注（发送时拼入 prompt，如「代码选区: a.ts 行 1-100」） */
+  source: string;
+  /** 文件路径（卡片显示 basename；终端选区等无文件时为 undefined） */
+  filePath?: string;
+  lineStart?: number;
+  lineEnd?: number;
+  /** 代码块语言（无则不包代码块） */
+  language?: string;
+  content: string;
+}
+
 /** Agent 会话：一个可切换/复制/重命名的独立对话上下文 */
 export interface AiSession {
   id: string;
@@ -367,6 +381,8 @@ export const state = {
   aiTodos: [] as { id: string; text: string; done: boolean }[],
   /** 终端运行状态（check_command_status / stop_command 工具）：id → 运行状态与最近输出 */
   agentTerminals: {} as Record<string, { running: boolean; lastOutput: string }>,
+  /** AI 输入框的引用附件（「添加到对话」卡片，可点击删除；发送时拼入 prompt 后清空） */
+  aiContextRefs: [] as AiContextRef[],
   fileSnapshots: new Map<string, FileSnapshot>(),
   /** 跨文件重构的整体撤销栈（FIFO，上限 20 组） */
   refactorUndoStack: [] as RefactorUndoGroup[],

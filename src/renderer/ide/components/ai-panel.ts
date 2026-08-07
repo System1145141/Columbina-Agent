@@ -33,6 +33,7 @@ import {
   clearActiveSession,
 } from "../services/ai-sessions";
 import { showPromptDialog } from "./file-tree";
+import { removeContextRef, clearContextRefs, buildContextPromptBlock } from "../services/ai-context";
 
 const aiToggleBtn = document.getElementById("ai-toggle-btn") as HTMLButtonElement;
 const aiPanelEl = document.getElementById("ai-panel") as HTMLElement;
@@ -856,14 +857,18 @@ function updateAiPanel() {
     void refreshModelSelect();
   }
   renderSessionButton();
+  renderAiRefs();
   renderAiMessages();
   renderAiTodos();
   renderAiPlan();
 }
 
 async function sendAiMessage() {
+  // 引用附件（「添加到对话」卡片）拼入 prompt 顶部，随本轮发送后清空
+  const refs = state.aiContextRefs;
+  const refText = refs.map((r) => buildContextPromptBlock(r)).join("\n\n");
   const text = aiInputEl.value.trim();
-  if (!text || state.aiRunning) return;
+  if ((!text && !refText) || state.aiRunning) return;
 
   // 用量统计归属兜底：新 turn 开始即清快照，统一覆盖所有无终态终止路径
   // （停止 / 连续失败 / runAgentTurn finally 兜底 cancel / 异常），防止残留串账
@@ -871,13 +876,58 @@ async function sendAiMessage() {
 
   const scope = aiContextSelectEl.value as import("../services/state").AiContextScope;
   aiInputEl.value = "";
+  clearContextRefs();
+
+  const prompt = refText ? `${refText}\n\n${text}` : text;
 
   // Solo 模式放宽渲染层重试上限（主进程 FC 循环另有 20 轮工具调用上限）
   const maxRounds = state.ideSettings.aiMode === "assist" ? 5 : 10;
   if (aiPlanModeCb?.checked) {
-    await runAgentPlan(text, scope);
+    await runAgentPlan(prompt, scope);
   } else {
-    await runAgentTurn(text, scope, maxRounds);
+    await runAgentTurn(prompt, scope, maxRounds);
+  }
+}
+
+/** 渲染「添加到对话」引用卡片栏：[文件名 行范围 ×]，× 点击移除 */
+function renderAiRefs() {
+  const bar = document.getElementById("ai-refs-bar") as HTMLElement | null;
+  if (!bar) return;
+  const refs = state.aiContextRefs;
+  if (refs.length === 0) {
+    bar.style.display = "none";
+    bar.innerHTML = "";
+    return;
+  }
+  bar.style.display = "flex";
+  bar.innerHTML = "";
+  for (const ref of refs) {
+    const chip = document.createElement("span");
+    chip.className = "ide__ai-ref";
+    const name = ref.filePath ? ref.filePath.split(/[\\/]/).pop() || ref.filePath : ref.source;
+    const range =
+      typeof ref.lineStart === "number" && typeof ref.lineEnd === "number"
+        ? ` ${ref.lineStart}-${ref.lineEnd}`
+        : "";
+    const label = document.createElement("span");
+    label.className = "ide__ai-ref-label";
+    label.textContent = `[${name}${range} `;
+    chip.appendChild(label);
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "ide__ai-ref-close";
+    close.title = "移除引用";
+    close.textContent = "×";
+    close.addEventListener("click", (e) => {
+      e.stopPropagation();
+      removeContextRef(ref.id);
+    });
+    chip.appendChild(close);
+    const bracket = document.createElement("span");
+    bracket.className = "ide__ai-ref-bracket";
+    bracket.textContent = "]";
+    chip.appendChild(bracket);
+    bar.appendChild(chip);
   }
 }
 

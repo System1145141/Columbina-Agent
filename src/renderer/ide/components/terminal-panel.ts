@@ -4,7 +4,7 @@ import "@xterm/xterm/css/xterm.css";
 import { state, getActiveRootPath } from "../services/state";
 import { registerTerminalToggle } from "../services/layout";
 import { registerRunCommandInTerminal } from "../services/agent-bridge";
-import { appendToAiInput, formatConversationBlock } from "../services/ai-context";
+import { addContextRef } from "../services/ai-context";
 
 const terminalPanelEl = document.getElementById("terminal-panel") as HTMLElement;
 const terminalTabsEl = document.getElementById("terminal-tabs") as HTMLElement;
@@ -215,7 +215,10 @@ function showTerminalContextMenu(x: number, y: number, selection: string) {
   btn.textContent = "添加到对话（终端选区）";
   btn.addEventListener("click", () => {
     hideTerminalContextMenu();
-    appendToAiInput(formatConversationBlock("终端选区", selection));
+    addContextRef({
+      source: "终端选区",
+      content: selection,
+    });
   });
   menu.appendChild(btn);
 
