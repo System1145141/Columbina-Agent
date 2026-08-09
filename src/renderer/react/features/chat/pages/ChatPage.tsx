@@ -20,7 +20,6 @@ import type { WeatherData } from "../components/weather/weather-types";
 import { getTtsPlaybackSnapshot, playTtsToCompletion, stopTtsPlayback } from "../components/tts-playback";
 import { EarlyTtsPlaybackQueue } from "../tts/early-tts-queue";
 import { ConversationSidebar } from "../components/ConversationSidebar";
-import { StatusFloat } from "../components/StatusFloat";
 import type { ChatMessage, ChatSession, ChatSessionMeta, ConversationMode, ReasoningBlock, RunActivityRecord, ToolExecutionRecord } from "../../../../../shared/chat-types-react";
 import { SidebarToggle } from "../../../components/ui/SidebarToggle";
 import { ModeSwitch } from "../../../components/ui/ModeSwitch";
@@ -68,7 +67,6 @@ import "../components/StyleControl.css";
 import "../components/PermissionControl.css";
 import "../components/ChatMessageList.css";
 import "../components/ConversationSidebar.css";
-import "../components/StatusFloat.css";
 
 import avatarLight from "../../../assets/avatars/avatar-light.png";
 import compressingPng from "../../../assets/compressing.png";
@@ -2078,7 +2076,6 @@ export function ChatPage() {
         <NewTaskButton label={taskLabel} onClick={() => void createNewTask()} />
       </div>
       <div className="cy-page-conversations">
-        <StatusFloat />
         <ConversationSidebar
           mode={mode}
           sessions={sessions}
