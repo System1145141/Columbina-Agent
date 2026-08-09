@@ -198,6 +198,8 @@ const chatRail = document.getElementById("chat-rail") as HTMLElement | null;
 const chatRailNew = document.getElementById("chat-rail-new") as HTMLButtonElement | null;
 const chatRailList = document.getElementById("chat-rail-list") as HTMLElement | null;
 const chatRailEmpty = document.getElementById("chat-rail-empty") as HTMLElement | null;
+const chatRailLearn = document.getElementById("chat-rail-learn") as HTMLButtonElement | null;
+const chatRailLearnLabel = document.getElementById("chat-rail-learn-label") as HTMLElement | null;
 
 // 旧版 localStorage key——首次启动时检测到老数据会迁移到主进程 chats 存储再清掉。
 const LEGACY_STORAGE_KEY = "columbina.chat.history.v1";

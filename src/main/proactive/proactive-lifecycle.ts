@@ -66,9 +66,9 @@ interface ProactiveGeneralSettings {
   mobileMessageSegmentation?: MobileMessageSegmentationMode;
 }
 
-/** 延迟 require("../../index")：index.ts 会 import 本模块，静态 import 会造成循环依赖。 */
+/** 延迟 require("../index")：index.ts 会 import 本模块，静态 import 会造成循环依赖。 */
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const mainModule = () => require("../../index") as {
+const mainModule = () => require("../index") as {
   loadGeneralSettings: () => ProactiveGeneralSettings;
   loadModelSettings: () => { apiKey: string };
   loadUserProfile: () => { timezone?: string };

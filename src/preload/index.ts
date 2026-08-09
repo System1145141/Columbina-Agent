@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { IPC } from "../shared/ipc-channels";
 import { exposeMusicApi } from "./music";
+import { createReactBridge } from "./react-bridge";
 
 // 主进程通过 additionalArguments 注入当前语言，供 renderer 初始化 i18n 使用。
 const langArg =
@@ -469,6 +470,11 @@ const userApi = {
   saveProfile: (profile: unknown) => ipcRenderer.invoke(IPC.USER_SAVE_PROFILE, profile),
   uploadAvatar: () => ipcRenderer.invoke(IPC.USER_UPLOAD_AVATAR),
   getAvatar: () => ipcRenderer.invoke(IPC.USER_GET_AVATAR),
+  // React 聊天窗口（ui-port-plan 阶段 A）需要这两个订阅；Columbina 主进程暂无
+  // 头像/资料变更广播通道，先提供 no-op（getProfile/getAvatar 拉取仍可用），
+  // 实时跨窗口联动在阶段 B 补广播后接入。
+  onAvatarChanged: (_callback: () => void) => () => {},
+  onProfileChanged: (_callback: (profile: unknown) => void) => () => {},
 };
 
 const memoryPanelApi = {
@@ -710,4 +716,7 @@ const i18nApi = {
   getBundle: (lang: string) => ipcRenderer.invoke(IPC.I18N_GET_BUNDLE, lang),
 };
 contextBridge.exposeInMainWorld("getI18nBundle", i18nApi.getBundle);
+
+// UI 移植（阶段 A 骨架）：React 聊天窗口的接口适配层（Phase B 填充映射实现）
+contextBridge.exposeInMainWorld("reactBridge", createReactBridge());
 

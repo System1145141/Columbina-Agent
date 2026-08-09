@@ -935,7 +935,7 @@ const DEFAULT_USER_PROFILE: UserProfile = {
   defaultCity: "",
 };
 
-function loadUserProfile(): UserProfile {
+export function loadUserProfile(): UserProfile {
   try {
     const filePath = getUserProfilePath();
     if (!fs.existsSync(filePath)) return DEFAULT_USER_PROFILE;
@@ -1145,7 +1145,7 @@ function normalizeModelSettings(input: Partial<ModelSettings> | null | undefined
   };
 }
 
-function loadModelSettings(): ModelSettings {
+export function loadModelSettings(): ModelSettings {
   try {
     const filePath = getSettingsPath();
     if (!fs.existsSync(filePath)) return DEFAULT_MODEL_SETTINGS;
@@ -2618,6 +2618,10 @@ function createWindow(): void {
 }
 
 
+// UI 移植（docs/ui-port-plan.md 阶段 A）：true 时聊天窗口加载 React 版（chat-react 入口），
+// 保留 vanilla 版入口直到阶段 D 验收通过后再移除。
+const USE_REACT_CHAT = true;
+
 function createChatWindow(sessionId?: string): void {
   if (chatWindow && !chatWindow.isDestroyed()) {
     chatWindow.show();
@@ -2659,10 +2663,17 @@ function createChatWindow(sessionId?: string): void {
   // 后续切换走 CHATS_SWITCH_SESSION 事件，避免重新加载页面。
   const queryString = sessionId ? "?sessionId=" + encodeURIComponent(sessionId) : "";
   if (isDev) {
-    chatWindow.loadURL(devServerUrl("/chat/" + queryString));
+    chatWindow.loadURL(devServerUrl((USE_REACT_CHAT ? "/react/" : "/chat/") + queryString));
   } else {
     chatWindow.loadFile(
-      path.join(__dirname, "..", "..", "renderer", "chat", "index.html"),
+      path.join(
+        __dirname,
+        "..",
+        "..",
+        "renderer",
+        USE_REACT_CHAT ? "react" : "chat",
+        "index.html",
+      ),
       sessionId ? { search: queryString } : undefined,
     );
   }

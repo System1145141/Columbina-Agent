@@ -1,0 +1,42 @@
+/* UI 移植（阶段 B）：把 Columbina 三主题映射到 React 聊天窗口的 --cy-* 变量。
+ * 在 ui/theme.ts 设置 documentElement.dataset.uiTheme 后生效。
+ * 深蓝 = 暗色赛博风（深海军蓝底 + 品牌粉强调）；浅蓝 = 蓝色调浅色。
+ * 像素级视觉对齐（气泡/阴影/antd 组件暗色适配）留阶段 D 打磨。 */
+
+[data-ui-theme="deep-blue"] {
+  --cy-bg-page: #0a0f24;
+  --cy-bg-workspace: #11183a;
+  --cy-bg-hover: #192154;
+  --cy-bg-active: #222c66;
+  --cy-border: #1d2554;
+  --cy-text: #f1f5ff;
+  --cy-text-muted: #94a3c7;
+  --cy-accent: #ff5b8a;
+  --cy-pill-bg: #11183a;
+  --cy-pill-border: #3b4b96;
+  --cy-pill-status: #f1a5c0;
+  --cy-shadow-workspace: inset 0 2px 8px rgba(0, 0, 0, 0.35), inset 0 0 2px rgba(0, 0, 0, 0.3);
+  --cy-shadow-bubble-neutral: 2px 2px 3px rgba(0, 0, 0, 0.35), 3px 5px 16px rgba(0, 0, 0, 0.3);
+  --cy-shadow-bubble-accent: 2px 2px 4px rgba(255, 91, 138, 0.25), 3px 7px 16px rgba(255, 91, 138, 0.3);
+  --cy-shadow-control-hover: 2px 2px 5px rgba(0, 0, 0, 0.35), 3px 8px 18px rgba(0, 0, 0, 0.3);
+  --cy-shadow-control-focus: 0 0 0 3px rgba(255, 91, 138, 0.25), 2px 6px 16px rgba(0, 0, 0, 0.3);
+}
+
+[data-ui-theme="light-blue"] {
+  --cy-bg-page: #f2f6fb;
+  --cy-bg-workspace: #ffffff;
+  --cy-bg-hover: #eef4fb;
+  --cy-bg-active: #dcebfa;
+  --cy-border: #e2eaf4;
+  --cy-text: #1d2530;
+  --cy-text-muted: #8a97a8;
+  --cy-accent: #3b82f6;
+  --cy-pill-bg: #f6faff;
+  --cy-pill-border: #93c5fd;
+  --cy-pill-status: #1e4e8f;
+  --cy-shadow-workspace: inset 0 2px 8px rgba(31, 35, 48, 0.04), inset 0 0 2px rgba(31, 35, 48, 0.03);
+  --cy-shadow-bubble-neutral: 2px 2px 3px rgba(31, 35, 48, 0.06), 3px 5px 16px rgba(31, 35, 48, 0.055);
+  --cy-shadow-bubble-accent: 2px 2px 4px rgba(59, 130, 246, 0.14), 3px 7px 16px rgba(59, 130, 246, 0.18);
+  --cy-shadow-control-hover: 2px 2px 5px rgba(31, 35, 48, 0.075), 3px 8px 18px rgba(31, 35, 48, 0.065);
+  --cy-shadow-control-focus: 0 0 0 3px rgba(59, 130, 246, 0.12), 2px 6px 16px rgba(31, 35, 48, 0.08);
+}
