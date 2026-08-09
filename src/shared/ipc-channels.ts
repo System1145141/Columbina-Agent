@@ -19,6 +19,10 @@ export const IPC = {
   CHAT_IS_MAXIMIZED: "chat:is-maximized",
   CHAT_SEND_MESSAGE: "chat:send-message",
   CHAT_INGEST_FILES: "chat:ingest-files",
+  // 后台文档索引进度（main → renderer：DocumentIndexProgress）
+  CHAT_PROCESS_DOCUMENTS: "chat:process-documents",
+  CHAT_DOCUMENT_INDEX_PROGRESS: "chat:document-index-progress",
+  CHAT_CANCEL_DOCUMENT_INDEX: "chat:cancel-document-index",
   CHAT_STREAM_CHUNK: "chat:stream-chunk",
   CHAT_STREAM_DONE: "chat:stream-done",
 
@@ -78,6 +82,10 @@ export const IPC = {
   CHATS_DELETE: "chats:delete",
   CHATS_OPEN_FOLDER: "chats:open-folder",
   CHATS_MIGRATE_LEGACY: "chats:migrate-legacy",
+  // renderer → main: 设置/切换会话模式（chat | learn）与 learn 模式的 Vault 工作区目录
+  CHATS_SET_MODE: "chats:set-mode",
+  // renderer → main: 为 learn 模式选择 Vault 工作区目录（dialog）
+  CHATS_PICK_VAULT_FOLDER: "chats:pick-vault-folder",
   // 任意会话变动后 main → 所有渲染窗口 broadcast，触发列表/标题刷新
   CHATS_CHANGED: "chats:changed",
   // 设置中心 → main：要求打开聊天窗口并加载指定 sessionId
@@ -142,6 +150,13 @@ export const IPC = {
   MEMORY_PANEL_DELETE_IMPORTED_DOC: "memory-panel:delete-imported-doc",
   MEMORY_PANEL_SAVE_L0: "memory-panel:save-l0",
   MEMORY_PANEL_SAVE_L1: "memory-panel:save-l1",
+  // Obsidian vault 双向同步（memory panel 扩展）
+  MEMORY_EXPORT_OBSIDIAN_VAULT: "memory:export-obsidian-vault",
+  OBSIDIAN_VAULT_BIND: "obsidian-vault:bind",
+  OBSIDIAN_VAULT_UNBIND: "obsidian-vault:unbind",
+  OBSIDIAN_VAULT_GET_CONFIG: "obsidian-vault:get-config",
+  OBSIDIAN_VAULT_SET_AUTO_SYNC: "obsidian-vault:set-auto-sync",
+  OBSIDIAN_VAULT_SYNC_NOW: "obsidian-vault:sync-now",
 
   // MCP server management
   MCP_ADD_SERVER: "mcp:add-server",
@@ -199,6 +214,10 @@ export const IPC = {
   TTS_SYNTHESIZE_CACHED_CUSTOM_CLOUD: "tts:synthesize-cached-custom-cloud", // 自定义云端 TTS 合成 + 本地缓存
   TTS_SYNTHESIZE_MIMO: "tts:synthesize-mimo",             // 小米 MiMo TTS 合成 → base64
   TTS_SYNTHESIZE_CACHED_MIMO: "tts:synthesize-cached-mimo", // 小米 MiMo TTS 合成 + 本地缓存
+  TTS_SYNTHESIZE_MOSSLAND: "tts:synthesize-mossland",       // Mossland (api.mosi.cn) 合成 → base64
+  TTS_SYNTHESIZE_CACHED_MOSSLAND: "tts:synthesize-cached-mossland", // Mossland 合成 + 本地缓存
+  TTS_CLONE_MOSSLAND: "tts:clone-mossland",           // Mossland 克隆音色（multipart 上传）
+  TTS_LIST_MOSSLAND_VOICES: "tts:list-mossland-voices", // Mossland 拉取账号下音色列表
 
   // agent permission level (file/shell access)
   PERMISSION_GET_LEVEL: "permission:get-level",
@@ -323,5 +342,19 @@ export const IPC = {
   // Phase 3.4：消息日志
   CHANNELS_LOG_GET: "channels:log:get",
   CHANNELS_LOG_CLEAR: "channels:log:clear",
+
+  // Music（网易云音乐：二维码登录 / 搜索 / 播放 / 歌单）
+  MUSIC_GET_STATUS: "music:get-status",
+  MUSIC_BEGIN_LOGIN: "music:begin-login",
+  MUSIC_CANCEL_LOGIN: "music:cancel-login",
+  MUSIC_LOGOUT: "music:logout",
+  MUSIC_GET_DAILY: "music:get-daily",
+  MUSIC_SEARCH: "music:search",
+  MUSIC_PRESENT_TRACKS: "music:present-tracks",
+  MUSIC_PLAY_TRACK: "music:play-track",
+  MUSIC_PLAY_PLAYLIST: "music:play-playlist",
+  MUSIC_DETECT_PLAYER: "music:detect-player",
+  MUSIC_STATE_CHANGED: "music:state-changed", // main → renderer：状态快照推送
+  MUSIC_CARD: "music:card",                   // main → renderer：音乐卡片（AG-UI CUSTOM 事件之外的可选通道）
 } as const;
 

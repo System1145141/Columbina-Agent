@@ -13,6 +13,16 @@ export interface Attachment {
   chunks?: number;
   /** kind="unsupported" 或 indexed 失败时的原因 */
   reason?: string;
+  /** 源文件绝对路径（后台文档索引 IPC 返回时附带） */
+  filePath?: string;
+  /** 后台索引产出的向量 importId（检索命中片段时用） */
+  importId?: string;
+  /** 是否命中文档索引缓存 */
+  cached?: boolean;
+  /** 索引完成后按 query 检索命中的 chunk 片段 */
+  retrievedChunks?: unknown[];
+  /** kind="unsupported" 时的错误标记 */
+  status?: "error";
 }
 
 /** ingestOneFile 的大文件索引回调签名。由调用方（index.ts）注入具体实现（importDocument）。 */

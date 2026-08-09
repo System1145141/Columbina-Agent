@@ -21,6 +21,7 @@
     "channels": "스마트폰 연결",
     "tts": "TTS 설정",
     "asr": "ASR 설정",
+    "music": "음악",
     "tokens": "토큰 사용량",
     "disclaimer": "면책 조항"
   },
@@ -320,6 +321,17 @@
     "hint": "음성 인식 및 통화 설정",
     "subtitle": "음성 인식 및 통화 설정",
     "off": "끄기"
+  },
+  "music": {
+    "title": "음악",
+    "hint": "NetEase 클라우드 뮤직 로그인 및 재생",
+    "subtitle": "NetEase 클라우드 뮤직: QR 로그인·검색·재생",
+    "account": "계정",
+    "depNotice": "재생은 로컬 NetEase 클라우드 뮤직 클라이언트(orpheus:// 프로토콜)에 의존합니다. 검색·로그인에는 resources/music-vendor(uv + cloud-music-mcp)가 필요하며, 없으면 \"음악 의존성 미설치\"로 표시됩니다.",
+    "qrTitle": "QR 로그인",
+    "qrTip": "NetEase 클라우드 뮤직 앱으로 QR 코드를 스캔해 로그인하세요",
+    "searchTitle": "노래 검색",
+    "searchBtn": "검색"
   },
   "common": { "save": "저장", "cancel": "취소", "confirm": "확인", "delete": "삭제", "close": "닫기", "edit": "편집", "waitingSave": "저장 대기", "saving": "저장 중...", "saved": "저장됨", "saveFailed": "저장 실패", "saveSettings": "설정 저장", "saveApiSettings": "API 설정 저장", "saveColumbinaSettings": "Columbina 설정 저장", "readConfigFailed": "설정 읽기 실패", "unsavedChanges": "저장되지 않은 변경 사항이 있습니다" },
   "chatWindow": {
@@ -668,6 +680,12 @@
     "ttsCustomCloudUrlRequired": "먼저 사용자 지정 클라우드 Endpoint URL을 입력하세요",
     "ttsMimoApiKeyRequired": "먼저 Xiaomi MiMo API 키를 입력하세요",
     "ttsMimoRefAudioRequired": "먼저 Xilian 클론 참조 오디오를 선택하세요",
+    "ttsMosslandApiKeyRequired": "먼저 Mossland API 키를 입력하세요",
+    "ttsMosslandVoiceIdRequired": "먼저 음성 ID를 입력하세요 (또는 아래에서 클론/목록 선택)",
+    "ttsMosslandRefAudioRequired": "먼저 클론할 참조 오디오를 선택하세요",
+    "ttsMosslandCloneSuccess": "✅ 클론 성공! 음성 ID {id}이(가) 자동 입력되었습니다.",
+    "ttsMosslandCloneFailed": "음성 클론 실패: ",
+    "ttsMosslandListFailed": "음성 목록 가져오기 실패: ",
     "ttsMinimaxApiKeyRequired": "먼저 MiniMax API 키를 입력하세요",
     "ttsMinimaxVoiceIdRequired": "먼저 음성 ID를 입력하세요 (또는 아래 클론 기능 사용)",
     "ttsCloneFileRequired": "음성 파일을 선택하세요",

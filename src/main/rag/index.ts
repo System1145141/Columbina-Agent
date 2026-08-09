@@ -9,12 +9,15 @@ import { WorldbookManager } from "./worldbook";
 export { INJECTION_HEADER, INJECTION_PREAMBLE } from "./worldbook-constants";
 import { chunkText } from "./chunk";
 import { feedEntityNamesToJieba } from "../memory/entity-graph";
+import { isL2LocallyRecallable } from "../memory/memory-types";
 
 // ── Global RAG instances ──
 let store: JsonVectorStore | null = null;
 let retriever: HybridRetriever | null = null;
 let worldbook: WorldbookManager | null = null;
 let provider: EmbeddingProvider | null = null;
+// 每轮对话递增，用于 DMAE repeatWindow 统计（worldbook 状态不持久化，重启回 0 可接受）
+let worldbookTurnCounter = 0;
 
 function getDataDir(): string {
   return path.join(app.getPath("userData"), "rag-data");
@@ -162,6 +165,7 @@ export async function searchMemoryEntries(
   const results = await retriever.retrieve(query, source, topK);
   if (options?.recordRecall !== false) {
     await recordUserMemoryRecalls(results);
+    await updateL2DmaeActivation(query, results);
   }
   return results.map((r) => ({
     id: r.entry.id,
@@ -188,6 +192,31 @@ async function recordUserMemoryRecalls(results: Array<{ entry: MemoryEntry }>): 
   }
 }
 
+/**
+ * V5 L2 DMAE：把本轮向量召回的 L2（按 rank 排序的 id 列表）喂给 l2DmaeManager 更新激活。
+ * - 只对 isL2LocallyRecallable 的 L2 生效（active/aging + synced + 有 ragId）
+ * - updateActivation 内部先按召回位次调用 setRecalledIntrinsicValues（I=[36,8,8,1]），再执行状态机更新
+ * - 模型回复文本此处不可得，model 奖励不触发（降级行为，与 buildMemoryContext 单参签名一致）
+ */
+async function updateL2DmaeActivation(userText: string, results: Array<{ entry: MemoryEntry }>): Promise<void> {
+  const recalledL2Ids = results
+    .filter((r) => r.entry.source === "user_memory")
+    .map((r) => r.entry.metadata?.l2Id)
+    .filter((id): id is string => typeof id === "string" && id.length > 0);
+  if (recalledL2Ids.length === 0) return;
+  try {
+    const { memoryStore } = await import("../memory/memory-store");
+    const { l2DmaeManager } = await import("../memory/l2-dmae-manager");
+    const allL2 = await memoryStore.getAllL2();
+    const recallableIds = new Set(allL2.filter(isL2LocallyRecallable).map((m) => m.id));
+    const filtered = recalledL2Ids.filter((id) => recallableIds.has(id));
+    if (filtered.length === 0) return;
+    await l2DmaeManager.updateActivation(allL2, userText, "", filtered);
+  } catch (err) {
+    console.warn("[RAG] failed to update L2 DMAE activation:", err);
+  }
+}
+
 // ── History search with metadata（供 recall_history 工具用）──
 // 跟 searchMemory 的区别：返回完整 entry（含 createdAt / metadata），
 // 让召回工具能按时间排序、展示时间戳。
@@ -206,9 +235,10 @@ export async function searchHistoryEntries(
 }
 
 // ── Worldbook DMAE：每轮打分（本轮用户输入 + 上轮模型回复）──
-export function updateWorldbookActivation(userText: string, modelText: string): void {
+export function updateWorldbookActivation(userText: string, modelText: string, turn?: number): void {
   if (!worldbook) return;
-  worldbook.updateActivation(userText, modelText);
+  const t = turn ?? ++worldbookTurnCounter;
+  worldbook.updateActivation(userText, modelText, t);
 }
 
 // ── Worldbook DMAE：取 Active 条目内容（阈值门控 + 注入）──
@@ -234,6 +264,25 @@ export function getPermanentWorldbookEntries(): string[] {
 }
 
 // ── Import document ──
+export type ImportedDocumentResult = {
+  importId: string;
+  chunkCount: number;
+};
+
+export type ImportedDocumentChunk = {
+  text: string;
+  score: number;
+  fileName?: string;
+  chunkIndex?: number;
+  importId?: string;
+};
+
+export type PreparedDocumentEmbedding = {
+  text: string;
+  chunkIndex: number;
+  embedding: number[];
+};
+
 export async function importDocument(
   text: string,
   fileName: string
@@ -248,6 +297,44 @@ export async function importDocument(
     provider
   );
   return chunks.length;
+}
+
+/**
+ * 把后台文档索引 worker 产出的预计算 embedding 批次写入向量库。
+ * 与 importDocument 写入相同的 schema（imported_doc source + fileName/chunkIndex/importId metadata）。
+ */
+export async function appendPreparedDocumentBatch(
+  fileName: string,
+  importId: string,
+  prepared: PreparedDocumentEmbedding[],
+): Promise<void> {
+  if (!store) throw new Error("RAG not initialized");
+  store.addPreparedBatch(prepared.map((entry) => ({
+    text: entry.text,
+    embedding: entry.embedding,
+    source: "imported_doc",
+    metadata: { fileName, chunkIndex: entry.chunkIndex, importId },
+  })));
+}
+
+export function hasImportedDocumentChunks(importId: string): boolean {
+  return store?.hasImportedDocumentChunks(importId) ?? false;
+}
+
+export async function searchImportedDocumentChunksForImportIds(
+  query: string,
+  importIds: string[],
+  topK = 6,
+): Promise<ImportedDocumentChunk[]> {
+  if (!retriever || !query.trim() || importIds.length === 0) return [];
+  const results = await retriever.retrieve(query, "imported_doc", topK, 0.7, 0.3, { importIds });
+  return results.map((result) => ({
+    text: result.entry.text,
+    score: result.score,
+    fileName: typeof result.entry.metadata?.fileName === "string" ? result.entry.metadata.fileName : undefined,
+    chunkIndex: typeof result.entry.metadata?.chunkIndex === "number" ? result.entry.metadata.chunkIndex : undefined,
+    importId: typeof result.entry.metadata?.importId === "string" ? result.entry.metadata.importId : undefined,
+  }));
 }
 
 // ── Build memory context (legacy, kept for compatibility) ──
@@ -292,14 +379,28 @@ export function getRAGStats() {
 }
 
 /**
- * 获取指定 source 的所有向量条目（含 embedding），用于记忆压缩 / 聚类。
+ * 获取指定 source 的所有向量条目（含 embedding），用于记忆压缩 / 聚类 / 启动对账。
  * 返回浅拷贝，调用方不应修改返回的 embedding。
  */
-export function getEntriesBySource(source: string): Array<{ id: string; text: string; embedding: number[]; createdAt: number; weight: number }> {
+export function getEntriesBySource(source: string): Array<{ id: string; text: string; embedding: number[]; createdAt: number; weight: number; metadata?: Record<string, unknown> }> {
   if (!store) return [];
   return ((store as any).entries as MemoryEntry[])
     .filter((e) => e.source === source)
-    .map((e) => ({ id: e.id, text: e.text, embedding: e.embedding, createdAt: e.createdAt, weight: e.weight }));
+    .map((e) => ({ id: e.id, text: e.text, embedding: e.embedding, createdAt: e.createdAt, weight: e.weight, metadata: e.metadata }));
+}
+
+/** 向量库是否可写（store 与 embedding provider 均已就绪） */
+export function isUserMemoryVectorStoreReady(): boolean {
+  return store !== null && provider !== null;
+}
+
+/**
+ * 按 id 批量删除 user_memory 向量（memory/RAG 启动对账清理孤儿向量用）。
+ * @returns 实际删除条数
+ */
+export function deleteUserMemoryVectors(ids: string[]): number {
+  if (!store) throw new Error("RAG not initialized");
+  return store.deleteByIds(ids);
 }
 
 export function deleteImportedDoc(importId: string, fileName?: string): number {

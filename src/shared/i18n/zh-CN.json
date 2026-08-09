@@ -21,6 +21,7 @@
     "channels": "连接手机",
     "tts": "TTS 设置",
     "asr": "ASR 设置",
+    "music": "音乐",
     "tokens": "Token 用量",
     "disclaimer": "免责声明"
   },
@@ -322,6 +323,17 @@
     "hint": "语音识别与通话配置",
     "subtitle": "语音识别与通话配置",
     "off": "关闭"
+  },
+  "music": {
+    "title": "音乐",
+    "hint": "网易云音乐登录与播放",
+    "subtitle": "网易云音乐：二维码登录、搜索与播放",
+    "account": "账号",
+    "depNotice": "播放依赖本地网易云音乐客户端（orpheus:// 协议）；搜索与登录需要 resources/music-vendor 依赖（uv + cloud-music-mcp），缺失时本面板显示\"未安装音乐依赖\"。",
+    "qrTitle": "扫码登录",
+    "qrTip": "请用网易云音乐 App 扫描二维码完成登录",
+    "searchTitle": "搜索歌曲",
+    "searchBtn": "搜索"
   },
   "common": {
     "save": "保存",
@@ -686,6 +698,12 @@
     "ttsCustomCloudUrlRequired": "请先填写自定义云端 Endpoint URL",
     "ttsMimoApiKeyRequired": "请先填写小米 MiMo API Key",
     "ttsMimoRefAudioRequired": "请先选择昔涟克隆参考音频",
+    "ttsMosslandApiKeyRequired": "请先填写 Mossland API Key",
+    "ttsMosslandVoiceIdRequired": "请先填写音色 ID（或点击下方克隆/从列表选择）",
+    "ttsMosslandRefAudioRequired": "请先选择要克隆的参考音频",
+    "ttsMosslandCloneSuccess": "✅ 克隆成功！音色 ID {id} 已自动填入。",
+    "ttsMosslandCloneFailed": "克隆音色失败: ",
+    "ttsMosslandListFailed": "获取音色列表失败: ",
     "ttsMinimaxApiKeyRequired": "请先填写 MiniMax API Key",
     "ttsMinimaxVoiceIdRequired": "请先填写音色 ID（或下方复刻训练）",
     "ttsCloneFileRequired": "请选择配音文件",

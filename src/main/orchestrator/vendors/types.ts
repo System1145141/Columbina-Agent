@@ -53,6 +53,33 @@ export interface ToolSpec {
   parameters: object; // JSON Schema
 }
 
+/**
+ * 结构化输出请求描述（wire 层请求的本地扩展，与 Cyrene vendors/types.ts 对齐）。
+ * 供 CITA / social-context 等结构化输出消费方使用；当前 adapter 尚未映射为
+ * response_format/output_config，结构化输出经 F4 runStructuredOutput 的
+ * extractJsonCandidates 兜底提取。
+ */
+export type StructuredOutputRequest =
+  | {
+      mode: "json_schema";
+      name: string;
+      schema: object;
+      strict: boolean;
+    }
+  | {
+      mode: "json_object";
+      /** LangChain responseFormat schema; legacy wire adapters ignore it. */
+      name?: string;
+      schema?: object;
+    }
+  | {
+      mode: "prompt_json";
+      sendJsonObjectHint: boolean;
+      /** LangChain responseFormat schema; legacy wire adapters ignore it. */
+      name?: string;
+      schema?: object;
+    };
+
 export interface ChatRequest {
   model: string;
   messages: ChatMessage[];

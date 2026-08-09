@@ -296,6 +296,10 @@ function getStickerSrc(id: string): string | undefined {
 // 启动期间 currentSessionId 为 null，发送按钮通过 sending 标志兜底（bootstrap 极快）。
 const messages: Message[] = [];
 let currentSessionId: string | null = null;
+// 当前会话模式（chat / learn）。learn 模式 = 绑定 Obsidian Vault 工作区，
+// 该会话 run 时主进程会自动注册 6 个 obsidian_* 工具并在每轮后静默更新进度。
+let currentSessionMode: "chat" | "learn" = "chat";
+let currentSessionWorkspaceRoot: string | undefined;
 let currentModelConfig: ModelConfig | null = null;
 
 // ── 角色选择 ──────────────────────────────────────────────
@@ -433,12 +437,16 @@ interface ChatStoreSession {
   createdAt: number;
   updatedAt: number;
   schemaVersion: 1;
+  /** 会话模式：chat（默认）| learn（Obsidian 学习模式）。 */
+  mode?: "chat" | "learn";
+  /** learn 模式绑定的 Vault 工作区目录。 */
+  workspaceRoot?: string;
 }
 
 interface ChatStoreApi {
   list: () => Promise<ChatSessionMetaUI[]>;
   get: (id: string) => Promise<ChatStoreSession | null>;
-  create: (payload?: { title?: string; identityId?: string | null }) => Promise<ChatStoreSession>;
+  create: (payload?: { title?: string; identityId?: string | null; mode?: "chat" | "learn"; workspaceRoot?: string }) => Promise<ChatStoreSession>;
   append: (id: string, message: unknown) => Promise<ChatStoreSession | null>;
   replaceMessages: (id: string, messages: unknown[]) => Promise<ChatStoreSession | null>;
   rename: (id: string, title: string) => Promise<ChatStoreSession | null>;
@@ -451,6 +459,10 @@ interface ChatStoreApi {
   onActiveSessionChanged: (callback: (sessionId: string | null) => void) => () => void;
   onChanged: (callback: () => void) => () => void;
   onSwitchSession: (callback: (sessionId: string) => void) => () => void;
+  /** 设置/切换会话模式（chat | learn）与 learn 模式的 Vault 工作区目录。 */
+  setMode: (id: string, mode: "chat" | "learn", workspaceRoot?: string | null) => Promise<ChatStoreSession | null>;
+  /** 为 learn 模式选择 Vault 工作区目录（系统目录选择对话框）。 */
+  pickVaultFolder: () => Promise<string | null>;
 }
 
 declare global {
@@ -490,6 +502,8 @@ async function saveSession(): Promise<void> {
 // 把 store 里的 ChatStoreSession 装载到当前窗口（替换 messages 数组并 render）。
 function loadSessionIntoUI(session: ChatStoreSession): void {
   currentSessionId = session.id;
+  currentSessionMode = session.mode === "learn" ? "learn" : "chat";
+  currentSessionWorkspaceRoot = session.workspaceRoot;
   messages.length = 0;
   for (const m of session.messages) {
     messages.push({
@@ -504,10 +518,40 @@ function loadSessionIntoUI(session: ChatStoreSession): void {
   }
   // 上报活跃 sessionId（设置面板"删除当前会话"差异化提示用）
   void window.chatStore?.setActiveSession(session.id);
+  refreshLearnModeUI();
   render();
   // 切换会话后刷新侧栏列表的活跃高亮
   void renderRailList();
 }
+
+// 学习模式按钮 UI 同步：当前会话是 learn 模式时点亮，并显示绑定的 Vault 路径。
+function refreshLearnModeUI(): void {
+  if (!chatRailLearn || !chatRailLearnLabel) return;
+  const isLearn = currentSessionMode === "learn";
+  chatRailLearn.classList.toggle("is-active", isLearn);
+  chatRailLearnLabel.textContent = isLearn ? "学习模式 ✓" : "学习模式";
+  chatRailLearn.title = isLearn
+    ? "学习模式（Obsidian Vault）：" + (currentSessionWorkspaceRoot || "未绑定目录")
+    : "学习模式（Obsidian Vault）";
+}
+
+// 📚 学习模式切换：未开启 → 选目录绑定（开启 learn）；已开启 → 切回普通聊天。
+chatRailLearn?.addEventListener("click", async () => {
+  if (!window.chatStore || !currentSessionId) return;
+  try {
+    if (currentSessionMode === "learn") {
+      const session = await window.chatStore.setMode(currentSessionId, "chat");
+      if (session) loadSessionIntoUI(session);
+      return;
+    }
+    const dir = await window.chatStore.pickVaultFolder();
+    if (!dir) return; // 用户取消
+    const session = await window.chatStore.setMode(currentSessionId, "learn", dir);
+    if (session) loadSessionIntoUI(session);
+  } catch (err) {
+    console.warn("[Columbina Chat] 切换学习模式失败:", err);
+  }
+});
 
 // ── 会话侧栏（点左上角 loader 展开）──
 // 精简版：+新对话 / 列表点击切换 / 活跃高亮。改名删除留设置面板。
@@ -560,6 +604,15 @@ function buildRailItem(session: ChatSessionMetaUI): HTMLLIElement {
 
   metaEl.appendChild(timeEl);
   metaEl.appendChild(identityEl);
+
+  // learn 模式徽标（绑定 Obsidian Vault 的会话）
+  if (session.mode === "learn") {
+    const learnEl = document.createElement("span");
+    learnEl.className = "chat__rail-badge-learn";
+    learnEl.textContent = "📚 学习";
+    if (session.workspaceRoot) learnEl.title = session.workspaceRoot;
+    metaEl.appendChild(learnEl);
+  }
 
   // 点击列表项 = 本地切换会话（不走跨窗口 IPC，比设置面板还快）
   li.addEventListener("click", async () => {

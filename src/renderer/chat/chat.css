@@ -470,6 +470,55 @@ body {
   line-height: 1;
 }
 
+/* 学习模式切换按钮（learn 模式 = 绑定 Obsidian Vault 工作区） */
+.chat__rail-learn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 1.5px solid transparent;
+  background: var(--rb-border-faint);
+  color: var(--rb-text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, transform 0.12s, color 0.2s;
+}
+
+.chat__rail-learn:hover {
+  background: var(--rb-border-soft);
+  color: var(--rb-text-default);
+}
+
+.chat__rail-learn:active {
+  transform: scale(0.98);
+}
+
+.chat__rail-learn.is-active {
+  border-color: #d4a017;
+  background: rgba(212, 160, 23, 0.14);
+  color: #d4a017;
+}
+
+.chat__rail-learn-icon {
+  font-size: 15px;
+  line-height: 1;
+}
+
+/* 会话列表项上的学习模式徽标 */
+.chat__rail-badge-learn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(212, 160, 23, 0.16);
+  color: #d4a017;
+  font-size: 10px;
+}
+
 .chat__rail-list {
   list-style: none;
   margin: 0;

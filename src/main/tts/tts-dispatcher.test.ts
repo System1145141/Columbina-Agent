@@ -6,9 +6,13 @@ vi.mock("./custom-cloud-engine", () => ({
 vi.mock("./mimo-engine", () => ({
   synthesize: vi.fn(async () => ({ audio: Buffer.from("RIFFmimo"), format: "wav" })),
 }));
+vi.mock("./mossland-engine", () => ({
+  synthesize: vi.fn(async () => ({ audio: Buffer.from("MOSSok"), format: "mp3" })),
+}));
 
 import { synthesize as customSynthesize } from "./custom-cloud-engine";
 import { synthesize as mimoSynthesize } from "./mimo-engine";
+import { synthesize as mosslandSynthesize } from "./mossland-engine";
 import { synthesizeByEngine } from "./tts-dispatcher";
 
 describe("tts-dispatcher custom-cloud", () => {
@@ -48,6 +52,27 @@ describe("tts-dispatcher mimo", () => {
       voiceAudioPath: "C:\\voices\\columbina.mp3",
       text: "hello",
       stylePrompt: "温柔一点",
+    }));
+  });
+});
+
+describe("tts-dispatcher mossland", () => {
+  it("routes mossland payload to the Mossland engine", async () => {
+    const result = await synthesizeByEngine("mossland", {
+      text: "hello",
+      apiKey: "k",
+      voiceId: "voice-1",
+      model: "moss-tts",
+      format: "mp3",
+    });
+
+    expect(result.format).toBe("mp3");
+    expect(result.audio.toString()).toBe("MOSSok");
+    expect(mosslandSynthesize).toHaveBeenCalledWith(expect.objectContaining({
+      apiKey: "k",
+      voiceId: "voice-1",
+      text: "hello",
+      model: "moss-tts",
     }));
   });
 });

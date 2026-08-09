@@ -322,11 +322,24 @@ interface MemoryPanelPayload {
   }>;
 }
 
+interface ObsidianVaultConfigData {
+  vaultPath: string;
+  autoSync: boolean;
+  lastSyncAt: number;
+}
+
 interface MemoryPanelApi {
   getData: () => Promise<MemoryPanelPayload>;
   deleteImportedDoc: (importId: string, fileName?: string) => Promise<{ ok: boolean; deleted: number }>;
   saveL0: (patch: Record<string, unknown>) => Promise<{ ok: boolean }>;
   saveL1: (patch: Record<string, unknown>) => Promise<{ ok: boolean }>;
+  // Obsidian vault 双向同步
+  exportToVault: () => Promise<{ ok: boolean; canceled?: boolean; outputPath?: string; fileCount?: number; error?: string }>;
+  bindVault: () => Promise<{ ok: boolean; canceled?: boolean; vaultPath?: string; fileCount?: number; error?: string }>;
+  unbindVault: () => Promise<{ ok: boolean }>;
+  getVaultConfig: () => Promise<ObsidianVaultConfigData>;
+  setAutoSync: (enabled: boolean) => Promise<{ ok: boolean; config?: ObsidianVaultConfigData }>;
+  syncNow: () => Promise<{ ok: boolean; vaultPath?: string; fileCount?: number; error?: string; skipped?: boolean }>;
 }
 
 interface SettingsApi {
@@ -781,6 +794,7 @@ const NAV_LABELS: Record<string, { emoji: string; title: string; hint: string }>
   columbina: { emoji: "🌸", title: "Columbina 设置", hint: "管理 Agent 行为、记忆、RAG 与权限" },
   tts: { emoji: "🎙️", title: "TTS 设置", hint: "语音合成与朗读偏好" },
   asr: { emoji: "🎧", title: "ASR 设置", hint: "语音识别与通话配置" },
+  music: { emoji: "🎵", title: "音乐", hint: "网易云音乐登录与播放" },
   tokens: { emoji: "📊", title: "Token 用量", hint: "查看 API 调用统计与消耗" },
   disclaimer: { emoji: "📜", title: "免责声明", hint: "使用条款与隐私说明" },
 };
@@ -1976,6 +1990,7 @@ function switchSection(section: string): void {
   const isChannels = section === "channels";
   const isTts = section === "tts";
   const isAsr = section === "asr";
+  const isMusic = section === "music";
   apiForm.classList.toggle("is-hidden", !isApi);
   generalForm.classList.toggle("is-hidden", !isGeneral);
   columbinaPanel.classList.toggle("is-hidden", !isColumbina);
@@ -2006,9 +2021,13 @@ function switchSection(section: string): void {
   if (ttsPanel) ttsPanel.classList.toggle("is-hidden", !isTts);
   const asrPanel = document.getElementById("asr-panel");
   if (asrPanel) asrPanel.classList.toggle("is-hidden", !isAsr);
+  const musicPanel = document.getElementById("music-panel");
+  if (musicPanel) musicPanel.classList.toggle("is-hidden", !isMusic);
+  if (isMusic) void loadMusicPanel();
+  else disposeMusicPanel();
   placeholderPanel.classList.toggle(
     "is-hidden",
-    isApi || isGeneral || isColumbina || isDisclaimer || isMemory || isUser || isChat || isTasks || isIdentity || isPlugins || isSkills || isTokens || isChannels || isTts || isAsr,
+    isApi || isGeneral || isColumbina || isDisclaimer || isMemory || isUser || isChat || isTasks || isIdentity || isPlugins || isSkills || isTokens || isChannels || isTts || isAsr || isMusic,
   );
 
   if (
@@ -2026,7 +2045,8 @@ function switchSection(section: string): void {
     !isTokens &&
     !isChannels &&
     !isTts &&
-    !isAsr
+    !isAsr &&
+    !isMusic
   ) {
     placeholderIcon.textContent = label.emoji;
     placeholderTitle.textContent = label.title;
@@ -2460,6 +2480,337 @@ channelsLogClearBtn?.addEventListener("click", async () => {
 // （也可以在用户展开 details 时再拉，但保持简单直接拉）
 void loadChannelsPanel();
 
+// ── Music（网易云）面板：登录状态 / 二维码 / 搜索 / 播放 ─────────
+// 交互逻辑移植自 Cyrene src/renderer/settings/music/panel.ts，vanilla DOM 风格重写。
+interface MusicApiResult<T> {
+  ok: boolean;
+  data?: T;
+  errorCode?: string;
+}
+interface MusicTrackView { id: string; name: string; artists?: string[]; album?: string; }
+interface MusicStatusView {
+  backend: string; account: string; player: string; flow: string;
+  profile?: { nickname?: string; avatarUrl?: string } | null;
+}
+interface MusicSelectionView { setId: string; source: string; query?: string; tracks: MusicTrackView[]; }
+
+let musicPanelInitialized = false;
+let musicLoginPollTimer: number | null = null;
+let musicStateUnsub: (() => void) | null = null;
+
+function musicApi(): MusicApi | null {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (window as any).music as MusicApi | null;
+}
+interface MusicApi {
+  getStatus: () => Promise<MusicApiResult<MusicStatusView>>;
+  beginLogin: () => Promise<MusicApiResult<{ qrContent: string; pollIntervalMs: number }>>;
+  cancelLogin: () => Promise<MusicApiResult<unknown>>;
+  logout: () => Promise<MusicApiResult<unknown>>;
+  search: (keyword: string, limit?: number) => Promise<MusicApiResult<MusicSelectionView>>;
+  playTrack: (trackId: string) => Promise<MusicApiResult<{ state: string }>>;
+  onStateChanged: (h: (s: MusicStatusView) => void) => (() => void) | void;
+}
+
+function setMusicFeedback(kind: "info" | "ok" | "err", msg: string): void {
+  const el = document.getElementById("music-feedback");
+  if (!el) return;
+  el.textContent = msg;
+  el.className = "tts-hint music-feedback";
+  if (kind === "ok") el.classList.add("music-feedback--ok");
+  else if (kind === "err") el.classList.add("music-feedback--err");
+}
+
+function musicViewState(s: MusicStatusView): string {
+  if (s.backend === "starting") return "backend_starting";
+  if (s.backend === "failed" || s.backend === "incompatible") return "backend_error";
+  if (s.backend === "degraded") return "backend_degraded";
+  if (s.flow === "creating_qr" || s.flow === "waiting_scan" || s.flow === "waiting_confirm") return s.flow;
+  if (s.flow === "expired") return "login_expired";
+  if (s.flow === "failed") return "login_failed";
+  if (s.account !== "signed_in") return "signed_out";
+  return s.player === "available" ? "connected" : "connected_without_client";
+}
+
+const MUSIC_STATE_LABELS: Record<string, string> = {
+  backend_starting: "音乐服务启动中…",
+  backend_error: "音乐服务暂不可用",
+  backend_degraded: "未安装音乐依赖（resources/music-vendor）",
+  signed_out: "尚未连接",
+  creating_qr: "正在等待扫码",
+  waiting_scan: "正在等待扫码",
+  waiting_confirm: "已扫码，请在手机确认",
+  login_expired: "二维码已过期",
+  login_failed: "登录失败",
+  connected: "网易云音乐已连接",
+  connected_without_client: "已登录，但未检测到桌面客户端",
+};
+
+function renderMusicStatus(s: MusicStatusView): void {
+  const state = musicViewState(s);
+  const statusEl = document.getElementById("music-account-status");
+  if (statusEl) statusEl.textContent = MUSIC_STATE_LABELS[state] ?? state;
+  const dot = document.getElementById("music-status-dot");
+  if (dot) dot.classList.toggle("is-connected", state === "connected" || state === "connected_without_client");
+
+  const actionsHost = document.getElementById("music-actions");
+  if (actionsHost) {
+    actionsHost.innerHTML = "";
+    const actionFor: Record<string, string> = {
+      signed_out: "连接网易云",
+      backend_degraded: "重新连接",
+      creating_qr: "取消登录",
+      waiting_scan: "取消登录",
+      waiting_confirm: "取消登录",
+      login_expired: "重新生成二维码",
+      login_failed: "重新登录",
+      connected: "断开连接",
+      connected_without_client: "断开连接",
+      backend_error: "重新启动音乐服务",
+    };
+    const label = actionFor[state];
+    if (label) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = state === "signed_out" || state === "backend_error" || state === "backend_degraded" ? "btn-primary" : "btn-secondary";
+      btn.textContent = label;
+      btn.addEventListener("click", () => void handleMusicAction(state));
+      actionsHost.appendChild(btn);
+    }
+  }
+
+  const loggedIn = state === "connected" || state === "connected_without_client";
+  document.getElementById("music-search-form")?.classList.toggle("is-hidden", !loggedIn);
+  const hint = document.getElementById("music-search-hint");
+  if (hint) hint.textContent = loggedIn ? "搜索网易云曲库，点击「播放」会唤起本地客户端。" : "连接网易云后即可搜索歌曲和获取每日推荐。";
+  const qrVisible = state === "creating_qr" || state === "waiting_scan" || state === "waiting_confirm" || state === "login_expired";
+  document.getElementById("music-qr-box")?.classList.toggle("is-hidden", !qrVisible);
+}
+
+async function handleMusicAction(state: string): Promise<void> {
+  const api = musicApi();
+  if (!api) { setMusicFeedback("err", "window.music 未就绪"); return; }
+  if (state === "signed_out" || state === "login_expired" || state === "login_failed" || state === "backend_degraded") {
+    return void startMusicLogin();
+  }
+  if (state === "connected" || state === "connected_without_client") {
+    setMusicFeedback("info", "正在断开连接…");
+    try {
+      const r = await api.logout();
+      if (r.ok) setMusicFeedback("ok", "已断开连接");
+      else setMusicFeedback("err", "断开失败：" + (r.errorCode ?? "E_UNKNOWN"));
+    } catch (err) {
+      setMusicFeedback("err", "断开异常：" + (err instanceof Error ? err.message : String(err)));
+    }
+    return;
+  }
+  if (state === "creating_qr" || state === "waiting_scan" || state === "waiting_confirm") {
+    await api.cancelLogin();
+    clearMusicQr();
+    setMusicFeedback("info", "已取消登录");
+  }
+}
+
+function clearMusicQr(): void {
+  const img = document.getElementById("music-qr-img") as HTMLImageElement | null;
+  if (img) { img.style.display = "none"; img.src = ""; }
+  document.getElementById("music-qr-box")?.classList.add("is-hidden");
+}
+
+function stopMusicLoginPolling(): void {
+  if (musicLoginPollTimer !== null) {
+    window.clearInterval(musicLoginPollTimer);
+    musicLoginPollTimer = null;
+  }
+}
+
+function startMusicLoginPolling(intervalMs = 2000): void {
+  stopMusicLoginPolling();
+  const api = musicApi();
+  if (!api) return;
+  musicLoginPollTimer = window.setInterval(async () => {
+    try {
+      const r = await api.getStatus();
+      if (r.ok) {
+        renderMusicStatus(r.data);
+        if (r.data.account === "signed_in") {
+          clearMusicQr();
+          stopMusicLoginPolling();
+          setMusicFeedback("ok", "已连接到网易云音乐");
+        } else if (r.data.flow === "expired" || r.data.flow === "failed" || r.data.flow === "cancelled") {
+          stopMusicLoginPolling();
+          if (r.data.flow !== "expired") clearMusicQr();
+          setMusicFeedback("err", r.data.flow === "expired" ? "二维码已过期，请重新生成" : "登录未完成，请重试");
+        } else if (r.data.account === "temporarily_unavailable" || r.data.account === "expired") {
+          stopMusicLoginPolling();
+          clearMusicQr();
+          setMusicFeedback("err", "登录失败：账户状态 " + r.data.account);
+        }
+      }
+    } catch (err) {
+      console.warn("[music] login poll failed", err);
+    }
+  }, Math.max(1000, intervalMs));
+}
+
+async function startMusicLogin(): Promise<void> {
+  const api = musicApi();
+  if (!api) { setMusicFeedback("err", "window.music 未就绪，请确认主进程已注册音乐服务"); return; }
+  setMusicFeedback("info", "正在生成二维码…");
+  try {
+    const r = await api.beginLogin();
+    if (!r.ok || !r.data) {
+      setMusicFeedback("err", "启动登录失败：" + (r.errorCode ?? "E_UNKNOWN"));
+      return;
+    }
+    let dataUrl = "";
+    try {
+      // qrcode 包无官方 .d.ts；动态 import 让 vite 按 browser 字段打包到渲染进程
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const qrcodeMod: any = await import("qrcode");
+      dataUrl = await qrcodeMod.toDataURL(r.data.qrContent, { width: 240, margin: 1 });
+    } catch (qrErr) {
+      console.error("[music] QR 渲染失败", qrErr);
+      setMusicFeedback("err", "二维码渲染失败");
+      return;
+    }
+    const img = document.getElementById("music-qr-img") as HTMLImageElement | null;
+    if (img) { img.src = dataUrl; img.style.display = "block"; }
+    document.getElementById("music-qr-box")?.classList.remove("is-hidden");
+    setMusicFeedback("info", "等待扫码…");
+    startMusicLoginPolling(r.data.pollIntervalMs);
+  } catch (err) {
+    console.error("[music] beginLogin threw", err);
+    setMusicFeedback("err", "启动登录异常：" + (err instanceof Error ? err.message : String(err)));
+  }
+}
+
+function renderMusicSearchResults(r: MusicApiResult<MusicSelectionView>, kw: string): void {
+  const box = document.getElementById("music-search-results");
+  if (!box) return;
+  box.innerHTML = "";
+  if (!r.ok) {
+    const div = document.createElement("div");
+    div.className = "music-feedback music-feedback--err";
+    div.textContent = "搜索失败：" + (r.errorCode ?? "E_UNKNOWN");
+    box.appendChild(div);
+    return;
+  }
+  const tracks = r.data?.tracks ?? [];
+  if (tracks.length === 0) {
+    const p = document.createElement("p");
+    p.className = "empty-hint";
+    p.textContent = `暂无结果，关键词 '${kw}' 未匹配到歌曲`;
+    box.appendChild(p);
+    return;
+  }
+  for (const t of tracks) {
+    const row = document.createElement("div");
+    row.className = "music-search-row";
+
+    const main = document.createElement("div");
+    main.className = "music-search-row__main";
+    const name = document.createElement("div");
+    name.className = "music-search-row__name";
+    name.textContent = t.name;
+    const meta = document.createElement("div");
+    meta.className = "music-search-row__meta";
+    meta.textContent = [(t.artists ?? []).join(" / "), t.album].filter(Boolean).join(" · ");
+    main.appendChild(name);
+    main.appendChild(meta);
+
+    const playBtn = document.createElement("button");
+    playBtn.type = "button";
+    playBtn.className = "btn-secondary music-search-row__play";
+    playBtn.textContent = "▶ 播放";
+    playBtn.addEventListener("click", async () => {
+      const api = musicApi();
+      if (!api) { setMusicFeedback("err", "window.music 未就绪"); return; }
+      playBtn.disabled = true;
+      try {
+        const res = await api.playTrack(t.id);
+        if (!res.ok) {
+          setMusicFeedback("err", "播放请求失败：" + (res.errorCode ?? "E_UNKNOWN"));
+        } else if (res.data?.state === "dispatched") {
+          setMusicFeedback("ok", "已向网易云发送播放请求：" + t.name);
+        } else if (res.data?.state === "web_fallback") {
+          setMusicFeedback("ok", "网易云桌面客户端不可用，已在浏览器中打开：" + t.name);
+        } else if (res.data?.state === "client_unavailable") {
+          setMusicFeedback("err", "已找到《" + t.name + "》，但播放需要安装网易云音乐桌面客户端。");
+        } else {
+          setMusicFeedback("err", "未能向网易云发送播放请求：" + t.name);
+        }
+      } catch (err) {
+        setMusicFeedback("err", "播放请求异常：" + (err instanceof Error ? err.message : String(err)));
+      } finally {
+        playBtn.disabled = false;
+      }
+    });
+
+    row.appendChild(main);
+    row.appendChild(playBtn);
+    box.appendChild(row);
+  }
+}
+
+async function runMusicSearch(): Promise<void> {
+  const api = musicApi();
+  if (!api) { setMusicFeedback("err", "window.music 未就绪"); return; }
+  const input = document.getElementById("music-search-input") as HTMLInputElement | null;
+  const kw = (input?.value ?? "").trim();
+  if (!kw) { setMusicFeedback("info", "请输入搜索关键词"); return; }
+  const box = document.getElementById("music-search-results");
+  if (box) box.innerHTML = '<p class="empty-hint">搜索中…</p>';
+  try {
+    const r = await api.search(kw, 20);
+    renderMusicSearchResults(r, kw);
+  } catch (err) {
+    console.error("[music] search threw", err);
+    if (box) box.innerHTML = "";
+    setMusicFeedback("err", "搜索异常：" + (err instanceof Error ? err.message : String(err)));
+  }
+}
+
+function disposeMusicPanel(): void {
+  stopMusicLoginPolling();
+  if (musicStateUnsub) {
+    try { musicStateUnsub(); } catch { /* ignore */ }
+    musicStateUnsub = null;
+  }
+  clearMusicQr();
+}
+
+async function loadMusicPanel(): Promise<void> {
+  if (!musicPanelInitialized) {
+    musicPanelInitialized = true;
+    document.getElementById("music-search-btn")?.addEventListener("click", () => void runMusicSearch());
+    const searchInput = document.getElementById("music-search-input") as HTMLInputElement | null;
+    searchInput?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") void runMusicSearch();
+    });
+  }
+  // 每次进入都重新订阅状态推送并拉一次快照（离开面板时 dispose 取消订阅）
+  const api = musicApi();
+  if (api && typeof api.onStateChanged === "function") {
+    if (musicStateUnsub) {
+      try { musicStateUnsub(); } catch { /* ignore */ }
+      musicStateUnsub = null;
+    }
+    musicStateUnsub = api.onStateChanged((s) => renderMusicStatus(s)) ?? null;
+  }
+  if (api) {
+    try {
+      const r = await api.getStatus();
+      if (r.ok) renderMusicStatus(r.data);
+      else setMusicFeedback("err", "读取状态失败：" + (r.errorCode ?? "E_UNKNOWN"));
+    } catch (err) {
+      console.warn("[music] getStatus failed", err);
+    }
+  } else {
+    setMusicFeedback("err", "window.music 未就绪");
+  }
+}
+
 // ── i18n 初始化：加载保存的语言，载入翻译包，应用翻译 ──
 (async function initI18n() {
   setI18nVars({ version: APP_VERSION });
@@ -2751,6 +3102,15 @@ const memoryL0CancelBtn = document.getElementById("memory-l0-cancel-btn") as HTM
 const memoryL1EditBtn = document.getElementById("memory-l1-edit-btn") as HTMLButtonElement | null;
 const memoryL1CancelBtn = document.getElementById("memory-l1-cancel-btn") as HTMLButtonElement | null;
 
+// Obsidian vault 双向同步
+const obsidianVaultPath = document.getElementById("obsidian-vault-path") as HTMLElement | null;
+const obsidianLastSyncHint = document.getElementById("obsidian-last-sync-hint") as HTMLElement | null;
+const obsidianBindBtn = document.getElementById("obsidian-bind-btn") as HTMLButtonElement | null;
+const obsidianUnbindBtn = document.getElementById("obsidian-unbind-btn") as HTMLButtonElement | null;
+const obsidianSyncNowBtn = document.getElementById("obsidian-sync-now-btn") as HTMLButtonElement | null;
+const obsidianExportBtn = document.getElementById("obsidian-export-btn") as HTMLButtonElement | null;
+const obsidianAutoSync = document.getElementById("obsidian-auto-sync") as HTMLInputElement | null;
+
 let memoryPanelCache: MemoryPanelPayload | null = null;
 let l0Editing = false;
 let l1Editing = false;
@@ -2883,6 +3243,8 @@ async function loadMemoryPanel(): Promise<void> {
 
     if (memoryL0EditBtn) memoryL0EditBtn.disabled = false;
     if (memoryL1EditBtn) memoryL1EditBtn.disabled = false;
+
+    void loadObsidianVaultStatus();
   } catch (err) {
     console.error("[settings] load memory panel failed", err);
     renderEmptyState(memoryL2List, t("settingsExtra.memoryReadFailed"), t("settingsExtra.checkTerminalLog"));
@@ -3151,6 +3513,91 @@ memoryImportedList?.addEventListener("click", async (event) => {
 
 void loadMemoryPanel();
 void loadUserProfile();
+
+// ── Obsidian Vault 同步 UI ───────────────────────────────────
+
+async function loadObsidianVaultStatus(): Promise<void> {
+  try {
+    const config = await window.memoryPanel?.getVaultConfig();
+    if (!config) return;
+    if (obsidianVaultPath) {
+      obsidianVaultPath.textContent = config.vaultPath ? config.vaultPath : "未绑定";
+      obsidianVaultPath.classList.toggle("is-bound", Boolean(config.vaultPath));
+    }
+    if (obsidianAutoSync) obsidianAutoSync.checked = config.autoSync;
+    if (obsidianLastSyncHint) {
+      obsidianLastSyncHint.textContent = config.lastSyncAt > 0
+        ? "上次同步：" + new Date(config.lastSyncAt).toLocaleString()
+        : "";
+    }
+  } catch (err) {
+    console.warn("[settings] load obsidian vault config failed", err);
+  }
+}
+
+obsidianBindBtn?.addEventListener("click", async () => {
+  try {
+    const result = await window.memoryPanel?.bindVault();
+    if (!result || result.canceled) return;
+    if (result.ok) {
+      console.info("[settings] obsidian vault bound:", result.vaultPath);
+    } else if (result.error) {
+      alert("绑定失败：" + result.error);
+    }
+    await loadObsidianVaultStatus();
+  } catch (err) {
+    console.error("[settings] bind obsidian vault failed", err);
+  }
+});
+
+obsidianUnbindBtn?.addEventListener("click", async () => {
+  try {
+    await window.memoryPanel?.unbindVault();
+    await loadObsidianVaultStatus();
+  } catch (err) {
+    console.error("[settings] unbind obsidian vault failed", err);
+  }
+});
+
+obsidianSyncNowBtn?.addEventListener("click", async () => {
+  try {
+    const result = await window.memoryPanel?.syncNow();
+    if (!result) return;
+    if (result.ok) {
+      alert("同步完成：" + (result.fileCount ?? 0) + " 个文件");
+    } else if (result.skipped) {
+      alert("未绑定 Vault，无法同步");
+    } else if (result.error) {
+      alert("同步失败：" + result.error);
+    }
+    await loadObsidianVaultStatus();
+  } catch (err) {
+    console.error("[settings] obsidian sync now failed", err);
+  }
+});
+
+obsidianExportBtn?.addEventListener("click", async () => {
+  try {
+    const result = await window.memoryPanel?.exportToVault();
+    if (!result || result.canceled) return;
+    if (result.ok) {
+      alert("导出完成：" + (result.fileCount ?? 0) + " 个文件");
+    } else if (result.error) {
+      alert("导出失败：" + result.error);
+    }
+  } catch (err) {
+    console.error("[settings] obsidian export failed", err);
+  }
+});
+
+obsidianAutoSync?.addEventListener("change", async () => {
+  try {
+    await window.memoryPanel?.setAutoSync(obsidianAutoSync.checked);
+    await loadObsidianVaultStatus();
+  } catch (err) {
+    console.error("[settings] obsidian set auto-sync failed", err);
+  }
+});
 
 // ── 权限档位 UI ───────────────────────────────────────────
 type PermissionLevel = "read-only" | "scoped" | "per-action" | "full";
@@ -4043,6 +4490,24 @@ interface TtsApi {
     apiKey: string; voiceAudioPath?: string; text: string; stylePrompt?: string;
     expectedCacheKey?: string;
   }) => Promise<{ base64: string; cacheKey: string; cached: boolean; format: "wav" }>;
+  // Mossland（返回 base64 + cacheKey + cached + format）
+  synthesizeMossland: (payload: {
+    apiKey: string; voiceId: string; text: string;
+    speed?: number; volume?: number; model?: string;
+    format?: "mp3" | "wav" | "pcm";
+  }) => Promise<{ base64: string; cacheKey: string; cached: boolean; format: "mp3" | "wav" | "pcm" }>;
+  synthesizeCachedMossland: (payload: {
+    apiKey: string; voiceId: string; text: string;
+    speed?: number; volume?: number; model?: string;
+    format?: "mp3" | "wav" | "pcm";
+    expectedCacheKey?: string;
+  }) => Promise<{ base64: string; cacheKey: string; cached: boolean; format: "mp3" | "wav" | "pcm" }>;
+  cloneMossland: (payload: {
+    apiKey: string; filePath: string; name?: string; description?: string;
+  }) => Promise<{ voiceId: string; name?: string; createdAt?: number }>;
+  listMosslandVoices: (payload: {
+    apiKey: string; limit?: number;
+  }) => Promise<{ voices: Array<{ id: string; name: string; createdAt: number }> }>;
   pickAudioFile: () => Promise<string | null>;
   saveSettings: (tts: Record<string, unknown>) => Promise<unknown>;
   loadSettings: () => Promise<Record<string, unknown>>;
@@ -4118,6 +4583,12 @@ async function loadTtsConfig(): Promise<void> {
   ttsEl("tts-mimo-key").value = String(ttsConfig.ttsMimoKey ?? "");
   ttsEl("tts-mimo-voice-audio").value = String(ttsConfig.ttsMimoVoiceAudioPath ?? "");
   ttsEl("tts-mimo-style").value = String(ttsConfig.ttsMimoStylePrompt ?? t("settingsExtra.ttsDefaultStyle"));
+
+  // Mossland
+  ttsEl("tts-mossland-key").value = String(ttsConfig.ttsMosslandKey ?? "");
+  ttsEl("tts-mossland-voice").value = String(ttsConfig.ttsMosslandVoiceId ?? "");
+  // 模型下拉当前仅 moss-tts 一项
+  (ttsEl("tts-mossland-model") as HTMLSelectElement).value = "moss-tts";
 
   // Opener 主动开口档位
   const openerMode = String(ttsConfig.openerMode ?? "off");
@@ -4229,6 +4700,9 @@ const ttsSaveFields: Array<[string, string]> = [
   ["tts-mimo-key", "ttsMimoKey"],
   ["tts-mimo-voice-audio", "ttsMimoVoiceAudioPath"],
   ["tts-mimo-style", "ttsMimoStylePrompt"],
+  ["tts-mossland-key", "ttsMosslandKey"],
+  ["tts-mossland-voice", "ttsMosslandVoiceId"],
+  ["tts-mossland-model", "ttsMosslandModel"],
 ];
 const ttsDebounceTimers: Record<string, ReturnType<typeof setTimeout> | undefined> = {};
 for (const [elId, field] of ttsSaveFields) {
@@ -4357,6 +4831,110 @@ document.getElementById("tts-mimo-test")?.addEventListener("click", async () => 
     btn.disabled = false;
     btn.textContent = t("settingsExtra.ttsTestButton");
   }
+});
+
+// ── Mossland（api.mosi.cn）──
+// Mossland 测试发音
+document.getElementById("tts-mossland-test")?.addEventListener("click", async () => {
+  if (!window.tts) return;
+  const apiKey = ttsEl("tts-mossland-key").value.trim();
+  const voiceId = ttsEl("tts-mossland-voice").value.trim();
+  const model = (ttsEl("tts-mossland-model") as HTMLSelectElement).value;
+  if (!apiKey) { window.alert(t("settingsExtra.ttsMosslandApiKeyRequired")); return; }
+  if (!voiceId) { window.alert(t("settingsExtra.ttsMosslandVoiceIdRequired")); return; }
+
+  const btn = document.getElementById("tts-mossland-test") as HTMLButtonElement;
+  btn.disabled = true;
+  btn.textContent = t("settingsExtra.ttsSynthesizing");
+  try {
+    const result = await window.tts.synthesizeMossland({
+      apiKey, voiceId, model, text: t("settingsExtra.ttsTestText"),
+      speed: Number(ttsEl("tts-speed").value),
+      volume: Number(ttsEl("tts-volume").value),
+      format: "mp3",
+    });
+    playTtsAudio(result.base64, result.format);
+  } catch (err) {
+    window.alert(t("settingsExtra.ttsTestFailed") + (err instanceof Error ? err.message : String(err)));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = t("settingsExtra.ttsTestButton");
+  }
+});
+
+// Mossland 选择克隆参考音频
+document.getElementById("tts-mossland-clone-pick")?.addEventListener("click", async () => {
+  if (!window.tts) return;
+  const filePath = await window.tts.pickAudioFile();
+  if (filePath) {
+    ttsEl("tts-mossland-clone-file").value = filePath;
+  }
+});
+
+// Mossland 开始克隆
+document.getElementById("tts-mossland-clone-start")?.addEventListener("click", async () => {
+  if (!window.tts) return;
+  const apiKey = ttsEl("tts-mossland-key").value.trim();
+  const filePath = ttsEl("tts-mossland-clone-file").value.trim();
+  const name = ttsEl("tts-mossland-clone-name").value.trim();
+  if (!apiKey) { window.alert(t("settingsExtra.ttsMosslandApiKeyRequired")); return; }
+  if (!filePath) { window.alert(t("settingsExtra.ttsMosslandRefAudioRequired")); return; }
+
+  const btn = document.getElementById("tts-mossland-clone-start") as HTMLButtonElement;
+  const status = document.getElementById("tts-mossland-clone-status") as HTMLElement;
+  btn.disabled = true;
+  status.textContent = t("settingsExtra.ttsSynthesizing");
+  try {
+    const result = await window.tts.cloneMossland({ apiKey, filePath, name });
+    ttsEl("tts-mossland-voice").value = result.voiceId;
+    void saveTtsField("ttsMosslandVoiceId", result.voiceId);
+    status.textContent = t("settingsExtra.ttsMosslandCloneSuccess").replace("{id}", result.voiceId);
+  } catch (err) {
+    status.textContent = t("settingsExtra.ttsMosslandCloneFailed") + (err instanceof Error ? err.message : String(err));
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// Mossland 拉取音色列表
+document.getElementById("tts-mossland-list-voices")?.addEventListener("click", async () => {
+  if (!window.tts) return;
+  const apiKey = ttsEl("tts-mossland-key").value.trim();
+  if (!apiKey) { window.alert(t("settingsExtra.ttsMosslandApiKeyRequired")); return; }
+
+  const btn = document.getElementById("tts-mossland-list-voices") as HTMLButtonElement;
+  const status = document.getElementById("tts-mossland-list-status") as HTMLElement;
+  const select = document.getElementById("tts-mossland-voices") as HTMLSelectElement;
+  btn.disabled = true;
+  status.textContent = t("settingsExtra.ttsSynthesizing");
+  try {
+    const result = await window.tts.listMosslandVoices({ apiKey });
+    // 保留当前已选值（若还在列表中）
+    const current = ttsEl("tts-mossland-voice").value.trim();
+    select.innerHTML = '<option value="">（选择音色）</option>';
+    for (const v of result.voices) {
+      const option = document.createElement("option");
+      option.value = v.id;
+      option.textContent = `${v.name}（${v.id.slice(0, 8)}…）`;
+      select.appendChild(option);
+    }
+    if (current && Array.from(select.options).some((o) => o.value === current)) {
+      select.value = current;
+    }
+    status.textContent = "";
+  } catch (err) {
+    status.textContent = t("settingsExtra.ttsMosslandListFailed") + (err instanceof Error ? err.message : String(err));
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// Mossland 从列表选择音色 → 自动填入并保存
+document.getElementById("tts-mossland-voices")?.addEventListener("change", (ev) => {
+  const select = ev.target as HTMLSelectElement;
+  if (!select.value) return;
+  ttsEl("tts-mossland-voice").value = select.value;
+  void saveTtsField("ttsMosslandVoiceId", select.value);
 });
 
 // MiniMax 测试发音

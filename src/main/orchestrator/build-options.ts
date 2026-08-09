@@ -27,6 +27,26 @@ import type { ChatMessage } from "./vendors/types";
 import type { AguiRunInput } from "../agui-bridge";
 import { IPC } from "../../shared/ipc-channels";
 import type { RelationshipChannel, RelationshipTurnInput } from "../relationship/relationship-log";
+import type { SocialAtom, SocialExtractionInput } from "../social-context/types";
+
+/** CITA prepareTurn 注入签名（与 Cyrene agent-runtime 的注入一致，宽类型避免强依赖）。 */
+export interface PrepareCitaTurnInput {
+  conversationId: string;
+  turnId: string;
+  originalQuery: string;
+  recentDialogue: Array<{ role: "user" | "assistant"; text: string }>;
+}
+
+export interface CitaContextPackageLite {
+  originalQuery: string;
+  contextualizedQuery: string;
+  rewriteStatus?: string;
+  resolvedReferences: Array<{ surface: string; targetRef: string }>;
+  focusedContexts?: Array<{ contextRef: string }>;
+  supportingContexts?: Array<{ contextRef: string }>;
+  semanticStatus?: string;
+  stateRevision?: number;
+}
 
 /** index.ts 模块级符号的最小可注入子集。
  *  类型故意用宽签名（unknown / 任意 shape）—— 因为 build-options 是纯消费者，
@@ -58,6 +78,19 @@ export interface BuildOptionsDeps {
   logWorldbookInjection: (alwaysOnContext: string, systemContent: string) => void;
   normalizeChatMessages: (raw: ReadonlyArray<unknown>) => ChatMessage[];
   chatRequestTimeoutMs: number;
+  /**
+   * CITA 上下文认知：prepareTurn 注入（工作模式启用）。
+   * 失败兜底：返回空 contextBlock，绝不阻断主流程（cita-service 已内置 try/catch）。
+   */
+  prepareCitaTurn?: (input: PrepareCitaTurnInput, signal?: AbortSignal) => Promise<{
+    contextBlock: string;
+    contextPackage?: CitaContextPackageLite;
+  }>;
+  /** social-context：Chat/talk 风格时检索 top-5 atoms 拼 socialContextBlock 注入 systemContent。 */
+  buildChatSocialContext?: (input: { conversationId: string; query: string }) => Promise<{
+    contextBlock: string;
+    retrievedAtoms: SocialAtom[];
+  }>;
 }
 
 /** onRunFinished 副作用所需的 deps（与 BuildOptionsDeps 部分重叠） */
@@ -92,6 +125,8 @@ export interface OnRunFinishedDeps {
   ) => Promise<void>;
   recordRelationshipTurn: (input: RelationshipTurnInput) => Promise<unknown> | unknown;
   getChatWindow: () => { webContents: { isDestroyed(): boolean; send: (channel: string, ...args: unknown[]) => void }; isDestroyed(): boolean } | null;
+  /** run 正常结束后异步抽取 social atoms（失败只 console.warn，不影响主流程）。 */
+  scheduleSocialAtomExtraction?: (input: SocialExtractionInput) => void;
 }
 
 export interface ModelEntry {
@@ -242,6 +277,46 @@ export async function buildAgentRunOptions(
   }
 
   const isTalkMode = (input.style || "").startsWith("talk");
+  const conversationId = input.sessionId || "default";
+
+  // CITA：工作模式（非 talk 风格）下，启用时注入上下文认知证据块；
+  // 任何异常都被 cita-service 捕获并返回空 contextBlock，绝不阻断主流程。
+  let citaContextBlock = "";
+  let contextualizedQuery = "";
+  if (!isTalkMode && deps.prepareCitaTurn) {
+    try {
+      const recentDialogue = messages
+        .filter((message): message is ChatMessage & { role: "user" | "assistant" } => (
+          message.role === "user" || message.role === "assistant"
+        ))
+        .slice(-12)
+        .map((message) => ({ role: message.role, text: message.content ?? "" }));
+      const prepared = await deps.prepareCitaTurn({
+        conversationId,
+        turnId: `${conversationId}:${messages.length}`,
+        originalQuery: latestUserText,
+        recentDialogue,
+      });
+      citaContextBlock = prepared.contextBlock;
+      if (prepared.contextPackage && prepared.contextPackage.contextualizedQuery !== latestUserText) {
+        contextualizedQuery = prepared.contextPackage.contextualizedQuery;
+      }
+    } catch (err) {
+      console.warn(`[CITA] injection conversation=${conversationId} tool=false soul=false reason=prepare_failed`, err);
+    }
+  }
+
+  // social-context：Chat/talk 风格下检索 top-5 atoms 注入社交背景块。
+  let socialContextBlock = "";
+  if (isTalkMode && deps.buildChatSocialContext) {
+    try {
+      const built = await deps.buildChatSocialContext({ conversationId, query: latestUserText });
+      socialContextBlock = built.contextBlock;
+    } catch (err) {
+      console.warn("[Columbina] chat social context build failed:", err);
+    }
+  }
+
   const systemContent =
     (environmentContext ? environmentContext + "\n\n" : "") +
     (channelSystem ? channelSystem + "\n\n" : "") +
@@ -251,13 +326,24 @@ export async function buildAgentRunOptions(
     toneInjection +
     (alwaysOnContext ? "\n\n" + alwaysOnContext + "\n\n" : "") +
     (relationshipContext ? "\n\n" + relationshipContext + "\n\n" : "") +
+    (socialContextBlock ? "\n\n---\n\n" + socialContextBlock : "") +
+    (citaContextBlock ? "\n\n" + citaContextBlock : "") +
     attachmentContext;
 
   deps.logWorldbookInjection(alwaysOnContext, systemContent);
 
+  // CITA 上下文化改写：与最后一条 user 消息不同时用 contextualizedQuery 替换其 content。
+  const citaMessages = contextualizedQuery && contextualizedQuery !== latestUserText
+    ? messages.map((message, index) => (
+        index === messages.length - 1 && message.role === "user"
+          ? { ...message, content: contextualizedQuery }
+          : message
+      ))
+    : messages;
+
   const fcMessages: ChatMessage[] = [
     { role: "system", content: systemContent },
-    ...messages,
+    ...citaMessages,
   ];
 
   return {
@@ -299,6 +385,7 @@ export async function onAgentRunFinished(
   latestUserText: string,
   deps: OnRunFinishedDeps,
   channel?: "wechat" | "feishu",
+  conversationId?: string,
 ): Promise<void> {
   const chatContent = result.reply;
   deps.scheduleMemoryWrite(latestUserText, chatContent);
@@ -349,6 +436,23 @@ export async function onAgentRunFinished(
     // 桌面聊天（channel === undefined）照常跑，保持 Live2D 表情/心情跟随对话变化
     if (channel !== "wechat" && channel !== "feishu") {
       void deps.observeRuntimeState(settings, [], latestUserText, chatContent);
+    }
+  }
+
+  // social-context：run 正常结束后异步抽取社交原子（失败只 console.warn，不影响主流程）。
+  // retrievedAtoms 由注入方（index.ts）从 store 补齐，便于 supersede/resolve 引用。
+  if (deps.scheduleSocialAtomExtraction && conversationId) {
+    const now = Date.now();
+    try {
+      deps.scheduleSocialAtomExtraction({
+        conversationId,
+        userTurn: { id: `user-${now}`, role: "user", text: latestUserText },
+        assistantTurn: { id: `assistant-${now}`, role: "assistant", text: chatContent },
+        retrievedAtoms: [],
+        now,
+      });
+    } catch (err) {
+      console.warn("[Columbina] social atom extraction schedule failed:", err);
     }
   }
 }

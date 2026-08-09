@@ -5,6 +5,7 @@ import { synthesize as minimaxSynthesize } from "./minimax-engine";
 import { synthesize as gptsovitsSynthesize } from "./gptsovits-engine";
 import { synthesize as customCloudSynthesize } from "./custom-cloud-engine";
 import { synthesize as mimoSynthesize } from "./mimo-engine";
+import { synthesize as mosslandSynthesize } from "./mossland-engine";
 import type { TtsEngine } from "../../shared/tts-types";
 
 export interface SynthesizeByEnginePayload {
@@ -102,6 +103,23 @@ export async function synthesizeByEngine(
       model: "mimo-v2.5-tts-voiceclone",
     });
     return { audio: result.audio, format: result.format };
+  }
+
+  if (engine === "mossland") {
+    if (!payload.apiKey || !payload.voiceId) {
+      throw new Error("Mossland TTS 未配置 apiKey/voiceId");
+    }
+    const format = payload.format ?? "mp3";
+    const result = await mosslandSynthesize({
+      apiKey: payload.apiKey,
+      voiceId: payload.voiceId,
+      text: payload.text,
+      speed: payload.speed,
+      volume: payload.volume,
+      model: payload.model ?? "moss-tts",
+      format,
+    });
+    return { audio: result.audio, format };
   }
 
   throw new Error(`TTS 引擎未启用（engine=${engine}）`);

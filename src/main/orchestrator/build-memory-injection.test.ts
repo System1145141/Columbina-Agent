@@ -18,12 +18,17 @@ const memoryStoreMock = vi.hoisted(() => ({
   getL1: vi.fn(),
 }))
 
+const l2DmaeManagerMock = vi.hoisted(() => ({
+  getActiveL2ForPrompt: vi.fn(),
+}))
+
 const entityGraphMock = vi.hoisted(() => ({
   search: vi.fn(),
 }))
 
 vi.mock("../rag", () => ragMock)
 vi.mock("../memory/memory-store", () => ({ memoryStore: memoryStoreMock }))
+vi.mock("../memory/l2-dmae-manager", () => ({ l2DmaeManager: l2DmaeManagerMock }))
 vi.mock("../memory/entity-graph", () => ({ entityGraph: entityGraphMock }))
 vi.mock("./tool-registry", () => ({ toolRegistry: { getEnabledTools: vi.fn(() => []) } }))
 
@@ -36,6 +41,8 @@ describe("buildMemoryInjection", () => {
     ragMock.searchMemoryEntries.mockResolvedValue([])
     memoryStoreMock.getAllL2.mockReset()
     memoryStoreMock.getAllL2.mockResolvedValue([])
+    l2DmaeManagerMock.getActiveL2ForPrompt.mockReset()
+    l2DmaeManagerMock.getActiveL2ForPrompt.mockResolvedValue([])
     entityGraphMock.search.mockReset()
     entityGraphMock.search.mockReturnValue("")
   })
@@ -54,6 +61,56 @@ describe("buildMemoryInjection", () => {
 
     expect(context).toContain("用户喜欢跑步")
     expect(wasRecentlyInjectedMemory("l2_run")).toBe(true)
+    expect(ragMock.searchMemoryEntries).toHaveBeenCalledWith("跑步", "user_memory", 5)
+  })
+
+  it("prefers DMAE-active L2 memories for injection", async () => {
+    ragMock.searchMemoryEntries.mockResolvedValue([{
+      id: "rag_search",
+      text: "向量召回结果",
+      createdAt: Date.now(),
+      score: 0.8,
+      metadata: { l2Id: "l2_search" },
+    }])
+    memoryStoreMock.getAllL2.mockResolvedValue([{
+      id: "l2_active",
+      content: "用户喜欢跑步",
+      triggerText: "跑步",
+      sourceConversationId: "test",
+      createdAt: Date.now(),
+      lastAccessedAt: Date.now(),
+      accessCount: 0,
+      weight: 0,
+      isPinned: false,
+      status: "active",
+      syncStatus: "synced",
+      ragId: "rag_active",
+      conflictWith: [],
+    }])
+    l2DmaeManagerMock.getActiveL2ForPrompt.mockResolvedValue([{
+      id: "l2_active",
+      content: "用户喜欢跑步",
+      triggerText: "跑步",
+      sourceConversationId: "test",
+      createdAt: Date.now(),
+      lastAccessedAt: Date.now(),
+      accessCount: 0,
+      weight: 0,
+      isPinned: false,
+      status: "active",
+      syncStatus: "synced",
+      ragId: "rag_active",
+      conflictWith: [],
+    }])
+
+    const { buildMemoryInjection } = await import("./index")
+
+    const context = await buildMemoryInjection("跑步")
+
+    expect(context).toContain("用户喜欢跑步")
+    expect(context).not.toContain("向量召回结果")
+    expect(wasRecentlyInjectedMemory("l2_active")).toBe(true)
+    expect(l2DmaeManagerMock.getActiveL2ForPrompt).toHaveBeenCalledWith(expect.any(Array), 4)
     expect(ragMock.searchMemoryEntries).toHaveBeenCalledWith("跑步", "user_memory", 5)
   })
 })

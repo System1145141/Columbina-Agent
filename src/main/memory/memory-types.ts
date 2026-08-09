@@ -48,13 +48,31 @@ export interface L2Memory {
   subEntryIds?: string[]
   /** 冲突标记：与该记忆语义相矛盾的其他条目 ragId 列表 */
   conflictWith?: string[]
+  /** 记忆摘要标题（压缩总结/LLM 命名），用于 Obsidian 文件名与双链锚点 */
+  slug?: string
+  /** 记忆来源原文引用（用户原话），用于 Obsidian frontmatter 展示 */
+  sourceQuote?: string
   evidenceIds?: string[]
   sourceMessageIds?: string[]
   supersededBy?: string
   mergedInto?: string
+  /**
+   * V5 DMAE：用于 H_u/H_m 检测的关键词集合。
+   * 由 content 分词 + evidence 实体在写入时提取；缺失时 memory-store 会自动补充。
+   */
+  keywords?: string[]
 }
 
 export type L2MemoryStatus = "active" | "aging" | "archived" | "superseded" | "merged"
+
+export function isL2LocallyRecallable(memory: L2Memory): boolean {
+  return (
+    (memory.status === "active" || memory.status === "aging") &&
+    memory.syncStatus === "synced" &&
+    typeof memory.ragId === "string" &&
+    memory.ragId.length > 0
+  )
+}
 
 export interface ReflectionLog {
   id: string
@@ -157,6 +175,20 @@ export interface MemoryJudgeTurn {
   assistantReply: string
 }
 
+/**
+ * L2 热层 DMAE 运行时状态（V5）。
+ * 随 memory.json 持久化；archived 条目在 Phase 1 跳过更新。
+ */
+export interface L2DmaeState {
+  l2Id: string
+  activation: number
+  intrinsicValue: number
+  userSilence: number
+  modelSilence: number
+  recentUserHits: number[]
+  state: "active" | "dormant" | "archived"
+}
+
 export interface MemoryStore {
   schemaVersion: number
   l0: L0Profile
@@ -165,6 +197,8 @@ export interface MemoryStore {
   evidence?: MemoryEvidence[]
   reflectionLogs?: ReflectionLog[]
   conflictLogs?: ConflictLog[]
+  /** L2 热层 DMAE 运行时状态（V5） */
+  l2DmaeStates?: L2DmaeState[]
   /** @deprecated Use schemaVersion for memory.json migrations. */
   version: number
 }

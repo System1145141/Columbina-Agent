@@ -3,6 +3,8 @@
 // 工具的选择和执行由 function-calling.ts 的 runFunctionCallingLoop 处理
 import { updateWorldbookActivation, getPermanentWorldbookEntries, getActiveWorldbookEntries, getCascadeWorldbookEntries, searchMemory, searchMemoryEntries, INJECTION_HEADER, INJECTION_PREAMBLE } from "../rag";
 import { memoryStore } from "../memory/memory-store";
+import { l2DmaeManager } from "../memory/l2-dmae-manager";
+import type { L2Memory } from "../memory/memory-types";
 import { entityGraph } from "../memory/entity-graph";
 import { recordRecentMemorySearchEntries } from "../memory/recent-injected-memory";
 import { toolRegistry } from "./tool-registry";
@@ -18,6 +20,9 @@ export { runFunctionCallingLoop } from "./function-calling";
  * 构建相关记忆注入：自动检索 top-N 相关 L2 记忆和导入文档，
  * 注入到 system prompt 中，让模型无需主动调用 tool 也能感知到相关信息。
  * 原有 tool 保留，模型仍可深度搜索。
+ *
+ * V5 L2 DMAE：先向量召回驱动激活状态更新，再优先注入 DMAE 激活排序后的 active L2
+ * （activation >= promptThreshold，按 activation 降序；无 active 时回退到向量召回结果）。
  */
 export async function buildMemoryInjection(
   userInput: string,
@@ -25,19 +30,29 @@ export async function buildMemoryInjection(
   const parts: string[] = [];
 
   try {
-    // 检索 top-3 L2 用户记忆
+    // ① 向量召回 top-5：驱动 L2 DMAE 激活状态更新（searchMemoryEntries 内部
+    //    按召回位次喂 setRecalledIntrinsicValues + updateActivation）
     const userMemoryEntries = await searchMemoryEntries(userInput, "user_memory", 5);
-    if (userMemoryEntries.length > 0) {
-      recordRecentMemorySearchEntries(userMemoryEntries);
+    // ② 读取 DMAE 热层：优先注入激活排序后的 active L2
+    const allL2 = await memoryStore.getAllL2();
+    let dmaeActive: L2Memory[] = [];
+    try {
+      dmaeActive = await l2DmaeManager.getActiveL2ForPrompt(allL2, 4);
+    } catch (err) {
+      console.warn("[Orchestrator] L2 DMAE injection failed, falling back to search results:", err);
+    }
+    const injected = dmaeActive.length > 0
+      ? dmaeActive.map((l2) => ({ text: l2.content, metadata: { l2Id: l2.id } }))
+      : userMemoryEntries;
+    if (injected.length > 0) {
+      recordRecentMemorySearchEntries(injected);
       // 标注可能存在冲突的记忆
-      const allL2 = await memoryStore.getAllL2();
-      const conflictAnnotated = userMemoryEntries.map((entry) => {
-        const m = entry.text;
-        const l2Entry = allL2.find((l) => l.content === m && l.conflictWith && l.conflictWith.length > 0);
-        if (l2Entry) {
-          return `· ${m} ⚠️（该信息可能存在矛盾记录）`;
-        }
-        return `· ${m}`;
+      const l2ById = new Map(allL2.map((l2) => [l2.id, l2]));
+      const conflictAnnotated = injected.map((entry) => {
+        const l2Id = typeof entry.metadata?.l2Id === "string" ? entry.metadata.l2Id : undefined;
+        const l2Entry = l2Id ? l2ById.get(l2Id) : undefined;
+        const hasConflict = !!(l2Entry?.conflictWith && l2Entry.conflictWith.length > 0);
+        return `· ${entry.text}${hasConflict ? " ⚠️（该信息可能存在矛盾记录）" : ""}`;
       });
       parts.push("【相关记忆】\n" + conflictAnnotated.join("\n"));
     }

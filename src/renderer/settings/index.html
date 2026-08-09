@@ -31,6 +31,7 @@
         <button type="button" class="nav-item" data-section="api"><span>🔑</span><span data-i18n="nav.api">API 设置</span></button>
         <button type="button" class="nav-item" data-section="columbina"><span>🌸</span><span data-i18n="nav.columbina">Columbina 设置</span></button>
         <button type="button" class="nav-item" data-section="channels"><span>📱</span><span data-i18n="nav.channels">连接手机</span></button>
+        <button type="button" class="nav-item" data-section="music"><span>🎵</span><span data-i18n="nav.music">音乐</span></button>
         <button type="button" class="nav-item" data-section="tts"><span>🎙️</span><span data-i18n="nav.tts">TTS 设置</span></button>
         <button type="button" class="nav-item" data-section="asr"><span>🎧</span><span data-i18n="nav.asr">ASR 设置</span></button>
         <button type="button" class="nav-item" data-section="tokens"><span>📊</span><span data-i18n="nav.tokens">Token 用量</span></button>
@@ -500,6 +501,30 @@
                 </div>
               </div>
               <div class="memory-list" id="memory-reflection-list"><div class="memory-list__empty"><span>📭</span><p data-i18n="memory.reflection.empty">暂无阶段总结</p><p class="memory-list__hint" data-i18n="memory.reflection.emptyHint">持续聊天后会自动生成</p></div></div>
+            </div>
+            <!-- Obsidian vault 双向同步 -->
+            <div class="memory-card">
+              <div class="memory-card__head">
+                <span>🪨</span>
+                <div>
+                  <h2>Obsidian Vault 同步</h2>
+                  <p>把记忆导出到 Obsidian Vault（记忆/实体/回顾/冲突），在 Obsidian 里编辑正文后自动回写</p>
+                </div>
+              </div>
+              <div class="memory-fields">
+                <div class="memory-field memory-field--full">
+                  <label>绑定状态</label>
+                  <span class="obsidian-vault-path" id="obsidian-vault-path">未绑定</span>
+                  <p class="memory-card__hint" id="obsidian-last-sync-hint"></p>
+                </div>
+              </div>
+              <div class="obsidian-actions">
+                <button type="button" class="ghost-btn" id="obsidian-bind-btn">📁 绑定 Vault</button>
+                <button type="button" class="ghost-btn" id="obsidian-unbind-btn">解绑</button>
+                <button type="button" class="ghost-btn" id="obsidian-sync-now-btn">🔄 立即同步</button>
+                <button type="button" class="ghost-btn" id="obsidian-export-btn">📤 导出到目录</button>
+                <label class="obsidian-checkbox"><input type="checkbox" id="obsidian-auto-sync" /> 记忆写入后自动同步</label>
+              </div>
             </div>
           </div>
         </section>
@@ -1335,6 +1360,11 @@
                   <span class="tts-engine__name">小米 MiMo</span>
                   <span class="tts-engine__tag">云端</span>
                 </button>
+                <button type="button" class="tts-engine" data-engine="mossland" role="radio" aria-checked="false">
+                  <span class="tts-engine__icon">🎙️</span>
+                  <span class="tts-engine__name">Mossland</span>
+                  <span class="tts-engine__tag">云端</span>
+                </button>
               </div>
             </div>
 
@@ -1464,7 +1494,55 @@
               <div class="tts-clone-status" id="tts-mimo-test-status"></div>
             </div>
 
-            <p class="tts-hint">💡 MiniMax 需在控制台训练音色并填写音色 ID。GPT-SoVITS 需自行启动本地服务并提供参考音频。自定义云端会 POST 固定 JSON 到你的 Endpoint。小米 MiMo 当前使用 Columbina 参考音频走 voiceclone 非流式 wav 合成。</p>
+            <div class="tts-config" id="tts-config-mossland" hidden>
+              <h2 class="tts-section__title">🎙️ Mossland 配置</h2>
+              <p class="tts-clone-hint">Mossland（api.mosi.cn）云端 TTS。先克隆音色拿到 voice_id，再测试发音。</p>
+              <div class="tts-field">
+                <label>API Key</label>
+                <input type="password" id="tts-mossland-key" placeholder="Mossland API Key" />
+              </div>
+              <div class="tts-field">
+                <label>音色 ID</label>
+                <input type="text" id="tts-mossland-voice" placeholder="克隆后的 voice_id（或点击下方克隆/从列表选择）" />
+              </div>
+              <div class="tts-field">
+                <label>合成模型</label>
+                <select id="tts-mossland-model">
+                  <option value="moss-tts">moss-tts（单说话人）</option>
+                </select>
+              </div>
+              <button type="button" class="ghost-btn" id="tts-mossland-test">🔊 测试发音</button>
+              <div class="tts-clone-status" id="tts-mossland-test-status"></div>
+
+              <!-- 音色克隆 + 音色列表 -->
+              <div class="tts-clone-section">
+                <h3 class="tts-clone-title">🎙️ 音色克隆</h3>
+                <p class="tts-clone-hint">上传参考音频（mp3/wav/m4a），克隆专属音色</p>
+                <div class="tts-field">
+                  <label>参考音频</label>
+                  <input type="text" id="tts-mossland-clone-file" placeholder="点击右侧选择音频文件" readonly />
+                  <button type="button" class="ghost-btn tts-pick-btn" id="tts-mossland-clone-pick">选择</button>
+                </div>
+                <div class="tts-field">
+                  <label>音色命名（可选）</label>
+                  <input type="text" id="tts-mossland-clone-name" placeholder="如 columbina-voice" />
+                </div>
+                <button type="button" class="ghost-btn" id="tts-mossland-clone-start">🚀 开始克隆</button>
+                <div class="tts-clone-status" id="tts-mossland-clone-status"></div>
+
+                <h3 class="tts-clone-title">📋 已有音色</h3>
+                <div class="tts-field">
+                  <label>账号下音色列表</label>
+                  <select id="tts-mossland-voices">
+                    <option value="">（点击下方按钮拉取）</option>
+                  </select>
+                  <button type="button" class="ghost-btn tts-pick-btn" id="tts-mossland-list-voices">刷新</button>
+                </div>
+                <div class="tts-clone-status" id="tts-mossland-list-status"></div>
+              </div>
+            </div>
+
+            <p class="tts-hint">💡 MiniMax 需在控制台训练音色并填写音色 ID。GPT-SoVITS 需自行启动本地服务并提供参考音频。自定义云端会 POST 固定 JSON 到你的 Endpoint。小米 MiMo 当前使用 Columbina 参考音频走 voiceclone 非流式 wav 合成。Mossland 走官方单说话人接口（moss-tts），音色需先克隆。</p>
 
             <hr class="api-section-divider" />
             <div class="tts-section">
@@ -1558,6 +1636,47 @@
           </div>
         </section>
 
+
+        <section class="settings-panel is-hidden" id="music-panel" data-panel="music">
+          <div class="panel-heading">
+            <div class="panel-heading__icon">🎵</div>
+            <div>
+              <h1 data-i18n="music.title">音乐</h1>
+              <p data-i18n="music.subtitle">网易云音乐：二维码登录、搜索与播放</p>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="tts-section">
+              <h2 class="tts-section__title" data-i18n="music.account">账号</h2>
+              <div class="music-status-row">
+                <span class="music-status-dot" id="music-status-dot"></span>
+                <span id="music-account-status">尚未连接</span>
+              </div>
+              <div class="music-actions" id="music-actions"></div>
+              <p class="tts-hint music-feedback" id="music-feedback"></p>
+              <p class="tts-hint" data-i18n="music.depNotice">播放依赖本地网易云音乐客户端（orpheus:// 协议）；搜索与登录需要 resources/music-vendor 依赖（uv + cloud-music-mcp），缺失时本面板显示"未安装音乐依赖"。</p>
+            </div>
+
+            <div class="tts-section is-hidden" id="music-qr-box">
+              <h2 class="tts-section__title" data-i18n="music.qrTitle">扫码登录</h2>
+              <div class="music-qr-wrap">
+                <img id="music-qr-img" alt="登录二维码" style="display:none;" />
+              </div>
+              <p class="tts-hint" id="music-qr-tip" data-i18n="music.qrTip">请用网易云音乐 App 扫描二维码完成登录</p>
+              <p class="tts-hint" id="music-qr-status"></p>
+            </div>
+
+            <div class="tts-section is-hidden" id="music-search-form">
+              <h2 class="tts-section__title" data-i18n="music.searchTitle">搜索歌曲</h2>
+              <div class="music-search-input-row">
+                <input type="text" id="music-search-input" placeholder="输入关键词，如：周杰伦 晴天" autocomplete="off" />
+                <button type="button" class="btn-primary" id="music-search-btn" data-i18n="music.searchBtn">搜索</button>
+              </div>
+              <p class="tts-hint" id="music-search-hint"></p>
+              <div class="music-search-results" id="music-search-results"></div>
+            </div>
+          </div>
+        </section>
 
         <section class="settings-panel is-hidden" id="placeholder-panel">
           <div class="placeholder-card">

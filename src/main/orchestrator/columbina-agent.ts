@@ -34,6 +34,7 @@ import { extractLastUserQuery, type ToolContext } from "./tool-context";
 import { recordUsage } from "../token-usage-store";
 import { resetReadRefs } from "../skills/skill-tools";
 import { truncateToolResult, compressConversation } from "./context-manager";
+import { createThinkFilter, stripThinkBlocks } from "../chat/think-filter";
 
 const LOG_PREFIX = "[ColumbinaAgent]";
 const MAX_TOOL_ROUNDS = 20; // 多步任务（写 Excel 多 sheet、生成图片等）可能耗多轮；到顶强制无工具总结兜底
@@ -256,6 +257,19 @@ async function runFcLoopWithEvents(
     let thinkingStarted = false;
     let textStarted = false;
 
+    // <think> 流式过滤：剥离模型混入正文的思维链，转译为 reasoning 事件（leading-only，安全默认）
+    const thinkFilter = createThinkFilter("leading-only");
+    const ensureThinkingStarted = () => {
+      if (thinkingStarted) return;
+      thinkingStarted = true;
+      observer.next({ type: EventType.REASONING_MESSAGE_START, messageId: thinkingMessageId, role: "assistant" });
+    };
+    const ensureTextStarted = () => {
+      if (textStarted) return;
+      textStarted = true;
+      observer.next({ type: EventType.TEXT_MESSAGE_START, messageId: textMessageId, role: "assistant" });
+    };
+
     let chat: ChatResponse;
     try {
       const res = await requestStreamRound(
@@ -263,19 +277,21 @@ async function runFcLoopWithEvents(
         (chunk) => {
           // 思维链增量即时发射，渲染层「深度思考」折叠块实时更新
           if (chunk.deltaThinking) {
-            if (!thinkingStarted) {
-              thinkingStarted = true;
-              observer.next({ type: EventType.REASONING_MESSAGE_START, messageId: thinkingMessageId, role: "assistant" });
-            }
+            ensureThinkingStarted();
             observer.next({ type: EventType.REASONING_MESSAGE_CONTENT, messageId: thinkingMessageId, delta: chunk.deltaThinking });
           }
-          // 正文增量即时发射，渲染层正文气泡逐字更新
+          // 正文增量即时发射，渲染层正文气泡逐字更新；先经 <think> 过滤器防标签泄漏
           if (chunk.deltaText) {
-            if (!textStarted) {
-              textStarted = true;
-              observer.next({ type: EventType.TEXT_MESSAGE_START, messageId: textMessageId, role: "assistant" });
+            const visible = thinkFilter.push(chunk.deltaText);
+            if (visible) {
+              ensureTextStarted();
+              observer.next({ type: EventType.TEXT_MESSAGE_CONTENT, messageId: textMessageId, delta: visible });
             }
-            observer.next({ type: EventType.TEXT_MESSAGE_CONTENT, messageId: textMessageId, delta: chunk.deltaText });
+            const capturedThinking = thinkFilter.takeThinking();
+            if (capturedThinking) {
+              ensureThinkingStarted();
+              observer.next({ type: EventType.REASONING_MESSAGE_CONTENT, messageId: thinkingMessageId, delta: capturedThinking });
+            }
           }
         },
         registerAbort,
@@ -305,7 +321,18 @@ async function runFcLoopWithEvents(
       throw err;
     }
 
-    // 收尾流事件（模型没产出正文/思维链时 START 不会发射，这里对称收 END）
+    // 流式收尾：flush <think> 过滤器残留的正文/思维链，再对称收 END
+    // （模型没产出正文/思维链时 START 不会发射，这里确保过滤器缓冲不丢失）
+    const tailVisible = thinkFilter.flush();
+    if (tailVisible) {
+      ensureTextStarted();
+      observer.next({ type: EventType.TEXT_MESSAGE_CONTENT, messageId: textMessageId, delta: tailVisible });
+    }
+    const tailThinking = thinkFilter.takeThinking();
+    if (tailThinking) {
+      ensureThinkingStarted();
+      observer.next({ type: EventType.REASONING_MESSAGE_CONTENT, messageId: thinkingMessageId, delta: tailThinking });
+    }
     if (thinkingStarted) observer.next({ type: EventType.REASONING_MESSAGE_END, messageId: thinkingMessageId });
     if (textStarted) observer.next({ type: EventType.TEXT_MESSAGE_END, messageId: textMessageId });
 
@@ -432,7 +459,7 @@ async function runFcLoopWithEvents(
     }
 
     // 情况2：模型正常返回文本（正文已随流式逐字发射完毕，这里只记录回复）
-    const content = chat.text || "";
+    const content = stripThinkBlocks(chat.text || "");
     console.log(LOG_PREFIX, "Function Calling 完成，最终回复长度=" + content.length);
 
     observer.next({ type: EventType.STEP_FINISHED, stepName: `round-${round + 1}` });
@@ -465,30 +492,56 @@ async function runFcLoopWithEvents(
   const thinkingMessageId = `thinking-${Date.now()}-force`;
   let thinkingStarted = false;
   let textStarted = false;
+
+  // <think> 流式过滤（同主循环，防强制总结时思维链标签泄漏）
+  const thinkFilter = createThinkFilter("leading-only");
+  const ensureThinkingStarted = () => {
+    if (thinkingStarted) return;
+    thinkingStarted = true;
+    observer.next({ type: EventType.REASONING_MESSAGE_START, messageId: thinkingMessageId, role: "assistant" });
+  };
+  const ensureTextStarted = () => {
+    if (textStarted) return;
+    textStarted = true;
+    observer.next({ type: EventType.TEXT_MESSAGE_START, messageId: textMessageId, role: "assistant" });
+  };
+
   try {
     // 强制总结同样真流式：正文/思维链边收边发（90s 静默超时，见 requestStreamRound）
     const res = await requestStreamRound(
       adapter, finalReq, settings, FORCE_SUMMARY_TIMEOUT_MS,
       (chunk) => {
         if (chunk.deltaThinking) {
-          if (!thinkingStarted) {
-            thinkingStarted = true;
-            observer.next({ type: EventType.REASONING_MESSAGE_START, messageId: thinkingMessageId, role: "assistant" });
-          }
+          ensureThinkingStarted();
           observer.next({ type: EventType.REASONING_MESSAGE_CONTENT, messageId: thinkingMessageId, delta: chunk.deltaThinking });
         }
         if (chunk.deltaText) {
-          if (!textStarted) {
-            textStarted = true;
-            observer.next({ type: EventType.TEXT_MESSAGE_START, messageId: textMessageId, role: "assistant" });
+          const visible = thinkFilter.push(chunk.deltaText);
+          if (visible) {
+            ensureTextStarted();
+            observer.next({ type: EventType.TEXT_MESSAGE_CONTENT, messageId: textMessageId, delta: visible });
           }
-          observer.next({ type: EventType.TEXT_MESSAGE_CONTENT, messageId: textMessageId, delta: chunk.deltaText });
+          const capturedThinking = thinkFilter.takeThinking();
+          if (capturedThinking) {
+            ensureThinkingStarted();
+            observer.next({ type: EventType.REASONING_MESSAGE_CONTENT, messageId: thinkingMessageId, delta: capturedThinking });
+          }
         }
       },
       registerAbort,
     );
     const chat = res.chat;
     if (res.partial) console.warn(LOG_PREFIX, "强制总结流式中止，使用已接收的部分内容");
+    const tailVisible = thinkFilter.flush();
+    if (tailVisible) {
+      ensureTextStarted();
+      observer.next({ type: EventType.TEXT_MESSAGE_CONTENT, messageId: textMessageId, delta: tailVisible });
+    }
+    const tailThinking = thinkFilter.takeThinking();
+    if (tailThinking) {
+      ensureThinkingStarted();
+      observer.next({ type: EventType.REASONING_MESSAGE_CONTENT, messageId: thinkingMessageId, delta: tailThinking });
+    }
     if (thinkingStarted) observer.next({ type: EventType.REASONING_MESSAGE_END, messageId: thinkingMessageId });
     if (textStarted) observer.next({ type: EventType.TEXT_MESSAGE_END, messageId: textMessageId });
 
@@ -503,7 +556,7 @@ async function runFcLoopWithEvents(
 
     observer.next({ type: EventType.STEP_FINISHED, stepName: "force-summary" });
     const totalUsage = (accInput > 0 || accOutput > 0) ? { input: accInput, output: accOutput, hit: accHit, miss: accMiss } : undefined;
-    return { reply: chat.text, toolResults: allToolResults, totalUsage };
+    return { reply: stripThinkBlocks(chat.text), toolResults: allToolResults, totalUsage };
   } catch (err) {
     // 兜底再失败也别让整个 run 崩掉（subscriber.error 会让用户彻底没回复）。
     // 用已收集的工具结果拼一个"任务中断"文案降级返回。

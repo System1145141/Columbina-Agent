@@ -21,6 +21,7 @@
     "channels": "Connect Phone",
     "tts": "TTS Settings",
     "asr": "ASR Settings",
+    "music": "Music",
     "tokens": "Token Usage",
     "disclaimer": "Disclaimer"
   },
@@ -322,6 +323,17 @@
     "hint": "Speech recognition & call configuration",
     "subtitle": "Speech recognition & call configuration",
     "off": "Off"
+  },
+  "music": {
+    "title": "Music",
+    "hint": "Netease Cloud Music login & playback",
+    "subtitle": "Netease Cloud Music: QR login, search and playback",
+    "account": "Account",
+    "depNotice": "Playback relies on the local Netease Cloud Music client (orpheus:// protocol); search & login require the resources/music-vendor bundle (uv + cloud-music-mcp). When missing, this panel shows \"music dependencies not installed\".",
+    "qrTitle": "Scan to log in",
+    "qrTip": "Scan the QR code with the Netease Cloud Music app to log in",
+    "searchTitle": "Search songs",
+    "searchBtn": "Search"
   },
   "common": { "save": "Save", "cancel": "Cancel", "confirm": "Confirm", "delete": "Delete", "close": "Close", "edit": "Edit", "waitingSave": "Waiting to save", "saving": "Saving...", "saved": "Saved", "saveFailed": "Save failed", "saveSettings": "Save Settings", "saveApiSettings": "Save API Settings", "saveColumbinaSettings": "Save Columbina Settings", "readConfigFailed": "Failed to read config", "unsavedChanges": "Unsaved changes" },
   "chatWindow": {
@@ -670,6 +682,12 @@
     "ttsCustomCloudUrlRequired": "Please enter custom cloud Endpoint URL first",
     "ttsMimoApiKeyRequired": "Please enter Xiaomi MiMo API Key first",
     "ttsMimoRefAudioRequired": "Please select Xilian clone reference audio first",
+    "ttsMosslandApiKeyRequired": "Please enter Mossland API Key first",
+    "ttsMosslandVoiceIdRequired": "Please enter Voice ID first (or clone / pick from list below)",
+    "ttsMosslandRefAudioRequired": "Please select a reference audio to clone first",
+    "ttsMosslandCloneSuccess": "✅ Clone success! Voice ID {id} has been auto-filled.",
+    "ttsMosslandCloneFailed": "Voice clone failed: ",
+    "ttsMosslandListFailed": "Failed to fetch voice list: ",
     "ttsMinimaxApiKeyRequired": "Please enter MiniMax API Key first",
     "ttsMinimaxVoiceIdRequired": "Please enter Voice ID first (or clone train below)",
     "ttsCloneFileRequired": "Please select voice file",

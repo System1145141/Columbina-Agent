@@ -12,6 +12,7 @@ import {
   type ToolSpec,
 } from "./vendors";
 import { extractLastUserQuery, type ToolContext } from "./tool-context";
+import { stripThinkBlocks } from "../chat/think-filter";
 import { recordUsage } from "../token-usage-store";
 import { resetReadRefs } from "../skills/skill-tools";
 import { truncateToolResult, compressConversation } from "./context-manager";
@@ -304,7 +305,7 @@ export async function runFunctionCallingLoop(
       recordUsage(chat.usage.input, chat.usage.output, 1);
     }
     const totalUsage = (accInput > 0 || accOutput > 0) ? { input: accInput, output: accOutput } : undefined;
-    return { reply: chat.text, toolResults: allToolResults, totalUsage };
+    return { reply: stripThinkBlocks(chat.text), toolResults: allToolResults, totalUsage };
   } catch (err) {
     // 兜底再失败也别让整个 run 崩掉（抛错会让用户彻底没回复）。
     // 用已收集的工具结果拼一个"任务中断"文案降级返回。
