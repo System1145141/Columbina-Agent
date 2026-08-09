@@ -20,6 +20,387 @@
   --cy-shadow-bubble-accent: 2px 2px 4px rgba(255, 91, 138, 0.25), 3px 7px 16px rgba(255, 91, 138, 0.3);
   --cy-shadow-control-hover: 2px 2px 5px rgba(0, 0, 0, 0.35), 3px 8px 18px rgba(0, 0, 0, 0.3);
   --cy-shadow-control-focus: 0 0 0 3px rgba(255, 91, 138, 0.25), 2px 6px 16px rgba(0, 0, 0, 0.3);
+
+  /* deep-blue 组件级覆盖专用变量（收敛重复色值） */
+  --cy-surface: #1a2250;        /* RoleToggle option / 回到底部按钮回退 */
+  --cy-text-primary: #d9e2f7;   /* 回到底部按钮文字回退 */
+  --db-surface: #11183a;        /* 卡片 / 面板底 */
+  --db-surface-2: #192154;      /* hover / 次级面板底 */
+  --db-surface-3: #222c66;      /* active / 选中底 */
+  --db-surface-deep: #0d1430;   /* 代码块 / 输入框内嵌底 */
+  --db-border: #1d2554;         /* 组件边框 */
+  --db-border-soft: rgba(59, 130, 246, 0.16); /* 分隔线 */
+  --db-text: #d9e2f7;           /* 次级正文 */
+  --db-text-strong: #f1f5ff;    /* 主正文 */
+  --db-text-muted: #94a3c7;     /* 弱化文字 */
+  --db-hover-bg: rgba(255, 255, 255, 0.06);
+  --db-hover-bg-strong: rgba(255, 255, 255, 0.1);
+}
+
+/* =====================================================================
+ * deep-blue 组件级覆盖：收敛 React 聊天窗口组件 CSS 里的硬编码浅色
+ * （#fff / #f7f7f7 / #fff1f5 等背景与 #000/#333 系文字）。
+ * 原则：color:#fff 在强调色底上属正常设计，保留；
+ *       浅色 background → 深色面板；深色文字 → --cy-text 系。
+ * 全部限定在 [data-ui-theme="deep-blue"] 祖先选择器内，
+ * 浅色主题（light-blue / pearl-white）观感完全不受影响。
+ * ===================================================================== */
+
+/* ---- styles/react-root.css ---- */
+[data-ui-theme="deep-blue"] .cy-file-drop-overlay {
+  background: rgba(17, 24, 58, 0.88);
+  border-color: var(--cy-accent);
+}
+[data-ui-theme="deep-blue"] .cy-file-drop-overlay span {
+  background: var(--db-surface-2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+[data-ui-theme="deep-blue"] .cy-workspace-composer__scroll-to-bottom {
+  background: var(--cy-surface);
+  color: var(--cy-text-primary);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+[data-ui-theme="deep-blue"] .cy-compressing-context {
+  background: rgba(17, 24, 58, 0.92);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+/* ---- components/ui/HollowLayout.css ---- */
+[data-ui-theme="deep-blue"] .hollow-center {
+  background: var(--cy-bg-workspace);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
+}
+
+/* ---- components/ui/ModeSwitch.css ---- */
+[data-ui-theme="deep-blue"] .cy-segmented {
+  background: #11183a;
+  border-color: rgba(59, 130, 246, 0.14);
+}
+[data-ui-theme="deep-blue"] .cy-segment {
+  color: #c7d2ee;
+}
+[data-ui-theme="deep-blue"] .cy-segment:hover:not(.is-active) {
+  color: var(--cy-text);
+}
+[data-ui-theme="deep-blue"] .cy-segment.is-active {
+  background: var(--db-surface-3);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  color: var(--cy-text);
+}
+
+/* ---- components/ui/NewTaskButton.css ---- */
+[data-ui-theme="deep-blue"] .cy-new-task:hover {
+  background: var(--cy-bg-hover);
+}
+[data-ui-theme="deep-blue"] .cy-new-task-label {
+  color: var(--db-text);
+}
+
+/* ---- components/ui/UserAvatar.css ---- */
+[data-ui-theme="deep-blue"] .cy-user-avatar-circle {
+  background: var(--db-surface-2);
+}
+[data-ui-theme="deep-blue"] .cy-user-avatar-circle span {
+  color: var(--cy-pill-status);
+}
+
+/* ---- components/ui/StyleControl.css ---- */
+[data-ui-theme="deep-blue"] .cy-style-panel__option {
+  color: var(--db-text);
+}
+[data-ui-theme="deep-blue"] .cy-style-panel__option:hover {
+  background: var(--cy-bg-hover);
+}
+[data-ui-theme="deep-blue"] .cy-style-panel__option.is-active {
+  background: rgba(255, 91, 138, 0.16);
+  color: #ff8fb0;
+}
+[data-ui-theme="deep-blue"] .cy-style-popover .ant-popover-inner {
+  border-color: var(--db-border);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+
+/* ---- components/ui/ReasoningControl.css ---- */
+[data-ui-theme="deep-blue"] .cy-reasoning-popover .ant-popover-inner {
+  border-color: var(--db-border);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+[data-ui-theme="deep-blue"] .cy-reasoning-popover .ant-segmented {
+  background: var(--db-surface);
+}
+[data-ui-theme="deep-blue"] .cy-reasoning-popover .ant-segmented-item {
+  color: var(--db-text-muted);
+}
+
+/* ---- components/ui/PermissionControl.css ---- */
+[data-ui-theme="deep-blue"] .cy-permission-panel__option.is-per-action {
+  color: var(--db-text);
+}
+[data-ui-theme="deep-blue"] .cy-permission-panel__option:hover {
+  background: var(--cy-bg-hover);
+}
+[data-ui-theme="deep-blue"] .cy-permission-panel__option.is-read-only.is-active {
+  background: rgba(33, 163, 102, 0.16);
+}
+[data-ui-theme="deep-blue"] .cy-permission-panel__option.is-scoped.is-active {
+  background: rgba(59, 130, 246, 0.18);
+}
+[data-ui-theme="deep-blue"] .cy-permission-panel__option.is-per-action.is-active {
+  background: var(--db-surface-2);
+}
+[data-ui-theme="deep-blue"] .cy-permission-panel__option.is-full.is-active {
+  background: rgba(212, 157, 22, 0.18);
+}
+[data-ui-theme="deep-blue"] .cy-permission-popover .ant-popover-inner {
+  border-color: var(--db-border);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+
+/* ---- features/chat/components/ChatComposer.css ---- */
+[data-ui-theme="deep-blue"] .cy-composer-shell {
+  background: var(--db-surface);
+}
+[data-ui-theme="deep-blue"] .cy-composer.ant-sender {
+  background: var(--db-surface);
+  border-color: rgba(59, 130, 246, 0.14);
+}
+[data-ui-theme="deep-blue"] .cy-composer.ant-sender:hover {
+  border-color: rgba(59, 130, 246, 0.3);
+}
+[data-ui-theme="deep-blue"] .cy-composer .ant-sender-actions-btn:disabled {
+  color: var(--db-text-muted);
+  background: var(--db-surface-2);
+}
+[data-ui-theme="deep-blue"] .cy-composer__queue {
+  border-bottom-color: var(--db-border-soft);
+}
+[data-ui-theme="deep-blue"] .cy-composer__queue-item {
+  color: rgba(241, 245, 255, 0.72);
+  background: var(--db-hover-bg);
+}
+[data-ui-theme="deep-blue"] .cy-composer__queue-item button {
+  color: rgba(241, 245, 255, 0.5);
+}
+[data-ui-theme="deep-blue"] .cy-composer__queue-item button:hover {
+  background: var(--db-hover-bg-strong);
+  color: rgba(241, 245, 255, 0.85);
+}
+[data-ui-theme="deep-blue"] .cy-composer__icon-button,
+[data-ui-theme="deep-blue"] .cy-composer__footer-button,
+[data-ui-theme="deep-blue"] .cy-composer__agent-button {
+  color: var(--db-text);
+}
+[data-ui-theme="deep-blue"] .cy-composer__icon-button .cy-composer__screenshot-icon {
+  stroke: var(--db-text);
+}
+[data-ui-theme="deep-blue"] .cy-composer__attachment {
+  background: var(--db-surface-2);
+}
+[data-ui-theme="deep-blue"] .cy-composer__attachment.is-image {
+  background: var(--db-surface-deep);
+}
+[data-ui-theme="deep-blue"] .cy-composer__attachment--sticker {
+  background: var(--db-surface-2);
+}
+[data-ui-theme="deep-blue"] .cy-sticker-picker button {
+  background: var(--db-surface);
+}
+[data-ui-theme="deep-blue"] .cy-sticker-picker button:hover {
+  border-color: var(--cy-pill-border);
+  background: var(--cy-bg-hover);
+}
+[data-ui-theme="deep-blue"] .cy-composer__footer-button--placeholder small {
+  background: var(--db-surface-2);
+  color: var(--db-text-muted);
+}
+[data-ui-theme="deep-blue"] .cy-composer__footer .cy-composer__code-folder-icon,
+[data-ui-theme="deep-blue"] .cy-composer__footer .cy-composer__terminal-folder-icon {
+  stroke: var(--db-text);
+}
+[data-ui-theme="deep-blue"] .cy-composer__footer-separator {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* ---- features/chat/components/ChatMessageList.css ---- */
+[data-ui-theme="deep-blue"] .cy-message-avatar__image {
+  border-color: var(--cy-pill-border);
+}
+[data-ui-theme="deep-blue"] .cy-message-avatar__user {
+  background:
+    radial-gradient(circle at 30% 28%, rgb(61 174 255 / 45%) 0%, transparent 55%),
+    radial-gradient(circle at 70% 75%, rgb(236 72 153 / 50%) 0%, transparent 60%),
+    rgba(17, 24, 58, 0.92);
+}
+[data-ui-theme="deep-blue"] .cy-message--assistant .ant-bubble-content {
+  background: var(--db-surface);
+  border-color: var(--db-border);
+}
+[data-ui-theme="deep-blue"] .cy-message__image-attachment {
+  background: var(--db-surface-deep);
+}
+[data-ui-theme="deep-blue"] .cy-tool-executions__result {
+  background: var(--db-surface-deep);
+}
+[data-ui-theme="deep-blue"] .cy-message-markdown-fallback {
+  background: var(--db-surface-deep);
+  border-color: var(--db-border);
+}
+[data-ui-theme="deep-blue"] .cy-message-markdown blockquote {
+  border-left-color: var(--cy-pill-border);
+  color: var(--db-text-muted);
+}
+[data-ui-theme="deep-blue"] .cy-message-markdown :not(pre) > code {
+  background: var(--db-surface-2);
+  color: #ff8fb0;
+}
+[data-ui-theme="deep-blue"] .cy-message-markdown th,
+[data-ui-theme="deep-blue"] .cy-message-markdown td {
+  border-color: var(--db-border);
+}
+[data-ui-theme="deep-blue"] .cy-last-message-editor textarea {
+  background: var(--db-surface);
+  border-color: var(--db-border);
+  color: var(--db-text);
+}
+[data-ui-theme="deep-blue"] .cy-last-message-editor textarea:focus {
+  border-color: var(--cy-accent);
+  box-shadow: 0 0 0 2px rgba(255, 91, 138, 0.25);
+}
+[data-ui-theme="deep-blue"] .cy-last-message-editor__actions button {
+  background: var(--db-surface-2);
+  border-color: var(--db-border);
+  color: var(--db-text);
+}
+[data-ui-theme="deep-blue"] .cy-last-message-editor__actions button.is-primary {
+  border-color: var(--cy-accent);
+  background: var(--cy-accent);
+  color: #fff;
+}
+[data-ui-theme="deep-blue"] .cy-dot-spinner {
+  --uib-color: #94a3c7;
+}
+
+/* ---- features/chat/components/ConversationSidebar.css ---- */
+[data-ui-theme="deep-blue"] .cy-conversation-sidebar__title {
+  color: var(--db-text-muted);
+}
+[data-ui-theme="deep-blue"] .cy-conversation-list .ant-conversations-item {
+  color: var(--db-text);
+}
+[data-ui-theme="deep-blue"] .cy-conversation-list .ant-conversations-item:hover {
+  background: var(--cy-bg-hover);
+}
+[data-ui-theme="deep-blue"] .cy-conversation-list .ant-conversations-item-active {
+  background: var(--db-surface-3);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
+}
+[data-ui-theme="deep-blue"] .cy-conversation-list .ant-conversations-group-title {
+  color: var(--db-text-muted);
+}
+[data-ui-theme="deep-blue"] .cy-conversation-list-wrapper::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+}
+[data-ui-theme="deep-blue"] .cy-project-popover .ant-popover-inner {
+  background: var(--db-surface);
+  border-color: var(--db-border);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.55);
+}
+[data-ui-theme="deep-blue"] .cy-project-card__details dt {
+  color: var(--db-text-muted);
+}
+[data-ui-theme="deep-blue"] .cy-project-card__details dd {
+  color: var(--db-text);
+}
+[data-ui-theme="deep-blue"] .cy-project-card__open {
+  border-top-color: var(--db-border);
+  background: var(--db-surface);
+  color: var(--db-text);
+}
+[data-ui-theme="deep-blue"] .cy-project-card__open:hover {
+  background: var(--cy-bg-hover);
+}
+[data-ui-theme="deep-blue"] .cy-session-rename-input {
+  background: var(--db-surface-deep);
+}
+[data-ui-theme="deep-blue"] .cy-session-context-menu {
+  background: var(--db-surface);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+}
+[data-ui-theme="deep-blue"] .cy-session-context-menu .ant-menu-item:hover {
+  background: var(--cy-bg-hover);
+}
+[data-ui-theme="deep-blue"] .cy-session-context-menu .ant-menu-item-danger:hover {
+  background: rgba(255, 77, 79, 0.14);
+}
+
+/* ---- features/chat/components/RunExperience.css ---- */
+[data-ui-theme="deep-blue"] .cy-task-plan-card,
+[data-ui-theme="deep-blue"] .cy-run-outcome {
+  background: rgba(17, 24, 58, 0.92);
+}
+[data-ui-theme="deep-blue"] .cy-task-plan-card__marker {
+  border-color: var(--cy-pill-border);
+}
+[data-ui-theme="deep-blue"] .cy-run-outcome--failed {
+  border-color: rgba(255, 77, 79, 0.4);
+  color: #ff9c9c;
+}
+[data-ui-theme="deep-blue"] .cy-interaction-panel {
+  background: var(--db-surface);
+  border-color: var(--db-border);
+}
+[data-ui-theme="deep-blue"] .cy-interaction-panel__heading code {
+  background: var(--db-surface-2);
+}
+[data-ui-theme="deep-blue"] .cy-interaction-panel__pager button:hover:not(:disabled),
+[data-ui-theme="deep-blue"] .cy-interaction-panel__question-index button:hover:not(:disabled),
+[data-ui-theme="deep-blue"] .cy-interaction-panel__question-index button.is-current {
+  background: var(--cy-bg-hover);
+}
+[data-ui-theme="deep-blue"] .cy-interaction-panel__options button:hover,
+[data-ui-theme="deep-blue"] .cy-interaction-panel__options button.is-selected {
+  border-color: var(--cy-pill-border);
+  background: var(--cy-bg-hover);
+}
+[data-ui-theme="deep-blue"] .cy-interaction-panel__custom-answer input {
+  background: var(--db-surface-deep);
+  border-color: var(--db-border);
+}
+[data-ui-theme="deep-blue"] .cy-interaction-panel__actions button {
+  background: var(--db-surface-2);
+}
+
+/* ---- features/chat/components/TodoPanel.css ---- */
+[data-ui-theme="deep-blue"] .cy-todo {
+  background: var(--db-surface);
+  color: var(--db-text-strong);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+}
+[data-ui-theme="deep-blue"] .cy-todo__dragline {
+  background: rgba(255, 255, 255, 0.15);
+}
+[data-ui-theme="deep-blue"] .cy-todo__mode-capsule {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+[data-ui-theme="deep-blue"] .cy-todo__hero-title {
+  color: var(--db-text-strong);
+}
+[data-ui-theme="deep-blue"] .cy-todo__hero-sub {
+  color: var(--db-text-muted);
+}
+[data-ui-theme="deep-blue"] .cy-todo__item {
+  color: var(--db-text);
+}
+[data-ui-theme="deep-blue"] .cy-todo__progress {
+  background: var(--db-hover-bg);
+}
+[data-ui-theme="deep-blue"] .cy-todo__progress-text {
+  color: var(--db-text-strong);
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.6);
+}
+[data-ui-theme="deep-blue"] .cy-todo__workspace-path {
+  color: var(--db-text);
 }
 
 [data-ui-theme="light-blue"] {
