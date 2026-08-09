@@ -23,6 +23,10 @@ export const IPC = {
   CHAT_PROCESS_DOCUMENTS: "chat:process-documents",
   CHAT_DOCUMENT_INDEX_PROGRESS: "chat:document-index-progress",
   CHAT_CANCEL_DOCUMENT_INDEX: "chat:cancel-document-index",
+  // 图片附件：发送策略裁决 + 视觉模型描述 + 预览（由 Cyrene-Agent 移植）
+  CHAT_GET_IMAGE_SEND_STRATEGY: "chat:get-image-send-strategy",
+  CHAT_CAPTION_IMAGE: "chat:caption-image",
+  CHAT_GET_IMAGE_PREVIEW: "chat:get-image-preview",
   CHAT_STREAM_CHUNK: "chat:stream-chunk",
   CHAT_STREAM_DONE: "chat:stream-done",
 

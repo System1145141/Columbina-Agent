@@ -91,6 +91,12 @@ export interface BuildOptionsDeps {
     contextBlock: string;
     retrievedAtoms: SocialAtom[];
   }>;
+  /**
+   * 图片附件 caption 兜底（UI 移植阶段 P1）：给定图片路径，调视觉模型生成描述。
+   * 由 index.ts 注入（复用 loadVisionConfig + vision-captioner），失败返回 { ok: false, error }。
+   * 未注入时图片附件仍被提及但标记"未接线"。
+   */
+  captionImageForFallback?: (filePath: string) => Promise<{ ok: boolean; caption?: string; error?: string }>;
 }
 
 /** onRunFinished 副作用所需的 deps（与 BuildOptionsDeps 部分重叠） */
@@ -276,6 +282,33 @@ export async function buildAgentRunOptions(
     attachmentContext = `\n\n【本轮附件内容】\n${parts.join("\n\n")}`;
   }
 
+  // 图片附件（UI 移植阶段 P1）：逐张调视觉模型生成描述，拼【图片视觉信息】。
+  // 与 UI 层的 prepareImageAttachments 并行，这里负责把图片内容真正送进模型上下文。
+  let imageAttachmentContext = "";
+  const images = (input.imageAttachments ?? [])
+    .filter((image) => typeof image?.filePath === "string" && typeof image?.name === "string");
+  if (images.length > 0) {
+    const imageLines: string[] = [];
+    for (const image of images) {
+      if (!deps.captionImageForFallback) {
+        imageLines.push(`- ${image.name}：图片分析未接线`);
+        continue;
+      }
+      try {
+        const result = await deps.captionImageForFallback(image.filePath);
+        if (result.ok && result.caption) {
+          imageLines.push(`- ${image.name}：${result.caption}`);
+        } else {
+          imageLines.push(`- ${image.name}：图片分析失败：${result.error || "图片分析失败"}。请诚实说明暂时无法看清这张图，不要编造图片内容。`);
+        }
+      } catch (err) {
+        console.warn("[Columbina] 图片 caption 兜底失败:", err instanceof Error ? err.message : err);
+        imageLines.push(`- ${image.name}：图片分析失败：${err instanceof Error ? err.message : String(err)}。请诚实说明暂时无法看清这张图，不要编造图片内容。`);
+      }
+    }
+    imageAttachmentContext = "\n\n【图片视觉信息】\n以下内容是视觉模型对用户本轮图片的观察结果，请将其视为你已经看到的图片内容；如果某张图分析失败，请不要编造。\n" + imageLines.join("\n");
+  }
+
   const isTalkMode = (input.style || "").startsWith("talk");
   const conversationId = input.sessionId || "default";
 
@@ -328,7 +361,8 @@ export async function buildAgentRunOptions(
     (relationshipContext ? "\n\n" + relationshipContext + "\n\n" : "") +
     (socialContextBlock ? "\n\n---\n\n" + socialContextBlock : "") +
     (citaContextBlock ? "\n\n" + citaContextBlock : "") +
-    attachmentContext;
+    attachmentContext +
+    imageAttachmentContext;
 
   deps.logWorldbookInjection(alwaysOnContext, systemContent);
 

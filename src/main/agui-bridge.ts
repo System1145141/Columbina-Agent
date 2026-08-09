@@ -35,6 +35,12 @@ export interface AguiRunInput {
   channel?: RelationshipChannel;
   /** 本轮附件（文本内容，临时注入系统上下文，不存历史）。 */
   attachments?: { name: string; text: string }[];
+  /**
+   * 图片附件（文件路径形态，UI 移植阶段 P1）。
+   * 主进程在 buildOptions 阶段统一走 caption（独立视觉模型分析），
+   * 把【图片视觉信息】文本拼入最新 user 消息——Columbina run 无图片直发通道。
+   */
+  imageAttachments?: { name: string; filePath: string; mime?: string }[];
   /** 角色身份标识。不传时使用默认（columbina）。 */
   identityId?: string;
   /** 指定使用的模型 ID（模型列表中的 id）。不传时使用全局默认模型。 */

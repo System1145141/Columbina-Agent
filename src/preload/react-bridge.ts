@@ -401,8 +401,11 @@ export function createReactBridge(): {
         // 双角色：透传本轮身份与所选模型（Columbina 主进程已支持 identityId/modelId）。
         ...(input.identityId ? { identityId: input.identityId } : {}),
         ...(input.modelId ? { modelId: input.modelId } : {}),
-        // imageAttachments：Columbina run 的 attachments 为 {name, text} 文本形态，
-        // 图片摄入留阶段 C 对齐（此处省略，走纯文本上下文）。
+        // imageAttachments：主进程 buildOptions 阶段统一 caption（视觉模型分析），
+        // 把【图片视觉信息】拼入模型上下文（Columbina run 无图片直发通道）。
+        ...(input.imageAttachments && input.imageAttachments.length > 0
+          ? { imageAttachments: input.imageAttachments }
+          : {}),
       }) as Promise<{ success: boolean; error?: string }>,
       onEvent: (callback) => {
         const listener = (_event: Electron.IpcRendererEvent, raw: unknown): void => {

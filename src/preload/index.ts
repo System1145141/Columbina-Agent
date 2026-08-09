@@ -73,6 +73,15 @@ const chatApi = {
   },
   cancelDocumentIndex: (jobId: string) =>
     ipcRenderer.invoke(IPC.CHAT_CANCEL_DOCUMENT_INDEX, { jobId }) as Promise<boolean>,
+  /** 图片附件发送策略：返回 { mode: "direct" | "caption" }（Columbina 无图片直发通道，恒 caption）。 */
+  getImageSendStrategy: () =>
+    ipcRenderer.invoke(IPC.CHAT_GET_IMAGE_SEND_STRATEGY) as Promise<{ mode: "direct" | "caption" }>,
+  /** 图片描述：调视觉模型生成文本描述（供附件展示与模型上下文）。 */
+  captionImage: (filePath: string, hasAnnotations = false) =>
+    ipcRenderer.invoke(IPC.CHAT_CAPTION_IMAGE, { filePath, hasAnnotations }) as Promise<{ ok: boolean; caption?: string; error?: string }>,
+  /** 图片预览：返回 dataUrl 供消息气泡内联展示。 */
+  getImagePreview: (filePath: string) =>
+    ipcRenderer.invoke(IPC.CHAT_GET_IMAGE_PREVIEW, { filePath }) as Promise<{ ok: boolean; dataUrl?: string; error?: string }>,
   onStreamChunk: (cb: (chunk: string) => void) => { ipcRenderer.on(IPC.CHAT_STREAM_CHUNK, (_e: unknown, chunk: string) => cb(chunk)); },
   onStreamDone: (cb: (payload: unknown) => void) => { ipcRenderer.on(IPC.CHAT_STREAM_DONE, (_e: unknown, payload: unknown) => cb(payload)); },
   removeStreamListeners: () => { ipcRenderer.removeAllListeners(IPC.CHAT_STREAM_CHUNK); ipcRenderer.removeAllListeners(IPC.CHAT_STREAM_DONE); },

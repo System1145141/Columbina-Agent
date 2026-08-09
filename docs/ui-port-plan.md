@@ -1,8 +1,9 @@
 # Cyrene React UI 移植计划（聊天窗口）
 
-> 状态：计划（未开工）
+> 状态：✅ 全部完成（阶段 A~E + 打磨批次 P1；2026-08-09 至 08-10）
 > 计划日期：2026-08-09
 > 前置：功能迁移（docs/migration-plan.md 第 1~5 阶段）已全部完成
+> git：阶段 A/B 提交 `551d916`，阶段 C/D/E 提交 `8074a3f`，P1 打磨未提交（待用户确认）
 
 ## 1. 背景与目标
 
@@ -118,8 +119,9 @@ ChatPage 期望的 `window.*` 接口（src/renderer/react/features/chat/pages/Ch
 
 ### 阶段 D：视觉统一与移除 vanilla —— ✅ 已完成（2026-08-09）
 - [x] **移除 vanilla 聊天窗口**（决策点 2 兑现）：vite.config 删除 `chat` 入口；createChatWindow 移除 USE_REACT_CHAT 开关与 vanilla 分支（恒加载 `/react/`）；删除 `src/renderer/chat/` 全部 5 文件（main.ts 3313 行 / chat.css / index.html / sticker-src.ts + test）。残留引用仅为注释，无实际导入。
-- [~] 视觉统一：`--cy-*` 三主题映射在阶段 B 已落地（theme-overrides.css）；antd 组件暗色适配、空态/长会话虚拟滚动等**留作后续打磨项**（非阻塞，记录在案）。
-- **验证**：`npm run build` 全绿；`npm test` **939/939**（124 文件）；冒烟启动 React 聊天窗口正常、无任何 Uncaught/TypeError/404。
+- [x] 视觉统一（P1 补完）：`--cy-*` 三主题映射（阶段 B 的 theme-overrides.css）+ **antd ConfigProvider 暗色适配**（deep-blue → darkAlgorithm，随 columbinaTheme.onChanged 动态切换）+ **长会话懒渲染**（>80 条启用可见窗口 + 缓冲 spacer，无新依赖）。
+- [x] 图片附件闭环（P1 补完）：`chat:get-image-send-strategy` / `chat:caption-image` / `chat:get-image-preview` IPC + preload chatApi 三方法 + `vision-captioner`（复用 loadVisionConfig，与 read_image/testVision 同链路）+ `AguiRunInput.imageAttachments` 透传 + `buildAgentRunOptions` 把图片描述以【图片视觉信息】拼入系统上下文（失败诚实降级）。策略恒 caption（主进程无图片直发通道，decideImageSendStrategy 保留 direct 扩展点）。
+- **验证**：`npm run build` 全绿；`npm test` **945/945**（125 文件）；冒烟启动 React 聊天窗口正常、无任何 Uncaught/TypeError/404。
 
 ### 阶段 E：回归与收尾 —— ✅ 已完成（2026-08-09）
 - [x] 全量 `npm run build` + `npm test` 零失败（939/939，124 文件）。

@@ -19,6 +19,9 @@ import {
 } from "./rag/document-index-queue";
 import { runDocumentIndexJob, retrieveQueuedDocumentChunks } from "./rag/document-index-worker";
 import { processDocumentIndexRequest } from "./rag/document-index-ipc";
+// 图片附件：发送策略裁决 + 路径校验/caption prompt（由 Cyrene-Agent 移植）
+import { decideImageSendStrategy } from "./chat/image-send-strategy";
+import { validateCaptionImagePath, buildImageCaptionPrompt } from "./chat/image-caption";
 import { buildAlwaysOnContext, buildMemoryInjection, runFunctionCallingLoop, scheduleMemoryWrite } from "./orchestrator";
 import { ColumbinaAgent } from "./orchestrator/columbina-agent";
 import { indexConversationTurn } from "./orchestrator/history-tools";
@@ -3206,6 +3209,58 @@ ipcMain.handle(IPC.CHAT_CANCEL_DOCUMENT_INDEX, (_event, payload: unknown) => {
   return typeof jobId === "string" && cancelDocumentIndexJob(jobId);
 });
 
+// ── 图片附件（UI 移植阶段 P1，由 Cyrene-Agent 移植）──
+// 图片发送策略：Columbina AGUI run 的 attachments 为文本形态、无图片直发通道，
+// 因此暂不支持 direct（multimodal 直发主模型），统一 caption（独立视觉模型分析）。
+ipcMain.handle(IPC.CHAT_GET_IMAGE_SEND_STRATEGY, () => {
+  return decideImageSendStrategy({ multimodal: false, vision: loadVisionConfig() });
+});
+
+// 图片描述：校验路径 → 读图 → 调视觉模型生成描述（供 ChatPage 附件展示 + 模型上下文注入）。
+ipcMain.handle(IPC.CHAT_CAPTION_IMAGE, async (_event, payload: unknown) => {
+  const filePath = payload && typeof payload === "object"
+    ? (payload as { filePath?: unknown }).filePath
+    : undefined;
+  const hasAnnotations = payload && typeof payload === "object"
+    ? (payload as { hasAnnotations?: unknown }).hasAnnotations === true
+    : false;
+  const validated = validateCaptionImagePath(filePath);
+  if (!validated.ok) return { ok: false, error: validated.error };
+
+  const visionCfg = loadVisionConfig();
+  if (!visionCfg) {
+    return { ok: false, error: "未配置视觉模型，无法分析图片" };
+  }
+
+  try {
+    const { captionImage } = await import("./orchestrator/vision-captioner");
+    const caption = await captionImage(
+      { base64: validated.buffer.toString("base64"), mime: validated.mime },
+      buildImageCaptionPrompt(hasAnnotations),
+      visionCfg,
+    );
+    if (caption.startsWith("[错误")) {
+      return { ok: false, error: caption };
+    }
+    return { ok: true, caption };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+});
+
+// 图片预览：返回 dataUrl 供消息气泡内联展示。
+ipcMain.handle(IPC.CHAT_GET_IMAGE_PREVIEW, (_event, payload: unknown) => {
+  const filePath = payload && typeof payload === "object"
+    ? (payload as { filePath?: unknown }).filePath
+    : undefined;
+  const validated = validateCaptionImagePath(filePath);
+  if (!validated.ok) return { ok: false, error: validated.error };
+  return {
+    ok: true,
+    dataUrl: `data:${validated.mime};base64,${validated.buffer.toString("base64")}`,
+  };
+});
+
 // IDE 窗口 IPC
 ipcMain.on(IPC.IDE_OPEN, () => createIdeWindow());
 ipcMain.on(IPC.IDE_CLOSE, () => ideWindow?.close());
@@ -5452,6 +5507,26 @@ app.whenReady().then(async () => {
         contextBlock: compileSocialContextBlock(retrievedAtoms),
         retrievedAtoms,
       };
+    },
+    // 图片附件 caption 兜底（UI 移植阶段 P1）：复用 loadVisionConfig + vision-captioner。
+    // 失败返回 { ok:false }，绝不抛异常阻断主流程。
+    captionImageForFallback: async (filePath) => {
+      const validated = validateCaptionImagePath(filePath);
+      if (!validated.ok) return { ok: false, error: validated.error };
+      const visionCfg = loadVisionConfig();
+      if (!visionCfg) return { ok: false, error: "未配置视觉模型，无法分析图片" };
+      try {
+        const { captionImage } = await import("./orchestrator/vision-captioner");
+        const caption = await captionImage(
+          { base64: validated.buffer.toString("base64"), mime: validated.mime },
+          buildImageCaptionPrompt(false),
+          visionCfg,
+        );
+        if (caption.startsWith("[错误")) return { ok: false, error: caption };
+        return { ok: true, caption };
+      } catch (err: any) {
+        return { ok: false, error: err?.message || String(err) };
+      }
     },
   };
   const onRunFinishedDeps: OnRunFinishedDeps = {

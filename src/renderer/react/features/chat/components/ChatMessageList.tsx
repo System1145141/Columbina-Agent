@@ -96,6 +96,84 @@ interface ChatMessageListProps {
 
 const markdownConfig = { extensions: Latex() };
 
+// ── 长会话懒渲染（阶段 P1 打磨）：Bubble.List 无内置虚拟滚动，按滚动位置窗口化渲染 ──
+// 策略：items 超过阈值时，只渲染「可视区间 + 上下缓冲」，首尾用估算高度的 spacer 撑起
+// 总高度，滚动语义不依赖精确高度（估算误差由缓冲吸收）。nearBottom 时强制渲染尾部，
+// 保证流式更新/贴纸/思维链等既有行为不破坏。
+const LAZY_RENDER_ITEM_THRESHOLD = 80; // items 数超过此值启用窗口化
+const LAZY_RENDER_BUFFER = 14;         // 可视区间上下缓冲 item 数
+
+/** 估算单个 bubble item 的渲染高度（像素）。仅用于滚动窗口定位，不要求精确。 */
+function estimateItemHeight(item: BubbleItemType): number {
+  switch (item.role) {
+    case "reasoning": return 56;
+    case "tool": return 48;
+    case "activity": return 96;
+    case "waiting": return 72;
+    case "codeRun": return 220;
+    case "weather": return 240;
+    case "music": return 160;
+    case "system": return 32;
+    default: break;
+  }
+  const text = typeof item.content === "string" ? item.content : "";
+  const perLine = item.role === "user" ? 26 : 24;
+  const charsPerLine = 48;
+  const lines = text.length > 0 ? Math.ceil(text.length / charsPerLine) + 1 : 0;
+  const body = Math.max(48, Math.min(480, lines * perLine));
+  // 头像/操作区/留白：用户消息偏小，助手消息带 footer 偏大
+  return body + (item.role === "user" ? 56 : 84);
+}
+
+/**
+ * 由 scrollTop/clientHeight 计算可见 item 窗口 [start, end)。
+ * nearBottom 时窗口对齐尾部（end = items.length），确保流式更新可见。
+ */
+function computeLazyWindow(
+  scrollTop: number,
+  clientHeight: number,
+  heights: number[],
+  nearBottom: boolean,
+): { start: number; end: number } {
+  const n = heights.length;
+  if (n === 0) return { start: 0, end: 0 };
+  if (nearBottom) {
+    // 尾部窗口：按视口高度向上累计，保证至少填满一屏
+    let tailStart = n;
+    let acc = 0;
+    while (tailStart > 0 && acc < clientHeight) {
+      tailStart -= 1;
+      acc += heights[tailStart];
+    }
+    return { start: Math.max(0, tailStart - LAZY_RENDER_BUFFER), end: n };
+  }
+  // 正向定位 start：第一个累计高度越过 scrollTop 的 item
+  let acc = 0;
+  let start = 0;
+  for (let i = 0; i < n; i += 1) {
+    if (acc + heights[i] > scrollTop) { start = i; break; }
+    acc += heights[i];
+    start = i + 1;
+  }
+  // end：从 start 累计到超过可视高度
+  let end = start;
+  let viewAcc = 0;
+  while (end < n && viewAcc < clientHeight) {
+    viewAcc += heights[end];
+    end += 1;
+  }
+  return {
+    start: Math.max(0, start - LAZY_RENDER_BUFFER),
+    end: Math.min(n, end + LAZY_RENDER_BUFFER),
+  };
+}
+
+function sumHeights(heights: number[], from: number, to: number): number {
+  let total = 0;
+  for (let i = from; i < to; i += 1) total += heights[i];
+  return total;
+}
+
 /** 按消息身份解析助手头像：sandrone → Sandrone.jpg，其余（含历史消息缺失）→ Columbina.jpg。 */
 export function resolveAssistantAvatar(identityId?: string | null): string {
   return resolveAsset(`avatars/${identityId === "sandrone" ? "Sandrone" : "Columbina"}.jpg`);
@@ -873,6 +951,14 @@ export function ChatMessageList({
   const containerRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
 
+  // 懒渲染窗口（item 索引区间；null = 全量渲染，仅当 items 超过阈值启用）
+  const [lazyWindow, setLazyWindow] = useState<{ start: number; end: number } | null>(null);
+
+  // items（bubble 单元）与估算高度：惰性重建，供懒渲染窗口定位。
+  // 必须先于 updateLazyWindow 定义（依赖数组立即求值）。
+  const items = useMemo(() => createMessageItems(messages, enabledStickers), [messages, enabledStickers]);
+  const heights = useMemo(() => items.map(estimateItemHeight), [items]);
+
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     const el = containerRef.current;
     if (!el) return;
@@ -884,6 +970,19 @@ export function ChatMessageList({
     onRegisterScrollToBottom?.(scrollToBottom);
   }, [onRegisterScrollToBottom, scrollToBottom]);
 
+  const updateLazyWindow = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (items.length <= LAZY_RENDER_ITEM_THRESHOLD) {
+      setLazyWindow(null);
+      return;
+    }
+    const next = computeLazyWindow(el.scrollTop, el.clientHeight, heights, isNearBottomRef.current);
+    setLazyWindow((current) => (
+      current && current.start === next.start && current.end === next.end ? current : next
+    ));
+  }, [heights, items.length]);
+
   const updateScrollState = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -891,7 +990,8 @@ export function ChatMessageList({
     const nearBottom = distance < 100;
     isNearBottomRef.current = nearBottom;
     onScrollToBottomVisibilityChange?.(!nearBottom);
-  }, [onScrollToBottomVisibilityChange]);
+    updateLazyWindow();
+  }, [onScrollToBottomVisibilityChange, updateLazyWindow]);
 
   // 打开/切换会话时滚动到底部
   useEffect(() => {
@@ -946,7 +1046,14 @@ export function ChatMessageList({
     };
   }, []);
 
-  const items = createMessageItems(messages, enabledStickers);
+  // items 变化（新消息/流式更新）时重算窗口：nearBottom 保持贴尾，否则保持当前位置
+  useEffect(() => {
+    updateLazyWindow();
+  }, [updateLazyWindow]);
+
+  const visibleItems = lazyWindow ? items.slice(lazyWindow.start, lazyWindow.end) : items;
+  const topSpacerHeight = lazyWindow ? sumHeights(heights, 0, lazyWindow.start) : 0;
+  const bottomSpacerHeight = lazyWindow ? sumHeights(heights, lazyWindow.end, items.length) : 0;
 
   return (
     <div
@@ -955,7 +1062,13 @@ export function ChatMessageList({
       aria-live="polite"
       onScroll={updateScrollState}
     >
-      <Bubble.List items={items} role={roles} autoScroll />
+      {topSpacerHeight > 0 && (
+        <div className="cy-message-list__lazy-spacer" style={{ height: topSpacerHeight }} aria-hidden="true" />
+      )}
+      <Bubble.List items={visibleItems} role={roles} autoScroll />
+      {bottomSpacerHeight > 0 && (
+        <div className="cy-message-list__lazy-spacer" style={{ height: bottomSpacerHeight }} aria-hidden="true" />
+      )}
     </div>
   );
 }
