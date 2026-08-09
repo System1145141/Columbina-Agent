@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { TodoState } from "../../../../shared/todo-types";
+import { t } from "../../../../../shared/i18n";
 import reminderPngUrl from "../../../assets/status-moods/提醒.png?url";
 import "./TodoPanel.css";
 
@@ -13,11 +14,16 @@ const DEFAULT_WIDTH = 240;
 const DEFAULT_TOP = 80;
 const DEFAULT_RIGHT = 24;
 
-const MODE_LABELS: Record<TodoPanelProps["mode"], string> = {
-  work: "工作",
-  daily: "日常",
-  learn: "学习",
-};
+function modeLabel(mode: TodoPanelProps["mode"]): string {
+  switch (mode) {
+    case "work":
+      return t("reactChat.modeWork");
+    case "daily":
+      return t("reactChat.modeDaily");
+    case "learn":
+      return t("reactChat.modeLearn");
+  }
+}
 
 function EmptyCircleIcon() {
   return (
@@ -58,7 +64,7 @@ function ModeCapsule({ mode }: { mode: TodoPanelProps["mode"] }) {
   return (
     <div className="cy-todo__mode-capsule">
       <span className="cy-todo__mode-dot" aria-hidden="true" />
-      <span className="cy-todo__mode-label">{MODE_LABELS[mode]}</span>
+      <span className="cy-todo__mode-label">{modeLabel(mode)}</span>
     </div>
   );
 }
@@ -131,7 +137,7 @@ export function TodoPanel({ state, mode, workspaceName }: TodoPanelProps) {
       className={`cy-todo ${collapsed ? "cy-todo--collapsed" : ""}`}
       style={{ left: pos.x, top: pos.y }}
       role="region"
-      aria-label="当前任务"
+      aria-label={t("reactChat.currentTasks")}
     >
       <button
         type="button"
@@ -139,7 +145,7 @@ export function TodoPanel({ state, mode, workspaceName }: TodoPanelProps) {
         onMouseDown={handleHeaderMouseDown}
         onClick={handleHeaderClick}
         aria-expanded={!collapsed}
-        title="拖动"
+        title={t("reactChat.drag")}
       >
         <span className="cy-todo__dragline" />
         <span
@@ -159,11 +165,11 @@ export function TodoPanel({ state, mode, workspaceName }: TodoPanelProps) {
         </div>
 
         <div className="cy-todo__hero">
-          <img className="cy-todo__mascot" src={reminderPngUrl} alt="提醒" />
+          <img className="cy-todo__mascot" src={reminderPngUrl} alt={t("reactChat.reminderAlt")} />
           <div className="cy-todo__hero-text">
-            <div className="cy-todo__hero-title">当前任务</div>
+            <div className="cy-todo__hero-title">{t("reactChat.currentTasks")}</div>
             <div className="cy-todo__hero-sub">
-              {completed}/{total} 已完成
+              {t("reactChat.todoDoneCount", { done: String(completed), total: String(total) })}
             </div>
           </div>
         </div>
@@ -176,7 +182,7 @@ export function TodoPanel({ state, mode, workspaceName }: TodoPanelProps) {
               <span className="cy-todo__status" aria-hidden="true">
                 <EmptyCircleIcon />
               </span>
-              <span className="cy-todo__content">暂无任务</span>
+              <span className="cy-todo__content">{t("reactChat.noTodos")}</span>
             </li>
           ) : (
             todos.map((todo) => {
@@ -210,9 +216,9 @@ export function TodoPanel({ state, mode, workspaceName }: TodoPanelProps) {
         </div>
 
         <div className="cy-todo__workspace">
-          <span className="cy-todo__workspace-label">当前工作路径</span>
+          <span className="cy-todo__workspace-label">{t("reactChat.currentWorkspacePath")}</span>
           <span className="cy-todo__workspace-path" title={workspaceName}>
-            {workspaceName ?? "未绑定工作区"}
+            {workspaceName ?? t("reactChat.unboundWorkspace")}
           </span>
         </div>
       </div>

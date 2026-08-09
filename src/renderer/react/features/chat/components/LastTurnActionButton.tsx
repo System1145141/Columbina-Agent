@@ -1,3 +1,5 @@
+import { t } from "../../../../../shared/i18n";
+
 interface LastTurnActionButtonProps {
   kind: "edit" | "regenerate";
   disabled?: boolean;
@@ -5,7 +7,7 @@ interface LastTurnActionButtonProps {
 }
 
 export function LastTurnActionButton({ kind, disabled = false, onClick }: LastTurnActionButtonProps) {
-  const label = kind === "edit" ? "编辑最后一条消息" : "重新生成最后一条回复";
+  const label = kind === "edit" ? t("reactChat.editLastMessage") : t("reactChat.regenerateLastReply");
   return (
     <button
       type="button"

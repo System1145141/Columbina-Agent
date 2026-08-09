@@ -1,42 +1,47 @@
 import type { CodeRunRecord, CodeRunViewModel, CodeVerificationCard } from "../../../../lib/code-run-view-model";
+import { t } from "../../../../../shared/i18n";
 import "./CodeRunPanel.css";
 
-const RUN_LABELS: Record<CodeRunRecord["status"], string> = {
-  queued: "准备中",
-  running: "正在执行",
-  waiting_for_user: "等待你的回答",
-  verifying: "正在验证",
-  approval_required: "等待验证授权",
-  completed: "已完成",
-  failed: "执行失败",
-  cancelled: "已取消",
-  interrupted: "已中断",
-};
+function runLabel(status: CodeRunRecord["status"]): string {
+  switch (status) {
+    case "queued": return t("reactChat.codeRunQueued");
+    case "running": return t("reactChat.codeRunRunning");
+    case "waiting_for_user": return t("reactChat.codeRunWaitingUser");
+    case "verifying": return t("reactChat.codeRunVerifying");
+    case "approval_required": return t("reactChat.codeRunApprovalRequired");
+    case "completed": return t("reactChat.codeRunCompleted");
+    case "failed": return t("reactChat.codeRunFailed");
+    case "cancelled": return t("reactChat.codeRunCancelled");
+    case "interrupted": return t("reactChat.codeRunInterrupted");
+  }
+}
 
-const CARD_LABELS: Record<CodeVerificationCard["status"], string> = {
-  completed_verified: "已完成并通过验证",
-  completed_no_changes: "已完成，无文件变更",
-  failed_verification: "验证未通过",
-  unverified: "尚未验证",
-  approval_required: "等待验证授权",
-  cancelled: "已取消",
-  interrupted: "已中断",
-  failed: "执行失败",
-};
+function cardLabel(status: CodeVerificationCard["status"]): string {
+  switch (status) {
+    case "completed_verified": return t("reactChat.codeRunCompletedVerified");
+    case "completed_no_changes": return t("reactChat.codeRunCompletedNoChanges");
+    case "failed_verification": return t("reactChat.codeRunVerificationFailed");
+    case "unverified": return t("reactChat.codeRunUnverified");
+    case "approval_required": return t("reactChat.codeRunApprovalRequired");
+    case "cancelled": return t("reactChat.codeRunCancelled");
+    case "interrupted": return t("reactChat.codeRunInterrupted");
+    case "failed": return t("reactChat.codeRunFailed");
+  }
+}
 
 function VerificationResult({ card }: { card: CodeVerificationCard }) {
   const mutationCount = card.mutations.created.length
     + card.mutations.modified.length
     + card.mutations.deleted.length;
   return (
-    <section className={`cy-code-run-card is-${card.status}`} aria-label="Code 验证结果">
+    <section className={`cy-code-run-card is-${card.status}`} aria-label={t("reactChat.codeVerificationResult")}>
       <header>
-        <strong>Code 验证结果</strong>
-        <span>{CARD_LABELS[card.status]}</span>
+        <strong>{t("reactChat.codeVerificationResult")}</strong>
+        <span>{cardLabel(card.status)}</span>
       </header>
       <dl>
-        <dt>工作区</dt><dd title={card.workspaceRoot}>{card.workspaceRoot}</dd>
-        <dt>文件变更</dt><dd>{mutationCount} 项</dd>
+        <dt>{t("reactChat.workspace")}</dt><dd title={card.workspaceRoot}>{card.workspaceRoot}</dd>
+        <dt>{t("reactChat.fileChanges")}</dt><dd>{t("reactChat.changeCount", { count: String(mutationCount) })}</dd>
       </dl>
       {card.verification.steps.length > 0 && (
         <ol className="cy-code-run-card__steps">
@@ -62,10 +67,10 @@ export function CodeRunPanel({ value }: { value: CodeRunViewModel }) {
   if (value.card) return <VerificationResult card={value.card} />;
   if (!value.run) return null;
   return (
-    <section className={`cy-code-run-card is-${value.run.status}`} aria-label="Code 任务状态">
+    <section className={`cy-code-run-card is-${value.run.status}`} aria-label={t("reactChat.codeTask")}>
       <header>
-        <strong>Code 任务</strong>
-        <span>{RUN_LABELS[value.run.status]}</span>
+        <strong>{t("reactChat.codeTask")}</strong>
+        <span>{runLabel(value.run.status)}</span>
       </header>
       {value.run.errorCode && <p className="cy-code-run-card__error">{value.run.errorCode}</p>}
     </section>

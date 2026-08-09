@@ -1,4 +1,5 @@
 import type { AskCardSubmission } from "../../../../../shared/ask-clarification";
+import { t } from "../../../../../shared/i18n";
 
 export type AgentRunStageKind =
   | "understanding"
@@ -110,47 +111,57 @@ export function describePermissionRequest(request: PermissionRequestDescription)
   switch (request.toolId) {
     case "weather": {
       const city = readPermissionString(request.args, ["city"]);
-      return city ? `查询${shortenPermissionText(city, 24)}天气` : "查询天气";
+      return city
+        ? t("reactChat.permWeatherDetail", { target: shortenPermissionText(city, 24) })
+        : t("reactChat.permWeather");
     }
     case "web_search": {
       const query = readPermissionString(request.args, ["query", "keyword"]);
-      return query ? `搜索“${shortenPermissionText(query)}”` : "搜索网页";
+      return query ? t("reactChat.permSearchDetail", { query: shortenPermissionText(query) }) : t("reactChat.permSearch");
     }
     case "write_word": {
       const filename = readPermissionString(request.args, ["filename"]);
-      return filename ? `创建 Word 文档：${shortenPermissionText(filename)}` : "创建 Word 文档";
+      return filename
+        ? t("reactChat.permWriteWordDetail", { filename: shortenPermissionText(filename) })
+        : t("reactChat.permWriteWord");
     }
     case "write_excel": {
       const filename = readPermissionString(request.args, ["filename"]);
-      return filename ? `创建 Excel 表格：${shortenPermissionText(filename)}` : "创建 Excel 表格";
+      return filename
+        ? t("reactChat.permWriteExcelDetail", { filename: shortenPermissionText(filename) })
+        : t("reactChat.permWriteExcel");
     }
     case "write_powerpoint": {
       const filename = readPermissionString(request.args, ["filename"]);
-      return filename ? `创建演示文稿：${shortenPermissionText(filename)}` : "创建演示文稿";
+      return filename
+        ? t("reactChat.permWritePowerpointDetail", { filename: shortenPermissionText(filename) })
+        : t("reactChat.permWritePowerpoint");
     }
     default:
-      return `执行「${request.toolName || request.toolId}」`;
+      return t("reactChat.permExecute", { tool: request.toolName || request.toolId });
   }
 }
 
 export function describeRunStage(stage: AgentRunStage): string {
   switch (stage.kind) {
     case "understanding":
-      return "昔涟正在理解需求…";
+      return t("reactChat.stageUnderstanding");
     case "planning":
-      return "昔涟正在规划任务…";
+      return t("reactChat.stagePlanning");
     case "executing":
-      return stage.detail ? `昔涟正在执行：${stage.detail}…` : "昔涟正在执行任务…";
+      return stage.detail
+        ? t("reactChat.stageExecutingDetail", { detail: stage.detail })
+        : t("reactChat.stageExecuting");
     case "waiting_permission":
-      return "昔涟正在获取审批…";
+      return t("reactChat.stageWaitingPermission");
     case "waiting_user":
-      return "昔涟正在询问…";
+      return t("reactChat.stageWaitingUser");
     case "responding":
-      return "昔涟正在组织回复…";
+      return t("reactChat.stageResponding");
     case "completed":
-      return "昔涟已完成本轮处理";
+      return t("reactChat.stageCompleted");
     case "failed":
-      return "昔涟这一步没有顺利完成";
+      return t("reactChat.stageFailed");
   }
 }
 
@@ -179,7 +190,7 @@ export function normalizeCodeVerificationInteraction(value: unknown): Permission
     id,
     source: "code_verification",
     sessionId,
-    toolName: "验证命令",
+    toolName: t("reactChat.verifyCommand"),
     summary: [executable, ...args].join(" "),
     workspaceName: cwd,
     targetPath: asNonEmptyString(approval.source),

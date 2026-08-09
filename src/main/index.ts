@@ -2618,10 +2618,6 @@ function createWindow(): void {
 }
 
 
-// UI 移植（docs/ui-port-plan.md 阶段 A）：true 时聊天窗口加载 React 版（chat-react 入口），
-// 保留 vanilla 版入口直到阶段 D 验收通过后再移除。
-const USE_REACT_CHAT = true;
-
 function createChatWindow(sessionId?: string): void {
   if (chatWindow && !chatWindow.isDestroyed()) {
     chatWindow.show();
@@ -2663,17 +2659,10 @@ function createChatWindow(sessionId?: string): void {
   // 后续切换走 CHATS_SWITCH_SESSION 事件，避免重新加载页面。
   const queryString = sessionId ? "?sessionId=" + encodeURIComponent(sessionId) : "";
   if (isDev) {
-    chatWindow.loadURL(devServerUrl((USE_REACT_CHAT ? "/react/" : "/chat/") + queryString));
+    chatWindow.loadURL(devServerUrl("/react/" + queryString));
   } else {
     chatWindow.loadFile(
-      path.join(
-        __dirname,
-        "..",
-        "..",
-        "renderer",
-        USE_REACT_CHAT ? "react" : "chat",
-        "index.html",
-      ),
+      path.join(__dirname, "..", "..", "renderer", "react", "index.html"),
       sessionId ? { search: queryString } : undefined,
     );
   }

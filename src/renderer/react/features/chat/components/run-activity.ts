@@ -1,4 +1,5 @@
 import type { RunActivityRecord } from "../../../../../shared/chat-types-react";
+import { t } from "../../../../../shared/i18n";
 
 export interface RunActivitySnapshot {
   processingMs: number;
@@ -43,5 +44,7 @@ export function formatElapsed(milliseconds: number): string {
   const seconds = Math.max(0, Math.floor(milliseconds / 1_000));
   const minutes = Math.floor(seconds / 60);
   const remainderSeconds = seconds % 60;
-  return minutes > 0 ? `${minutes}分${remainderSeconds}秒` : `${remainderSeconds}秒`;
+  return minutes > 0
+    ? `${minutes}${t("reactChat.minuteUnit")}${remainderSeconds}${t("reactChat.secondUnit")}`
+    : `${remainderSeconds}${t("reactChat.secondUnit")}`;
 }

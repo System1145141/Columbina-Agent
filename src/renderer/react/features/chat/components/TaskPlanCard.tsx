@@ -1,18 +1,21 @@
 import type { TaskPlanPresentation } from "./run-presentation";
+import { t } from "../../../../../shared/i18n";
 import "./RunExperience.css";
 
-const STATUS_LABEL = {
-  pending: "待执行",
-  running: "进行中",
-  completed: "已完成",
-  failed: "未完成",
-} as const;
+function statusLabel(status: "pending" | "running" | "completed" | "failed"): string {
+  switch (status) {
+    case "pending": return t("reactChat.planPending");
+    case "running": return t("reactChat.planRunning");
+    case "completed": return t("reactChat.planCompleted");
+    case "failed": return t("reactChat.planFailed");
+  }
+}
 
 export function TaskPlanCard({ plan }: { plan: TaskPlanPresentation }) {
   return (
-    <section className="cy-task-plan-card" aria-label="任务计划">
+    <section className="cy-task-plan-card" aria-label={t("reactChat.taskPlan")}>
       <header>
-        <span>任务计划</span>
+        <span>{t("reactChat.taskPlan")}</span>
         {plan.title && <strong>{plan.title}</strong>}
       </header>
       <ol>
@@ -22,7 +25,7 @@ export function TaskPlanCard({ plan }: { plan: TaskPlanPresentation }) {
             <li key={step.id} className={`is-${status}`}>
               <span className="cy-task-plan-card__marker" aria-hidden="true" />
               <span>{step.title}</span>
-              <small>{STATUS_LABEL[status]}</small>
+              <small>{statusLabel(status)}</small>
             </li>
           );
         })}

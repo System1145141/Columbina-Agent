@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { t } from "../../../../../shared/i18n";
 
 interface CopyButtonProps {
   /** 要复制的文本 */
@@ -55,8 +56,8 @@ export function CopyButton({ text, size = 16, color = "#8e8e93" }: CopyButtonPro
       type="button"
       className="cy-copy-button"
       onClick={handleClick}
-      aria-label="复制"
-      title="复制"
+      aria-label={t("reactChat.copy")}
+      title={t("reactChat.copy")}
       style={{
         position: "relative",
         width: size,

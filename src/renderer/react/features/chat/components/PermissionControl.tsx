@@ -1,5 +1,6 @@
 import { Popover } from "antd";
 import { useEffect, useState } from "react";
+import { t } from "../../../../../shared/i18n";
 
 type PermissionLevel = "read-only" | "scoped" | "per-action" | "full";
 
@@ -8,11 +9,11 @@ interface PermissionSettingsApi {
   setPermissionLevel?: (level: PermissionLevel) => Promise<{ ok: boolean; level?: PermissionLevel }>;
 }
 
-const PERMISSION_OPTIONS: ReadonlyArray<{ level: PermissionLevel; label: string }> = [
-  { level: "read-only", label: "允许访问" },
-  { level: "scoped", label: "指定目录" },
-  { level: "per-action", label: "请求审批" },
-  { level: "full", label: "完全访问" },
+const PERMISSION_OPTIONS: ReadonlyArray<{ level: PermissionLevel; labelKey: string }> = [
+  { level: "read-only", labelKey: "reactChat.permissionReadOnly" },
+  { level: "scoped", labelKey: "reactChat.permissionScoped" },
+  { level: "per-action", labelKey: "reactChat.permissionPerAction" },
+  { level: "full", labelKey: "reactChat.permissionFull" },
 ];
 
 function permissionApi(): PermissionSettingsApi | undefined {
@@ -37,7 +38,7 @@ function ChevronIcon() {
 }
 
 function labelFor(level: PermissionLevel): string {
-  return PERMISSION_OPTIONS.find((option) => option.level === level)?.label ?? "允许访问";
+  return t(PERMISSION_OPTIONS.find((option) => option.level === level)?.labelKey ?? "reactChat.permissionReadOnly");
 }
 
 export function PermissionControl() {
@@ -77,7 +78,7 @@ export function PermissionControl() {
       overlayClassName="cy-permission-popover"
       content={
         <div className="cy-permission-panel">
-          <strong>权限等级</strong>
+          <strong>{t("reactChat.permissionLevel")}</strong>
           <div className="cy-permission-panel__options">
             {PERMISSION_OPTIONS.map((option) => (
               <button
@@ -87,7 +88,7 @@ export function PermissionControl() {
                 onClick={() => void select(option.level)}
               >
                 <PermissionIcon level={option.level} />
-                <span>{option.label}</span>
+                <span>{t(option.labelKey)}</span>
               </button>
             ))}
           </div>

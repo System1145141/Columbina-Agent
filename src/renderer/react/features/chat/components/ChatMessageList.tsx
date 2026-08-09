@@ -3,6 +3,7 @@ import { XMarkdown, type ComponentProps } from "@ant-design/x-markdown";
 import Latex from "@ant-design/x-markdown/plugins/Latex";
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo, type KeyboardEvent, type ReactNode } from "react";
 import { resolveAsset } from "../../../../../shared/renderer-base";
+import { t } from "../../../../../shared/i18n";
 import type { ConversationMode, ReasoningBlock, RunActivityRecord, ToolExecutionRecord } from "../../../../../shared/chat-types-react";
 import thinkingMoodUrl from "../../../assets/status-moods/思考中.png?url";
 import completedThinkingMoodUrl from "../../../assets/status-moods/提醒.png?url";
@@ -29,6 +30,8 @@ import { CodeRunPanel } from "./CodeRunPanel";
 import type { CodeRunViewModel } from "../../../../lib/code-run-view-model";
 import type { WeatherData } from "./weather/weather-types";
 import { WeatherCard } from "./weather/WeatherCard";
+import type { MusicCardData } from "../../../../../shared/music-card";
+import { MusicCard } from "./music/MusicCard";
 
 export interface ChatMessageItem {
   id: string;
@@ -45,6 +48,8 @@ export interface ChatMessageItem {
   ttsCacheKey?: string;
   ttsCacheVersion?: string;
   sticker?: string | null;
+  /** 消息对应的角色身份（columbina / sandrone），决定助手头像；历史消息缺失时默认 columbina。 */
+  identityId?: string | null;
   toolExecutions?: ToolExecutionRecord[];
   runActivity?: RunActivityRecord;
   runStage?: AgentRunStage;
@@ -52,6 +57,15 @@ export interface ChatMessageItem {
   codeRun?: CodeRunViewModel;
   attachments?: ChatMessageAttachment[];
   weather?: WeatherData;
+  /** 渠道消息镜像（columbina.botMessage）：显示来源渠道名（微信/飞书等）。 */
+  channelMessage?: {
+    channel: string;
+    direction: "incoming" | "outgoing";
+    senderName?: string;
+    at: number;
+  };
+  /** 音乐候选卡片（columbina.music）。 */
+  musicCard?: MusicCardData;
 }
 
 export interface ChatMessageAttachment {
@@ -81,7 +95,22 @@ interface ChatMessageListProps {
 }
 
 const markdownConfig = { extensions: Latex() };
-const cyreneAvatarUrl = resolveAsset("avatars/cyrene-avatar.png");
+
+/** 按消息身份解析助手头像：sandrone → Sandrone.jpg，其余（含历史消息缺失）→ Columbina.jpg。 */
+export function resolveAssistantAvatar(identityId?: string | null): string {
+  return resolveAsset(`avatars/${identityId === "sandrone" ? "Sandrone" : "Columbina"}.jpg`);
+}
+
+function AssistantMessageAvatar({ identityId }: { identityId?: string | null }) {
+  return (
+    <img
+      className="cy-message-avatar__image"
+      src={resolveAssistantAvatar(identityId)}
+      alt={identityId === "sandrone" ? "桑多涅" : "哥伦比娅"}
+      draggable={false}
+    />
+  );
+}
 
 function MarkdownCode({ children, lang, block }: ComponentProps<{ children?: ReactNode }>) {
   if (!block) return <code>{children}</code>;
@@ -148,26 +177,41 @@ function resolveStickerUrl(id: string, stickers: EnabledSticker[]): string | und
   return raw.startsWith("/stickers/") ? resolveAsset(raw) : raw;
 }
 
+function ChannelBadge({ message }: { message: NonNullable<ChatMessageItem["channelMessage"]> }) {
+  const label = message.direction === "incoming"
+    ? `${message.channel} · ${t("reactChat.channelIncoming")}`
+    : `${message.channel} · ${t("reactChat.channelOutgoing")}`;
+  return (
+    <div className="cy-message__channel-badge" title={message.senderName ? t("reactChat.fromSender", { name: message.senderName }) : undefined}>
+      <span className="cy-message__channel-badge-icon" aria-hidden="true">🛰</span>
+      <span>{label}</span>
+    </div>
+  );
+}
+
 function AssistantContent({
   content,
   streaming,
   stickerUrl,
+  channelMessage,
 }: {
   content: string;
   streaming: boolean;
   stickerUrl?: string;
+  channelMessage?: NonNullable<ChatMessageItem["channelMessage"]>;
 }) {
   return (
     <div className="cy-message__assistant-body">
+      {channelMessage && <ChannelBadge message={channelMessage} />}
       {content && <MarkdownContent content={content} streaming={streaming} />}
-      {stickerUrl && <img className="cy-message__sticker" src={stickerUrl} alt="昔涟表情" draggable={false} />}
+      {stickerUrl && <img className="cy-message__sticker" src={stickerUrl} alt={t("reactChat.assistantStickerAlt")} draggable={false} />}
     </div>
   );
 }
 
 function DotSpinner() {
   return (
-    <span className="cy-dot-spinner" aria-label="加载中" role="status">
+    <span className="cy-dot-spinner" aria-label={t("reactChat.loading")} role="status">
       {Array.from({ length: 8 }, (_, index) => <span className="cy-dot-spinner__dot" key={index} />)}
     </span>
   );
@@ -175,12 +219,12 @@ function DotSpinner() {
 
 function ModelWaitContent() {
   return (
-    <section className="cy-model-wait" aria-label="等待模型响应">
+    <section className="cy-model-wait" aria-label={t("reactChat.waitingModel")}>
       <span className="cy-model-wait__art" aria-hidden="true">
         <img src={offlineMoodUrl} alt="" draggable={false} />
         <DotSpinner />
       </span>
-      <span>昔涟正在等模型回应…</span>
+      <span>{t("reactChat.waitingModel")}</span>
     </section>
   );
 }
@@ -200,7 +244,7 @@ function ReasoningContent({
   return (
     <Think
       rootClassName="cy-message-reasoning"
-      title={loading ? "正在思考…" : "思考完成"}
+      title={loading ? t("reactChat.thinking") : t("reactChat.thinkingDone")}
       icon={
         <span className={`cy-reasoning-status-art${loading ? " is-thinking" : " is-complete"}`} aria-hidden="true">
           <img src={statusArt} alt="" draggable={false} />
@@ -266,7 +310,7 @@ function RunActivityDetail({
   }
   return timeline.length
     ? <div className="cy-run-activity__detail">{timeline}</div>
-    : <div className="cy-run-activity__empty">昔涟正在整理这一轮回复…</div>;
+    : <div className="cy-run-activity__empty">{t("reactChat.organizingReply")}</div>;
 }
 
 function RunActivityContent({
@@ -297,8 +341,8 @@ function RunActivityContent({
   }, [onExpand, snapshot.processing]);
 
   const title = snapshot.processing
-    ? `昔涟正在处理中 ${formatElapsed(snapshot.processingMs)}`
-    : `昔涟已处理 ${formatElapsed(snapshot.processingMs)}`;
+    ? t("reactChat.processingRun", { elapsed: formatElapsed(snapshot.processingMs) })
+    : t("reactChat.processedRun", { elapsed: formatElapsed(snapshot.processingMs) });
   const image = snapshot.processing ? workingMoodUrl : companionMoodUrl;
 
   return (
@@ -336,14 +380,14 @@ function RunActivityContent({
 
 function ToolExecutionContent({ tools }: { tools: ToolExecutionRecord[] }) {
   return (
-    <section className="cy-tool-executions" aria-label="工具执行过程">
+    <section className="cy-tool-executions" aria-label={t("reactChat.toolExecutions")}>
       <ThoughtChain
         rootClassName="cy-tool-executions__chain"
         line="dashed"
         items={tools.map((tool) => ({
           key: tool.id,
           title: tool.name,
-          description: tool.status === "running" ? "正在执行…" : tool.status === "error" ? "执行失败" : "执行完成",
+          description: tool.status === "running" ? t("reactChat.toolRunning") : tool.status === "error" ? t("reactChat.toolFailed") : t("reactChat.toolDone"),
           status: tool.status === "running" ? "loading" : tool.status === "error" ? "error" : "success",
           blink: tool.status === "running",
           collapsible: Boolean(tool.result),
@@ -355,10 +399,10 @@ function ToolExecutionContent({ tools }: { tools: ToolExecutionRecord[] }) {
 }
 
 function attachmentStatus(attachment: ChatMessageAttachment): string | undefined {
-  if (attachment.status === "processing") return "视觉分析中…";
-  if (attachment.status === "error") return attachment.reason ?? "图片分析失败";
-  if (attachment.imageSendMode === "direct") return "已交给主模型查看";
-  if (attachment.imageSendMode === "caption" && attachment.status === "done") return "视觉分析完成";
+  if (attachment.status === "processing") return t("reactChat.visionAnalyzing");
+  if (attachment.status === "error") return attachment.reason ?? t("reactChat.imageAnalysisFailed");
+  if (attachment.imageSendMode === "direct") return t("reactChat.sentToMainModel");
+  if (attachment.imageSendMode === "caption" && attachment.status === "done") return t("reactChat.visionDone");
   return undefined;
 }
 
@@ -405,16 +449,19 @@ function UserContent({
   content,
   stickerUrl,
   attachments = [],
+  channelMessage,
 }: {
   content: string;
   stickerUrl?: string;
   attachments?: ChatMessageAttachment[];
+  channelMessage?: NonNullable<ChatMessageItem["channelMessage"]>;
 }) {
   return (
     <div className="cy-message__user-body">
+      {channelMessage && <ChannelBadge message={channelMessage} />}
       <UserAttachments attachments={attachments} />
       {content && <MarkdownContent content={content} />}
-      {stickerUrl && <img className="cy-message__sticker" src={stickerUrl} alt="用户表情" draggable={false} />}
+      {stickerUrl && <img className="cy-message__sticker" src={stickerUrl} alt={t("reactChat.userStickerAlt")} draggable={false} />}
     </div>
   );
 }
@@ -447,14 +494,14 @@ function LastUserMessageEditor({
         autoFocus
         value={value}
         disabled={busy}
-        aria-label="编辑最后一条消息"
+        aria-label={t("reactChat.editLastMessageAria")}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={handleKeyDown}
       />
       <div className="cy-last-message-editor__actions">
-        <button type="button" disabled={busy} onClick={onCancel}>取消</button>
+        <button type="button" disabled={busy} onClick={onCancel}>{t("reactChat.cancel")}</button>
         <button type="button" className="is-primary" disabled={busy || !value.trim()} onClick={onSubmit}>
-          保存并重新生成
+          {t("reactChat.saveAndRegenerate")}
         </button>
       </div>
     </div>
@@ -462,12 +509,13 @@ function LastUserMessageEditor({
 }
 
 function CyreneMessageAvatar() {
-  return <img className="cy-message-avatar__image" src={cyreneAvatarUrl} alt="昔涟" draggable={false} />;
+  // 角色配置层兜底头像：默认哥伦比娅；具体消息可在 item 上按 identityId 覆盖
+  return <AssistantMessageAvatar identityId={undefined} />;
 }
 
 function UserMessageAvatar({ src }: { src: string | null }) {
-  if (src) return <img className="cy-message-avatar__image" src={src} alt="用户" draggable={false} />;
-  return <span className="cy-message-avatar__user" aria-label="用户" />;
+  if (src) return <img className="cy-message-avatar__image" src={src} alt={t("reactChat.userAlt")} draggable={false} />;
+  return <span className="cy-message-avatar__user" aria-label={t("reactChat.userAlt")} />;
 }
 
 function createRoles(
@@ -494,7 +542,7 @@ function createRoles(
     variant: "filled" as const,
     rootClassName: "cy-message cy-message--user",
     avatar: <UserMessageAvatar src={userAvatarUrl} />,
-    contentRender: (content: string, info: { extraInfo?: { messageId?: string; stickerUrl?: string; attachments?: ChatMessageAttachment[] } }) => (
+    contentRender: (content: string, info: { extraInfo?: { messageId?: string; stickerUrl?: string; attachments?: ChatMessageAttachment[]; channelMessage?: ChatMessageItem["channelMessage"] } }) => (
       info.extraInfo?.messageId === editingMessageId
         ? <LastUserMessageEditor
             value={editDraft}
@@ -507,6 +555,7 @@ function createRoles(
             content={content}
             stickerUrl={info.extraInfo?.stickerUrl}
             attachments={info.extraInfo?.attachments}
+            channelMessage={info.extraInfo?.channelMessage}
           />
     ),
     footer: (content: string, info: { extraInfo?: { messageId?: string } }) => {
@@ -532,11 +581,12 @@ function createRoles(
     variant: "filled" as const,
     rootClassName: "cy-message cy-message--assistant",
     avatar: <CyreneMessageAvatar />,
-    contentRender: (content: string, info: { extraInfo?: { streaming?: boolean; stickerUrl?: string } }) => (
+    contentRender: (content: string, info: { extraInfo?: { streaming?: boolean; stickerUrl?: string; channelMessage?: ChatMessageItem["channelMessage"] } }) => (
       <AssistantContent
         content={content}
         streaming={Boolean(info.extraInfo?.streaming)}
         stickerUrl={info.extraInfo?.stickerUrl}
+        channelMessage={info.extraInfo?.channelMessage}
       />
     ),
     footer: (content: string, info: { extraInfo?: { messageId?: string; streaming?: boolean; ttsCacheKey?: string } }) => {
@@ -647,6 +697,15 @@ function createRoles(
       info.extraInfo?.weather ? <WeatherCard data={info.extraInfo.weather} /> : null
     ),
   },
+  music: {
+    placement: "start" as const,
+    variant: "borderless" as const,
+    avatar: null,
+    rootClassName: "cy-message cy-message--music",
+    contentRender: (_content: string, info: { extraInfo?: { musicCard?: MusicCardData } }) => (
+      info.extraInfo?.musicCard ? <MusicCard data={info.extraInfo.musicCard} /> : null
+    ),
+  },
   system: {
     placement: "start" as const,
     variant: "borderless" as const,
@@ -667,6 +726,7 @@ export function createMessageItems(messages: ChatMessageItem[], enabledStickers:
           stickerUrl: stickerId ? resolveStickerUrl(stickerId, enabledStickers) : undefined,
           attachments: message.attachments,
           messageId: message.id,
+          channelMessage: message.channelMessage,
         },
       }];
     }
@@ -738,17 +798,27 @@ export function createMessageItems(messages: ChatMessageItem[], enabledStickers:
         extraInfo: { weather: message.weather },
       });
     }
+    if (message.musicCard) {
+      assistantItems.push({
+        key: `${message.id}-music`,
+        role: "music",
+        content: "",
+        extraInfo: { musicCard: message.musicCard },
+      });
+    }
     if (stages.includes("assistant")) {
       assistantItems.push({
         key: message.id,
         role: "assistant",
         content: message.content,
         streaming: message.streaming,
+        avatar: <AssistantMessageAvatar identityId={message.identityId} />,
         extraInfo: {
           messageId: message.id,
           streaming: message.streaming,
           ttsCacheKey: message.ttsCacheKey,
           stickerUrl: message.sticker ? resolveStickerUrl(message.sticker, enabledStickers) : undefined,
+          channelMessage: message.channelMessage,
         },
       });
     }

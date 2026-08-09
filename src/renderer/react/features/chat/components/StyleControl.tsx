@@ -1,6 +1,7 @@
 import { Popover } from "antd";
 import { useEffect, useState } from "react";
 import { normalizeStyleId, type StyleId } from "../../../../../shared/style-sampling";
+import { t } from "../../../../../shared/i18n";
 import gentleIconUrl from "../../../assets/status-moods/温柔.png?url";
 import livelyIconUrl from "../../../assets/status-moods/元气.png?url";
 import healingIconUrl from "../../../assets/status-moods/治愈.png?url";
@@ -8,13 +9,13 @@ import focusedIconUrl from "../../../assets/status-moods/知性.png?url";
 import sweetIconUrl from "../../../assets/status-moods/撒娇.png?url";
 import customIconUrl from "../../../assets/status-moods/自定义.png?url";
 
-const STYLE_OPTIONS: ReadonlyArray<{ id: StyleId; label: string; iconUrl: string }> = [
-  { id: "default", label: "温柔 · 和善", iconUrl: gentleIconUrl },
-  { id: "lively", label: "元气 · 活泼", iconUrl: livelyIconUrl },
-  { id: "healing", label: "治愈 · 安心", iconUrl: healingIconUrl },
-  { id: "focused", label: "知性 · 认真", iconUrl: focusedIconUrl },
-  { id: "sweet", label: "撒娇 · 黏人", iconUrl: sweetIconUrl },
-  { id: "custom", label: "自定义", iconUrl: customIconUrl },
+const STYLE_OPTIONS: ReadonlyArray<{ id: StyleId; labelKey: string; iconUrl: string }> = [
+  { id: "default", labelKey: "reactChat.styleDefault", iconUrl: gentleIconUrl },
+  { id: "lively", labelKey: "reactChat.styleLively", iconUrl: livelyIconUrl },
+  { id: "healing", labelKey: "reactChat.styleHealing", iconUrl: healingIconUrl },
+  { id: "focused", labelKey: "reactChat.styleFocused", iconUrl: focusedIconUrl },
+  { id: "sweet", labelKey: "reactChat.styleSweet", iconUrl: sweetIconUrl },
+  { id: "custom", labelKey: "reactChat.styleCustom", iconUrl: customIconUrl },
 ];
 
 interface StyleSettingsApi {
@@ -61,7 +62,7 @@ export function StyleControl() {
       overlayClassName="cy-style-popover"
       content={
         <div className="cy-style-panel">
-          <strong>回复风格</strong>
+          <strong>{t("reactChat.replyStyle")}</strong>
           <div className="cy-style-panel__options">
             {STYLE_OPTIONS.map((option) => (
               <button
@@ -71,7 +72,7 @@ export function StyleControl() {
                 onClick={() => void select(option.id)}
               >
                 <img className="cy-style-icon" src={option.iconUrl} alt="" />
-                <span>{option.label}</span>
+                <span>{t(option.labelKey)}</span>
               </button>
             ))}
           </div>
@@ -80,7 +81,7 @@ export function StyleControl() {
     >
       <button type="button" className="cy-composer__agent-button cy-style-control">
         <img className="cy-style-icon" src={current.iconUrl} alt="" />
-        <span>style · {current.label}</span>
+        <span>style · {t(current.labelKey)}</span>
         <ChevronIcon />
       </button>
     </Popover>

@@ -1,4 +1,5 @@
 import "./ClineModeSwitch.css";
+import { t } from "../../../../../shared/i18n";
 
 export type ClineMode = "plan" | "act";
 
@@ -12,7 +13,7 @@ export function ClineModeSwitch({
   onChange: (mode: ClineMode) => void;
 }) {
   return (
-    <div className="cy-cline-mode-switch" role="group" aria-label="Cline 执行模式">
+    <div className="cy-cline-mode-switch" role="group" aria-label={t("reactChat.clineModeGroupAria")}>
       {(["plan", "act"] as const).map((mode) => (
         <button
           type="button"
@@ -20,7 +21,7 @@ export function ClineModeSwitch({
           className={value === mode ? "is-active" : ""}
           aria-pressed={value === mode}
           disabled={disabled}
-          title={mode === "plan" ? "先规划，不修改文件" : "允许执行并修改工作区"}
+          title={mode === "plan" ? t("reactChat.clinePlanTitle") : t("reactChat.clineActTitle")}
           onClick={() => onChange(mode)}
         >
           {mode === "plan" ? "Plan" : "Act"}

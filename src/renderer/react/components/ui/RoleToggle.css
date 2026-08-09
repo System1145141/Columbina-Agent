@@ -1,0 +1,68 @@
+.cy-role-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 12px;
+  background: var(--cy-pill-bg);
+  border: 1px solid var(--cy-pill-border);
+  border-radius: 999px;
+  -webkit-app-region: no-drag;
+  user-select: none;
+}
+
+.cy-role-toggle__group {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 180ms ease;
+}
+
+.cy-role-toggle__group.is-active {
+  opacity: 1;
+}
+
+.cy-role-toggle__name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cy-text);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.cy-role-toggle__group.is-active .cy-role-toggle__name {
+  color: var(--cy-accent, #3b82f6);
+  text-shadow: 0 0 14px rgba(59, 130, 246, 0.28);
+}
+
+.cy-role-toggle__model {
+  font-size: 10px;
+  line-height: 1;
+  background: rgba(128, 128, 128, 0.12);
+  color: var(--cy-text-muted);
+  border: 1px solid var(--cy-pill-border);
+  border-radius: 4px;
+  padding: 2px 4px;
+  max-width: 130px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 180ms ease, color 180ms ease;
+}
+
+.cy-role-toggle__model:hover {
+  border-color: var(--cy-text-muted);
+  color: var(--cy-text);
+}
+
+.cy-role-toggle__model option {
+  background: var(--cy-surface, #ffffff);
+  color: var(--cy-text, #1f2328);
+}
+
+.cy-role-toggle__divider {
+  width: 1px;
+  height: 14px;
+  background: var(--cy-pill-border);
+}

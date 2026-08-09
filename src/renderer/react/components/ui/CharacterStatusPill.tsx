@@ -1,3 +1,5 @@
+import { t } from "../../../../shared/i18n";
+
 interface CharacterStatusPillProps {
   avatarPath: string;
   name?: string;
@@ -7,7 +9,7 @@ interface CharacterStatusPillProps {
 export function CharacterStatusPill({
   avatarPath,
   name = "Cyrene",
-  status = "模型未连接",
+  status = t("reactChat.modelNotConnected"),
 }: CharacterStatusPillProps) {
   return (
     <div className="cy-status-pill">

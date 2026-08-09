@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { DownOutlined } from "@ant-design/icons";
+import { t } from "../../../../../shared/i18n";
 import { ChatComposer, type ComposerAttachment } from "../components/ChatComposer";
 import { ComposerSlot } from "../components/ComposerSlot";
 import { TodoPanel } from "../components/TodoPanel";
@@ -27,6 +28,8 @@ import { CharacterStatusPill } from "../../../components/ui/CharacterStatusPill"
 import { WindowControls } from "../../../components/ui/WindowControls";
 import { SettingsButton } from "../../../components/ui/SettingsButton";
 import { UserAvatar } from "../../../components/ui/UserAvatar";
+import { RoleToggle, AGENT_ROLE_LABELS, type AgentRole, type ModelEntry } from "../../../components/ui/RoleToggle";
+import { resolveAsset } from "../../../../../shared/renderer-base";
 import { useUserCallPreference } from "../../../hooks/useUserNickname";
 import { resolveRevisableLastTurn } from "../components/last-turn-actions";
 import { NewTaskButton } from "../../../components/ui/NewTaskButton";
@@ -44,6 +47,13 @@ import {
   type OpenSessionArgs,
   type ReactSessionMode,
 } from "./openSessionByDeps";
+import {
+  buildHandoffPrompt,
+  parseHandoff,
+  resolveHandoffConfig,
+  resolveHandoffRole,
+} from "./handoff";
+import { normalizeMusicCardData } from "../../../../../shared/music-card";
 import "../../../components/ui/SidebarToggle.css";
 import "../../../components/ui/ModeSwitch.css";
 import "../../../components/ui/CharacterStatusPill.css";
@@ -51,6 +61,7 @@ import "../../../components/ui/WindowControls.css";
 import "../../../components/ui/SettingsButton.css";
 import "../../../components/ui/UserAvatar.css";
 import "../../../components/ui/NewTaskButton.css";
+import "../../../components/ui/RoleToggle.css";
 import "../components/ChatComposer.css";
 import "../components/ReasoningControl.css";
 import "../components/StyleControl.css";
@@ -143,7 +154,7 @@ const DEMO_RESPONSES: Readonly<Record<string, string>> = {
     "",
     "- 第一项：消息列表使用 Bubble",
     "- 第二项：正文使用 XMarkdown",
-    "- 第三项：样式仍由昔涟主题控制",
+    "- 第三项：样式仍由哥伦比娅主题控制",
     "",
     "> 这是一段引用，用来观察间距、颜色和左侧边线。",
     "",
@@ -175,7 +186,7 @@ $$`,
     "",
     "function greeting(mode: CyreneMode): string {",
     "  return mode === \"chat\"",
-    "    ? \"昔涟期待和你一起聊天♪\"",
+    "    ? \"哥伦比娅期待和你一起聊天♪\"",
     "    : `当前模式：${mode}`;",
     "}",
     "",
@@ -245,6 +256,10 @@ interface AguiApi {
     styleId?: string;
     sessionId: string;
     imageAttachments?: Array<{ name: string; filePath: string; mime?: string }>;
+    /** 本轮角色身份（columbina / sandrone），驱动人格 prompt。 */
+    identityId?: string;
+    /** 本轮指定模型 ID（模型列表中的 id）。 */
+    modelId?: string;
   }) => Promise<{ success: boolean; error?: string }>;
   onEvent: (callback: (event: AguiEvent) => void) => () => void;
   cancel: (runId?: string) => Promise<unknown>;
@@ -272,11 +287,15 @@ interface PublicModelConfig {
   model?: unknown;
   displayName?: string;
   stickerSize?: "small" | "standard" | "large";
+  models?: ModelEntry[];
+  defaultModelId?: string;
+  selectedModelIds?: { columbina?: string; sandrone?: string };
 }
 
 interface ModelConfigApi {
   get: () => Promise<PublicModelConfig>;
   onChanged: (callback: (config: PublicModelConfig) => void) => () => void;
+  saveSelectedModelIds: (selectedModelIds: { columbina?: string; sandrone?: string }) => Promise<unknown>;
 }
 
 function chatStore(): ChatStoreApi | undefined {
@@ -345,8 +364,10 @@ function toUiMessages(session: ChatSession): ChatMessageItem[] {
     ttsCacheVersion: message.ttsCacheVersion,
     responseStarted: message.role === "model",
     sticker: message.sticker,
+    identityId: message.identityId,
     toolExecutions: message.toolExecutions,
     attachments: message.attachments,
+    musicCard: message.musicCard,
   }));
 }
 
@@ -390,10 +411,17 @@ export function ChatPage() {
   const [composerInteraction, setComposerInteraction] = useState<ComposerInteraction>();
   const [interactionBusy, setInteractionBusy] = useState(false);
   const [lastTurnRevisionStarting, setLastTurnRevisionStarting] = useState(false);
-  const [modelName, setModelName] = useState("模型未连接");
+  const [modelName, setModelName] = useState(t("reactChat.modelNotConnected"));
   const [modelDisplayName, setModelDisplayName] = useState("");
   const [selectedClineMode, setSelectedClineMode] = useState<"plan" | "act">("act");
   const [stickerSize, setStickerSize] = useState<"small" | "standard" | "large">("standard");
+  // 双角色：当前身份 + 每角色独立模型选择（与 vanilla chat/main.ts 的 currentRole/selectedModelId 语义一致）
+  const [currentRole, setCurrentRole] = useState<AgentRole>("columbina");
+  const [availableModels, setAvailableModels] = useState<ModelEntry[]>([]);
+  const [selectedModelIds, setSelectedModelIds] = useState<Record<AgentRole, string | null>>({
+    columbina: null,
+    sandrone: null,
+  });
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [todoStateByMode, setTodoStateByMode] = useState<Partial<Record<"work" | "daily" | "learn", TodoState>>>({});
   const activeModeRef = useRef(mode);
@@ -441,6 +469,44 @@ export function ChatPage() {
         if (mode === "work" || mode === "daily" || mode === "learn") {
           setTodoStateByMode((prev) => ({ ...prev, [mode]: incoming }));
         }
+        return;
+      }
+      if (event.type === "CUSTOM" && event.name === "columbina.botMessage") {
+        // 渠道消息镜像（微信/飞书等）：渲染为消息流里的一条渠道消息（不进入本地历史）
+        const raw = asRecord(event.value);
+        if (!raw) return;
+        const text = asNonEmptyString(raw.text);
+        if (!text) return;
+        const direction = raw.type === "bot:outgoing" ? "outgoing" : "incoming";
+        const channel = asNonEmptyString(raw.channel) ?? t("reactChat.channelFallback");
+        const senderName = asNonEmptyString(raw.senderName);
+        const targetMode = activeModeRef.current;
+        const item: ChatMessageItem = {
+          id: `channel-${crypto.randomUUID()}`,
+          role: direction === "outgoing" ? "assistant" : "user",
+          content: text,
+          channelMessage: {
+            channel,
+            direction,
+            senderName,
+            at: typeof raw.at === "number" ? raw.at : Date.now(),
+          },
+        };
+        setMessagesByMode((current) => ({ ...current, [targetMode]: [...(current[targetMode] ?? []), item] }));
+        return;
+      }
+      if (event.type === "CUSTOM" && event.name === "columbina.music") {
+        // 音乐候选卡片：消息流里显示音乐卡片（不进入本地历史）
+        const music = normalizeMusicCardData(event.value);
+        if (!music) return;
+        const targetMode = activeModeRef.current;
+        const item: ChatMessageItem = {
+          id: `music-${crypto.randomUUID()}`,
+          role: "assistant",
+          content: "",
+          musicCard: music,
+        };
+        setMessagesByMode((current) => ({ ...current, [targetMode]: [...(current[targetMode] ?? []), item] }));
       }
     });
   }, []);
@@ -466,12 +532,27 @@ export function ChatPage() {
     let active = true;
     const apply = (config: PublicModelConfig) => {
       if (!active) return;
-      setModelName(typeof config.model === "string" && config.model.trim() ? config.model.trim() : "模型未连接");
+      setModelName(typeof config.model === "string" && config.model.trim() ? config.model.trim() : t("reactChat.modelNotConnected"));
       setModelDisplayName(typeof config.displayName === "string" ? config.displayName.trim() : "");
       setStickerSize(config.stickerSize === "small" || config.stickerSize === "large" ? config.stickerSize : "standard");
+      const models = Array.isArray(config.models) ? config.models : [];
+      setAvailableModels(models);
+      // 每角色模型回退链：selectedModelIds[role] → defaultModelId → null（与 vanilla applyModelConfig 一致）
+      const validIds = new Set(models.map((model) => model.id));
+      const resolve = (saved: string | null | undefined): string | null => (
+        saved && validIds.has(saved)
+          ? saved
+          : config.defaultModelId && validIds.has(config.defaultModelId)
+            ? config.defaultModelId
+            : null
+      );
+      setSelectedModelIds({
+        columbina: resolve(config.selectedModelIds?.columbina),
+        sandrone: resolve(config.selectedModelIds?.sandrone),
+      });
     };
     void modelConfig.get().then(apply).catch(() => {
-      if (active) setModelName("模型未连接");
+      if (active) setModelName(t("reactChat.modelNotConnected"));
     });
     const off = modelConfig.onChanged(apply);
     return () => {
@@ -479,6 +560,23 @@ export function ChatPage() {
       off();
     };
   }, []);
+
+  /** 切换当前角色（哥伦比娅 / 桑多涅）。 */
+  const handleRoleChange = (role: AgentRole) => {
+    setCurrentRole(role);
+  };
+
+  /** 保存某角色选中的模型 id（与 vanilla 一样持久化到 modelConfig.selectedModelIds）。 */
+  const handleRoleModelChange = (role: AgentRole, modelId: string | null) => {
+    const next = { ...selectedModelIds, [role]: modelId };
+    setSelectedModelIds(next);
+    void (window as typeof window & { modelConfig?: ModelConfigApi }).modelConfig
+      ?.saveSelectedModelIds?.({ columbina: next.columbina ?? undefined, sandrone: next.sandrone ?? undefined })
+      .catch((error) => console.warn("[ChatPage] 保存角色模型选择失败:", error));
+  };
+
+  const currentRoleModel = availableModels.find((model) => model.id === selectedModelIds[currentRole]) ?? null;
+  const roleStatus = currentRoleModel ? (currentRoleModel.nickname || currentRoleModel.model || currentRoleModel.id) : (modelDisplayName || modelName);
   const modelBusyByModeRef = useRef<Partial<Record<ConversationMode, boolean>>>({});
   const lastTurnRevisionStartingRef = useRef(false);
   const activeAguiOffRef = useRef<(() => void) | null>(null);
@@ -495,7 +593,7 @@ export function ChatPage() {
     messageId: string;
   } | null>(null);
 
-  const taskLabel = ["work", "daily", "code"].includes(mode) ? "新建任务" : "新建对话";
+  const taskLabel = ["work", "daily", "code"].includes(mode) ? t("reactChat.newTask") : t("reactChat.newChat");
   const activeSessionId = activeSessionIds[mode];
   const scopeKey = activeSessionId ?? `mode:${mode}`;
   const draft = drafts[scopeKey] ?? "";
@@ -834,6 +932,7 @@ export function ChatPage() {
               id,
               role: "model",
               content: response,
+              identityId: currentRole,
               at: Date.now(),
             }).then((saved) => {
               void refreshSessions(targetMode, false);
@@ -857,11 +956,16 @@ export function ChatPage() {
     assistantId: string;
     session: ChatSession;
     attachments: ComposerAttachment[];
-  }) {
+    /** 自动接力：以 [system:handoff] 提示拼入本轮 run messages（不进入本地历史）。 */
+    includeHandoffPrompt?: boolean;
+    /** 本轮角色身份（接力时由调用方显式传入；默认当前 currentRole）。 */
+    role?: AgentRole;
+  }): Promise<string | undefined> {
+    const role = input.role ?? currentRole;
     const api = aguiApi();
     const store = chatStore();
     if (!api || !store) {
-      const visibleError = "模型请求失败：AG-UI 模型服务尚未就绪";
+      const visibleError = t("reactChat.modelRequestFailedDetail", { detail: t("reactChat.aguiNotReady") });
       updateMessage(input.targetMode, input.assistantId, {
         content: visibleError,
         loading: false,
@@ -873,6 +977,7 @@ export function ChatPage() {
         id: input.assistantId,
         role: "model",
         content: visibleError,
+        identityId: role,
         at: Date.now(),
       });
       return;
@@ -903,7 +1008,7 @@ export function ChatPage() {
     const updateRunTool = (toolId: string, patch: Partial<ToolExecutionRecord>) => {
       const index = toolExecutions.findIndex((tool) => tool.id === toolId);
       toolExecutions = index === -1
-        ? [...toolExecutions, { id: toolId, name: patch.name ?? "工具调用", status: patch.status ?? "running", result: patch.result }]
+        ? [...toolExecutions, { id: toolId, name: patch.name ?? t("reactChat.toolCall"), status: patch.status ?? "running", result: patch.result }]
         : toolExecutions.map((tool, toolIndex) => toolIndex === index ? { ...tool, ...patch } : tool);
       updateMessage(input.targetMode, input.assistantId, { toolExecutions });
     };
@@ -1043,11 +1148,11 @@ export function ChatPage() {
           if (stage) updateMessage(input.targetMode, input.assistantId, { runStage: stage });
         } else if (event.type === "TOOL_CALL_START" && event.toolCallId) {
           updateRunTool(event.toolCallId, {
-            name: event.toolCallName ?? "工具调用",
+            name: event.toolCallName ?? t("reactChat.toolCall"),
             status: "running",
           });
           updateMessage(input.targetMode, input.assistantId, {
-            runStage: { kind: "executing", detail: event.toolCallName ?? "工具调用" },
+            runStage: { kind: "executing", detail: event.toolCallName ?? t("reactChat.toolCall") },
           });
         } else if (event.type === "TOOL_CALL_RESULT" && event.toolCallId) {
         updateRunTool(event.toolCallId, {
@@ -1144,7 +1249,7 @@ export function ChatPage() {
       } else if (event.type === "RUN_ERROR") {
         completeRunActivity();
         updateMessage(input.targetMode, input.assistantId, { runStage: { kind: "failed" } });
-        resolveTerminal(new Error(event.message ?? event.error ?? event.content ?? "模型请求失败"));
+        resolveTerminal(new Error(event.message ?? event.error ?? event.content ?? t("reactChat.modelRequestFailed")));
       }
     });
     activeAguiOffRef.current?.();
@@ -1152,16 +1257,23 @@ export function ChatPage() {
 
     try {
       const general = await window.chat?.getGeneralSettings?.();
+      const runMessages = input.session.messages.slice(-16).map((item) => ({
+        role: item.role,
+        content: item.content,
+        at: item.at,
+      }));
+      const messages = input.includeHandoffPrompt
+        ? [...runMessages, { role: "user" as const, content: buildHandoffPrompt(role), at: Date.now() }]
+        : runMessages;
       const ack = await api.run({
-        messages: input.session.messages.slice(-16).map((item) => ({
-          role: item.role,
-          content: item.content,
-          at: item.at,
-        })),
+        messages,
         userTurnId: input.userMessageId,
         assistantTurnId: input.assistantId,
         styleId: general?.currentStyleId,
         sessionId: input.sessionId,
+        // 双角色：本轮身份与所选模型随 run 传给主进程（驱动人格 prompt + 模型选择）
+        identityId: role,
+        modelId: selectedModelIds[role] ?? undefined,
         imageAttachments: input.attachments
           .filter((attachment) => attachment.kind === "image" && attachment.filePath)
           .map((attachment) => ({
@@ -1170,11 +1282,11 @@ export function ChatPage() {
             mime: attachment.mime,
           })),
       });
-      if (!ack.success) throw new Error(ack.error ?? "模型请求发起失败");
+      if (!ack.success) throw new Error(ack.error ?? t("reactChat.runLaunchFailed"));
       const terminalError = await terminal;
       if (terminalError) throw terminalError;
 
-      const finalContent = streamContent.trim() ? streamContent : "任务已完成。";
+      const finalContent = streamContent.trim() ? streamContent : t("reactChat.taskCompleted");
       updateMessage(input.targetMode, input.assistantId, {
         content: finalContent,
         loading: false,
@@ -1202,11 +1314,12 @@ export function ChatPage() {
       if (savedAssistant) {
         finishEarlyTtsQueue(earlyTtsQueue, finalContent);
       } else earlyTtsQueue.cancel();
+      return finalContent;
     } catch (error) {
       earlyTtsQueue.cancel();
       completeRunActivity();
       const errorMessage = error instanceof Error ? error.message : String(error);
-      const visibleError = `模型请求失败：${errorMessage}`;
+      const visibleError = t("reactChat.modelRequestFailedDetail", { detail: errorMessage });
       updateMessage(input.targetMode, input.assistantId, {
         content: visibleError,
         loading: false,
@@ -1221,8 +1334,10 @@ export function ChatPage() {
         role: "model",
         content: visibleError,
         runActivity,
+        identityId: role,
         at: Date.now(),
       });
+      return undefined;
     } finally {
       off();
       if (activeAguiOffRef.current === off) activeAguiOffRef.current = null;
@@ -1361,15 +1476,101 @@ export function ChatPage() {
     const existing = activeSessionIdsRef.current[targetMode];
     if (existing) return existing;
     const store = chatStore();
-    if (!store) throw new Error("聊天会话服务尚未就绪");
+    if (!store) throw new Error(t("reactChat.sessionServiceNotReady"));
     const session = await store.create({
       identityId: null,
       mode: targetMode,
-      title: targetMode === "work" || targetMode === "code" || targetMode === "daily" ? "新任务" : "新对话",
+      title: targetMode === "work" || targetMode === "code" || targetMode === "daily" ? t("reactChat.newTask") : t("reactChat.newChat"),
     });
     await refreshSessions(targetMode, false);
     await selectSession(session.id, targetMode);
     return session.id;
+  }
+
+  /**
+   * 自动接力（Columbina 独有特色）：助手回复含 [HANDOFF:CONTINUE] 时切换另一角色
+   * （columbina ↔ sandrone）以 includeHandoffPrompt 的方式继续回复，直到模型输出
+   * [HANDOFF:STOP]、达到轮数上限或 run 失败。接力提示不进入本地历史。
+   * 与 vanilla 行为一致：接力结束后切回用户最初选择的角色。
+   */
+  async function runHandoffChain(input: {
+    targetMode: "chat" | "work" | "daily" | "code";
+    sessionId: string;
+    firstAssistantId: string;
+    firstContent: string | undefined;
+  }): Promise<void> {
+    const { targetMode, sessionId, firstAssistantId, firstContent } = input;
+    // 自动接力仅在双角色对话场景（chat）启用：任务模式（work/daily/code）接力会破坏任务闭环。
+    if (targetMode !== "chat" || !firstContent) return;
+    let cfg: { enabled: boolean; maxRounds: number } = { enabled: false, maxRounds: 1 };
+    try {
+      const general = await (window as typeof window & {
+        settings?: { getGeneral?: () => Promise<unknown> };
+      }).settings?.getGeneral?.();
+      if (general) cfg = resolveHandoffConfig(general);
+    } catch {
+      // 读取失败按默认（关闭）处理
+    }
+    if (!cfg.enabled || cfg.maxRounds <= 0) return;
+
+    const store = chatStore();
+    if (!store) return;
+    const originalRole = currentRole;
+    let role = originalRole;
+    let content = firstContent;
+    let assistantId = firstAssistantId;
+    let rounds = 0;
+    while (rounds < cfg.maxRounds) {
+      const { cleanContent, shouldHandoff } = parseHandoff(content);
+      if (!shouldHandoff) break;
+      // 修正上一轮助手消息：去掉 handoff 标记，保持界面与本地历史干净
+      const latest = await store.get(sessionId);
+      if (!latest) break;
+      const lastModelIndex = latest.messages.findLastIndex((message) => message.role === "model");
+      if (lastModelIndex < 0) break;
+      const lastModel = latest.messages[lastModelIndex];
+      const cleanedModel = { ...lastModel, content: cleanContent, at: Date.now() };
+      const fixedSession = await store.replaceTail(sessionId, lastModelIndex, [cleanedModel]);
+      updateMessage(targetMode, assistantId, { content: cleanContent });
+
+      role = resolveHandoffRole(role);
+      setCurrentRole(role);
+      rounds += 1;
+
+      const handoffSession = fixedSession ?? {
+        ...latest,
+        messages: latest.messages.map((message) => (message.id === lastModel.id ? cleanedModel : message)),
+      };
+      const handoffAssistantId = crypto.randomUUID();
+      setMessagesByMode((current) => ({
+        ...current,
+        [targetMode]: [...(current[targetMode] ?? []), {
+          id: handoffAssistantId,
+          role: "assistant",
+          content: "",
+          loading: true,
+          waitingForFirstEvent: true,
+          streaming: false,
+          responseStarted: false,
+        }],
+      }));
+      // 接力轮：以 [system:handoff] 提示拼入 run messages（不进入本地历史）
+      content = await runModel({
+        targetMode,
+        sessionId,
+        userMessageId: crypto.randomUUID(),
+        assistantId: handoffAssistantId,
+        session: handoffSession,
+        attachments: [],
+        includeHandoffPrompt: true,
+        role,
+      });
+      assistantId = handoffAssistantId;
+      // runModel 失败、或下一轮已由 pendingQueue 接管时停止接力（防死循环）
+      if (!content || isSessionBusy(sessionId)) break;
+    }
+    // 无论是否接力，最终切回用户最初选择的角色（与 vanilla 行为一致）
+    if (currentRole !== originalRole) setCurrentRole(originalRole);
   }
 
 
@@ -1377,17 +1578,15 @@ export function ChatPage() {
   async function initVaultStructure(sessionId: string) {
     const store = chatStore();
     if (!store) return;
-    const confirmed = window.confirm(
-      "要在当前 Obsidian Vault 中添加 Cyrene 通用学习结构吗？只会创建缺失的文件，不会覆盖已有内容。"
-    );
+    const confirmed = window.confirm(t("reactChat.initVaultConfirm"));
     if (!confirmed) return;
     const result = await store.initLearnWorkspace(sessionId);
     if (!result.ok) {
-      window.alert(`添加学习结构失败：${result.error ?? "未知错误"}`);
+      window.alert(`${t("reactChat.initVaultFailed")}${result.error ?? t("reactChat.unknownError")}`);
     } else {
       const created = result.created?.length ?? 0;
       const skipped = result.skipped?.length ?? 0;
-      window.alert(`已创建 ${created} 个文件/目录${skipped > 0 ? `，跳过 ${skipped} 个已存在项` : ""}。`);
+      window.alert(`${t("reactChat.vaultCreated", { created: String(created) })}${skipped > 0 ? t("reactChat.vaultSkipped", { skipped: String(skipped) }) : ""}。`);
     }
   }
 
@@ -1401,16 +1600,14 @@ export function ChatPage() {
     const sessionId = await ensureSession(targetMode);
     const result = await store.setWorkspace(sessionId, picked.path);
     if (!result.ok) {
-      window.alert(`设置工作区失败：${result.error ?? "未知错误"}`);
+      window.alert(`${t("reactChat.setWorkspaceFailed")}${result.error ?? t("reactChat.unknownError")}`);
       return;
     }
-    setWorkspaceNames((current) => ({ ...current, [targetMode]: picked.displayName ?? "工作文件夹" }));
+    setWorkspaceNames((current) => ({ ...current, [targetMode]: picked.displayName ?? t("reactChat.workspaceFolder") }));
 
     // Learn 模式：空目录询问是否初始化通用学习结构
     if (targetMode === "learn" && result.isEmpty) {
-      const confirmed = window.confirm(
-        "这是一个空目录。Cyrene 可以在这里创建通用学习工作区结构（materials/、notes/、exercises/、templates/、learn/progress.md），方便你之后和 Cyrene 一起学习。\n\n是否创建？"
-      );
+      const confirmed = window.confirm(t("reactChat.emptyDirConfirm"));
       if (confirmed) {
         await initVaultStructure(sessionId);
       }
@@ -1443,20 +1640,18 @@ export function ChatPage() {
     const session = await store.create({
       identityId: null,
       mode: targetMode,
-      title: workspace ? "新任务" : "新对话",
+      title: workspace ? t("reactChat.newTask") : t("reactChat.newChat"),
     });
     if (workspace) {
       const result = await store.setWorkspace(session.id, workspace.path);
       if (!result.ok) {
         await store.delete(session.id);
-        window.alert(`设置工作区失败：${result.error ?? "未知错误"}`);
+        window.alert(`${t("reactChat.setWorkspaceFailed")}${result.error ?? t("reactChat.unknownError")}`);
         return;
       }
       // Learn 模式：空目录询问是否初始化通用学习结构
       if (targetMode === "learn" && result.isEmpty) {
-        const confirmed = window.confirm(
-          "这是一个空目录。Cyrene 可以在这里创建通用学习工作区结构（materials/、notes/、exercises/、templates/、learn/progress.md），方便你之后和 Cyrene 一起学习。\n\n是否创建？"
-        );
+        const confirmed = window.confirm(t("reactChat.emptyDirConfirm"));
         if (confirmed) {
           await initVaultStructure(session.id);
         }
@@ -1500,7 +1695,7 @@ export function ChatPage() {
       const result = await store.setCodeMode(sessionId, clineMode);
       if (!result.ok) {
         setSelectedClineMode(previous);
-        window.alert(`切换 Cline 模式失败：${result.error ?? "未知错误"}`);
+        window.alert(`${t("reactChat.switchClineModeFailed")}${result.error ?? t("reactChat.unknownError")}`);
       }
     } catch (error) {
       setSelectedClineMode(previous);
@@ -1514,7 +1709,7 @@ export function ChatPage() {
     if (!api || !sessionId) return;
     try {
       const result = await api.createNewTask(sessionId);
-      if (!result.ok) window.alert(`创建 Cline Task 失败：${result.error ?? "未知错误"}`);
+      if (!result.ok) window.alert(`${t("reactChat.createClineTaskFailed")}${result.error ?? t("reactChat.unknownError")}`);
     } catch (error) {
       console.warn("[Cyrene React] 创建 Cline Task 失败:", error);
     }
@@ -1546,7 +1741,7 @@ export function ChatPage() {
         }));
       }
     } catch (error) {
-      window.alert(`文件摄入失败：${error instanceof Error ? error.message : String(error)}`);
+      window.alert(`${t("reactChat.fileIngestFailed")}${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setAttachmentBusy(false);
     }
@@ -1608,7 +1803,7 @@ export function ChatPage() {
         attachment.filePath === image.filePath
           ? result.ok && result.caption
             ? { ...attachment, imageSendMode: "caption", status: "done", caption: result.caption, reason: undefined }
-            : { ...attachment, imageSendMode: "caption", status: "error", reason: result.error ?? "图片分析失败" }
+            : { ...attachment, imageSendMode: "caption", status: "error", reason: result.error ?? t("reactChat.imageAnalysisFailed") }
           : attachment
       )));
     }
@@ -1746,6 +1941,7 @@ export function ChatPage() {
       content: rawContent,
       at: Date.now(),
       sticker: userSticker,
+      identityId: null,
       attachments: attachments
         .filter((attachment) => (attachment.kind === "image" || attachment.kind === "document") && attachment.filePath)
         .map((attachment) => attachment.kind === "image" ? {
@@ -1769,20 +1965,27 @@ export function ChatPage() {
     if (demoResponse && assistantId) streamDemoResponse(targetMode, assistantId, demoResponse, sessionId);
     if (shouldRunModel && assistantId && !updatedSession) {
       updateMessage(targetMode, assistantId, {
-        content: "模型请求失败：用户消息未能写入当前会话",
+        content: t("reactChat.userMessageSaveFailed"),
         loading: false,
         waitingForFirstEvent: false,
         streaming: false,
         responseStarted: true,
       });
     } else if (shouldRunModel && assistantId && updatedSession) {
-      await runModel({
+      const finalContent = await runModel({
         targetMode,
         sessionId,
         userMessageId,
         assistantId,
         session: updatedSession,
         attachments,
+      });
+      // 自动接力：助手回复含 [HANDOFF:CONTINUE] 时切换另一角色继续回复
+      await runHandoffChain({
+        targetMode,
+        sessionId,
+        firstAssistantId: assistantId,
+        firstContent: finalContent,
       });
     }
   }
@@ -1842,7 +2045,18 @@ export function ChatPage() {
         <SidebarToggle collapsed={collapsed} onToggle={() => setCollapsed((v) => !v)} />
       </div>
       <div className="cy-page-top-center">
-        <CharacterStatusPill avatarPath={avatarLight} status={modelDisplayName || modelName} />
+        <CharacterStatusPill
+          avatarPath={resolveAsset(`avatars/${currentRole === "sandrone" ? "Sandrone" : "Columbina"}.jpg`)}
+          name={AGENT_ROLE_LABELS[currentRole]}
+          status={roleStatus}
+        />
+        <RoleToggle
+          currentRole={currentRole}
+          models={availableModels}
+          selectedModelIds={selectedModelIds}
+          onRoleChange={handleRoleChange}
+          onModelChange={handleRoleModelChange}
+        />
         <ModeSwitch value={mode} onChange={(nextMode) => {
           if (isConversationMode(nextMode)) setMode(nextMode);
         }} />
@@ -1872,7 +2086,7 @@ export function ChatPage() {
           onSelect={(sessionId) => void selectSession(sessionId)}
           onOpenProject={(workspaceRoot) => {
             void chatStore()?.openWorkspace(workspaceRoot).then((result) => {
-              if (!result.ok) window.alert(`无法打开项目文件夹：${result.error ?? "未知错误"}`);
+              if (!result.ok) window.alert(`${t("reactChat.openProjectFailed")}${result.error ?? t("reactChat.unknownError")}`);
             });
           }}
           onRename={(sessionId, newTitle) => void handleRenameSession(sessionId, newTitle)}
@@ -1889,7 +2103,7 @@ export function ChatPage() {
       >
         {isDraggingFiles && (
           <div className="cy-file-drop-overlay" aria-hidden="true">
-            <span>松开即可添加到当前对话</span>
+            <span>{t("reactChat.dropToAttach")}</span>
           </div>
         )}
         {(mode === "work" || mode === "daily" || mode === "learn") && (
@@ -1923,7 +2137,7 @@ export function ChatPage() {
         {isCompressingContext && (
           <div className="cy-compressing-context" aria-live="polite" aria-busy="true">
             <img src={compressingPng} className="cy-compressing-context-icon" alt="" aria-hidden="true" />
-            <span>昔涟正在压缩上下文…</span>
+            <span>{t("reactChat.compressingContext")}</span>
           </div>
         )}
         <div className="cy-workspace-composer">
@@ -1932,8 +2146,8 @@ export function ChatPage() {
               type="button"
               className="cy-workspace-composer__scroll-to-bottom"
               onClick={() => scrollToBottomRef.current()}
-              aria-label="滚动到底部"
-              title="滚动到底部"
+              aria-label={t("reactChat.scrollToBottom")}
+              title={t("reactChat.scrollToBottom")}
             >
               <DownOutlined />
             </button>

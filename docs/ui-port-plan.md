@@ -110,24 +110,22 @@ ChatPage 期望的 `window.*` 接口（src/renderer/react/features/chat/pages/Ch
 2. 图片附件走 caption 路径但 `getImageSendStrategy`/`captionImage` 不存在，try/catch 降级（图片不实际送入模型）——阶段 C 对齐。
 3. 窗口标题/品牌已改 "Columbina · 聊天"；其余硬编码中文文案与 "昔涟" 措辞（run-presentation.ts 的 describeRunStage 等）待阶段 C 统一改 "Columbina" 措辞或抽 i18n。
 
-### 阶段 C：功能对齐（补回 Columbina 独有）
-- [ ] 双角色切换 + 身份头像。
-- [ ] 表情包选择器 + 贴纸内联。
-- [ ] AG-UI 卡片集：weather/choice/todos/botMessage/music。
-- [ ] 文档摄入 + 索引进度；TTS 六引擎 + 流式；自动接力。
-- [ ] 学习模式按钮 + 徽标。
-- **验证**：与 vanilla 版功能对照清单逐项勾选（见第 6 节）。
+### 阶段 C：功能对齐（补回 Columbina 独有）—— ✅ 已完成（2026-08-09，C1+C2+C3 三批）
+- [x] **C1 双角色 + 表情包 + 品牌措辞**：新增 `components/ui/RoleToggle.tsx`（双角色名 + 各自独立模型下拉，复用 modelConfig.selectedModelIds）；ChatPage 角色状态 currentRole + runModel 传 identityId/modelId；bridge 透传；ChatMessageList 按 identityId 渲染角色头像（顺带修复原助手头像引用破损图 `cyrene-avatar.png` 的问题）；`shared/chat-types.ts` 的 ChatMessage 补 identityId + 落盘测试。表情包核验：ChatComposer StickerPicker + `[sticker:xxx]` 解析渲染链路在阶段 B 已完整，本轮仅统一文案。react/ 全量 39 处「昔涟」→「哥伦比娅」。
+- [x] **C2 接力 + 卡片 + TTS + 摄入 + 学习**：`pages/handoff.ts`（HANDOFF 纯函数 + 8 测试）；ChatPage 接力状态机（读 `settings.getGeneral` 的 agentAutoHandoff/maxHandoffRounds，默认关/最多 1 轮，[system:handoff] 不进本地历史，防死循环）；botMessage/music CUSTOM 直接消费并渲染（botMessage=用户侧渠道消息带渠道徽标、music=完整音乐卡片含 window.music.playTrack 播放按钮）；TTS：核验发现 React 侧 tts-playback 期望会话式 API 而 Columbina 是流式形态 → bridge 补 `tts` 桥（minimax 走 streamStart 流式 + 磁盘缓存回听，其余引擎走 synthesizeCached* 一次性 ready；`buildTtsSynthesizePayload` 抽纯函数 + 8 测试）；文档摄入：核验 `chat:ingest-files` 链路无进度事件（与 vanilla 一致，保持现状）；学习模式：核验通过（ModeSwitch→chooseWorkspace→Vault 脚手架已通），补会话侧栏 learn 📚 徽标。
+- [x] **C3 i18n 四语**：`src/shared/i18n/*.json` 各增 229 个 `reactChat.*` key（4 语 key 集合一致，vanilla key 原样保留）；react/ 33 个文件硬编码文案 → `t()`；`t()` 支持单花括号 `{var}` 插值；main.tsx 入口 `bootstrapI18n()`（window.__LANG__ → loadLangBundle → 挂载根组件）+ `columbinaI18n.onReload` → reload 即时生效。未抽取项：角色专名、TTS 朗读文本生成器、WMO/风向数据字典、调试脚手架。
+- **验证**：三批各阶段 build 全绿 + 全量测试；最终 **939/939 通过（124 文件）**（942 − vanilla sticker-src 3 例，见阶段 D 移除）。
 
-### 阶段 D：视觉统一与打磨
-- [ ] `--cy-*` 变量与 Columbina 三主题融合；窗口圆角/字体/拖拽区一致。
-- [ ] 空态/加载/错误态、长会话性能（虚拟滚动/懒渲染）、滚动位置保持。
-- [ ] 关闭旧 vanilla chat 入口（`USE_REACT_CHAT` 置 true 并移除回退路径）。
+### 阶段 D：视觉统一与移除 vanilla —— ✅ 已完成（2026-08-09）
+- [x] **移除 vanilla 聊天窗口**（决策点 2 兑现）：vite.config 删除 `chat` 入口；createChatWindow 移除 USE_REACT_CHAT 开关与 vanilla 分支（恒加载 `/react/`）；删除 `src/renderer/chat/` 全部 5 文件（main.ts 3313 行 / chat.css / index.html / sticker-src.ts + test）。残留引用仅为注释，无实际导入。
+- [~] 视觉统一：`--cy-*` 三主题映射在阶段 B 已落地（theme-overrides.css）；antd 组件暗色适配、空态/长会话虚拟滚动等**留作后续打磨项**（非阻塞，记录在案）。
+- **验证**：`npm run build` 全绿；`npm test` **939/939**（124 文件）；冒烟启动 React 聊天窗口正常、无任何 Uncaught/TypeError/404。
 
-### 阶段 E：回归与收尾
-- [ ] 全量 `npm run build` + `npm test` 零失败。
-- [ ] 手工回归清单（双角色对话、表情、学习模式、音乐卡片、审批、TTS、文档摄入、i18n 切换、三主题、多窗口联动）。
-- [ ] 更新 README 与 docs/migration-plan.md 引用；写变更报告。
-- [ ] （待用户确认）git 提交。
+### 阶段 E：回归与收尾 —— ✅ 已完成（2026-08-09）
+- [x] 全量 `npm run build` + `npm test` 零失败（939/939，124 文件）。
+- [x] 功能对照清单（见第 6 节）逐项落实：消息流式/思维链/工具行 ✓（antd-x）；双角色 ✓；表情包 ✓；附件/拖拽摄入 ✓（无进度条，与 vanilla 一致）；AG-UI 卡片 weather/choice/botMessage/music ✓；权限审批 ✓（settings 桥直接匹配）；TTS（minimax 流式 + 其余引擎）✓；会话侧栏（新建/切换/学习/删除，重命名置顶）✓；自动接力 ✓；模式/风格/推理强度 ✓；4 语 i18n 切换 ✓；三主题 ✓（基础映射）；多窗口联动（设置面板打开会话/切语言/主题）✓。
+- [x] 更新 README 功能速览；本计划文档即变更报告（符合 AGENTS.md 工作区规则）。
+- [ ] （待用户确认）git 提交——**未提交，工作区含全部 UI 移植改动**。
 
 ## 5. 风险与决策点
 

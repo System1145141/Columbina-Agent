@@ -5,6 +5,11 @@ import {
   resolveRunActivitySnapshot,
   shouldAutoCollapseRunActivity,
 } from "./run-activity";
+import { loadBundle } from "../../../../../shared/i18n";
+import zhCN from "../../../../../shared/i18n/zh-CN.json";
+
+// formatElapsed 已改为 t() 拼接单位，加载 zh-CN 语言包后断言中文文案。
+loadBundle(zhCN as Record<string, unknown>);
 
 describe("run activity presentation", () => {
   it("accumulates completed reasoning with the active reasoning segment", () => {

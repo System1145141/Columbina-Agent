@@ -5,6 +5,7 @@ import {
   toggleTtsPlayback,
   type TtsPlaybackStatus,
 } from "./tts-playback";
+import { t } from "../../../../../shared/i18n";
 
 interface TtsButtonProps {
   conversationId: string;
@@ -18,12 +19,12 @@ interface TtsButtonProps {
 }
 
 function buttonLabel(status: TtsPlaybackStatus): string {
-  if (status === "synthesizing") return "正在生成语音";
-  if (status === "playing") return "暂停朗读";
-  if (status === "paused") return "继续朗读";
-  if (status === "completed") return "重新朗读";
-  if (status === "error") return "重新朗读";
-  return "朗读";
+  if (status === "synthesizing") return t("reactChat.ttsSynthesizing");
+  if (status === "playing") return t("reactChat.ttsPause");
+  if (status === "paused") return t("reactChat.ttsResume");
+  if (status === "completed") return t("reactChat.ttsReplay");
+  if (status === "error") return t("reactChat.ttsReplay");
+  return t("reactChat.ttsPlay");
 }
 
 export function TtsButton({

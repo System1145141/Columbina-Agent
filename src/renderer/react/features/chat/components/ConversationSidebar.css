@@ -144,6 +144,13 @@
   opacity: 0.85;
 }
 
+/* learn 学习会话徽标 */
+.cy-session-label__learn {
+  flex: none;
+  font-size: 11px;
+  line-height: 1;
+}
+
 .cy-conversation-project span {
   overflow: hidden;
   text-overflow: ellipsis;

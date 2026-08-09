@@ -10,7 +10,7 @@ vi.mock("@ant-design/x-markdown", () => ({ XMarkdown: () => null }));
 vi.mock("@ant-design/x-markdown/plugins/Latex", () => ({ default: () => ({}) }));
 vi.mock("../../../../../shared/renderer-base", () => ({ resolveAsset: (path: string) => path }));
 
-import { createMessageItems, type ChatMessageItem } from "./ChatMessageList";
+import { createMessageItems, resolveAssistantAvatar, type ChatMessageItem } from "./ChatMessageList";
 import { extractMessageStickerId, stripMessageStickerMarkers } from "./message-sticker";
 
 describe("React chat sticker messages", () => {
@@ -21,6 +21,15 @@ describe("React chat sticker messages", () => {
 
   it("keeps user text while removing only its sticker marker", () => {
     expect(stripMessageStickerMarkers("给你一个 [sticker:hugtight]")).toBe("给你一个");
+  });
+});
+
+describe("React chat role avatars", () => {
+  it("resolves assistant avatar by identityId (default columbina)", () => {
+    expect(resolveAssistantAvatar("sandrone")).toBe("avatars/Sandrone.jpg");
+    expect(resolveAssistantAvatar("columbina")).toBe("avatars/Columbina.jpg");
+    expect(resolveAssistantAvatar(undefined)).toBe("avatars/Columbina.jpg");
+    expect(resolveAssistantAvatar(null)).toBe("avatars/Columbina.jpg");
   });
 });
 

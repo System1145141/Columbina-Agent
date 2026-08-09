@@ -1,0 +1,100 @@
+.cy-music-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 260px;
+  max-width: 420px;
+  padding: 12px;
+  border: 1px solid var(--cy-border, rgba(127, 127, 127, 0.28));
+  border-radius: 12px;
+  background: var(--cy-card-bg, rgba(127, 127, 127, 0.08));
+}
+
+.cy-music-card__header {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cy-text-secondary, #8e8e93);
+}
+
+.cy-music-card__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cy-music-card__track {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--cy-card-track-bg, rgba(127, 127, 127, 0.1));
+}
+
+.cy-music-card__cover,
+.cy-music-card__cover-placeholder {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.cy-music-card__cover-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: var(--cy-text-secondary, #8e8e93);
+  background: var(--cy-card-placeholder-bg, rgba(127, 127, 127, 0.12));
+}
+
+.cy-music-card__meta {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cy-music-card__name {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cy-music-card__artists {
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--cy-text-secondary, #8e8e93);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cy-music-card__play {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--cy-border, rgba(127, 127, 127, 0.28));
+  border-radius: 50%;
+  font-size: 13px;
+  color: var(--cy-accent, #6d5dfc);
+  background: transparent;
+  cursor: pointer;
+}
+
+.cy-music-card__play:hover {
+  background: var(--cy-card-track-bg, rgba(127, 127, 127, 0.12));
+}
+
+.cy-music-card__play.is-playing,
+.cy-music-card__play:disabled {
+  cursor: default;
+  opacity: 0.6;
+}

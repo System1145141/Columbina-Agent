@@ -3,6 +3,7 @@ import { DeleteOutlined, EditOutlined, PushpinOutlined } from "@ant-design/icons
 import { Input, Menu, Modal, Popover } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChatSessionMeta, ConversationMode } from "../../../../../shared/chat-types-react";
+import { t } from "../../../../../shared/i18n";
 
 interface ConversationSidebarProps {
   mode: ConversationMode;
@@ -70,16 +71,16 @@ function ProjectInfoCard({
   onOpen: () => void;
 }) {
   return (
-    <section className="cy-project-card" aria-label={`${project.name} 项目信息`}>
+    <section className="cy-project-card" aria-label={t("reactChat.projectInfoAria", { name: project.name })}>
       <div className="cy-project-card__name">
         <ProjectIcon mode={mode} />
         <span>{project.name}</span>
       </div>
       <dl className="cy-project-card__details">
-        <div><dt>项目名</dt><dd>{project.name}</dd></div>
-        <div><dt>对话串数</dt><dd>{project.conversationCount}</dd></div>
-        <div><dt>项目路径</dt><dd title={project.workspaceRoot}>{project.workspaceRoot ?? "暂无项目路径"}</dd></div>
-        <div><dt>上次修改时间</dt><dd>{formatModifiedTime(project.updatedAt)}</dd></div>
+        <div><dt>{t("reactChat.projectName")}</dt><dd>{project.name}</dd></div>
+        <div><dt>{t("reactChat.conversationCount")}</dt><dd>{project.conversationCount}</dd></div>
+        <div><dt>{t("reactChat.projectPath")}</dt><dd title={project.workspaceRoot}>{project.workspaceRoot ?? t("reactChat.noProjectPath")}</dd></div>
+        <div><dt>{t("reactChat.lastModified")}</dt><dd>{formatModifiedTime(project.updatedAt)}</dd></div>
       </dl>
       <button
         className="cy-project-card__open"
@@ -91,7 +92,7 @@ function ProjectInfoCard({
         }}
       >
         <ProjectIcon mode={mode} />
-        <span>跳转对应文件夹</span>
+        <span>{t("reactChat.jumpToFolder")}</span>
       </button>
     </section>
   );
@@ -118,7 +119,7 @@ export function ConversationSidebar({
         current.updatedAt = Math.max(current.updatedAt, session.updatedAt);
       } else {
         result.set(key, {
-          name: session.workspaceDisplayName ?? "未绑定项目",
+          name: session.workspaceDisplayName ?? t("reactChat.unboundProject"),
           workspaceRoot: session.workspaceRoot,
           conversationCount: 1,
           updatedAt: session.updatedAt,
@@ -197,7 +198,8 @@ export function ConversationSidebar({
         />
       ) : (
         <span className="cy-session-label">
-          <span className="cy-session-label__title">{session.title || "新对话"}</span>
+          {mode === "learn" && <span className="cy-session-label__learn" aria-label={t("reactChat.learnSessionAria")}>📚</span>}
+          <span className="cy-session-label__title">{session.title || t("reactChat.sessionDefaultTitle")}</span>
           {session.pinned && <PushpinOutlined className="cy-session-label__pin" />}
         </span>
       ),
@@ -215,7 +217,7 @@ export function ConversationSidebar({
       x: event.clientX,
       y: event.clientY,
       sessionId,
-      sessionTitle: session.title || "新对话",
+      sessionTitle: session.title || t("reactChat.sessionDefaultTitle"),
       pinned: session.pinned ?? false,
     });
   }
@@ -236,11 +238,11 @@ export function ConversationSidebar({
       void onTogglePin(contextMenu.sessionId, !contextMenu.pinned);
     } else if (key === "delete") {
       Modal.confirm({
-        title: `删除"${contextMenu.sessionTitle}"？`,
-        content: "删除后无法恢复，确定要继续吗？",
-        okText: "删除",
+        title: t("reactChat.deleteSessionTitle", { title: contextMenu.sessionTitle }),
+        content: t("reactChat.deleteSessionConfirm"),
+        okText: t("reactChat.delete"),
         okType: "danger",
-        cancelText: "取消",
+        cancelText: t("reactChat.cancel"),
         onOk: () => void onDelete(contextMenu.sessionId),
       });
     }
@@ -265,11 +267,11 @@ export function ConversationSidebar({
   }, [contextMenu.open]);
 
   return (
-    <nav className="cy-conversation-sidebar" aria-label={supportsProjects ? "项目与对话" : "对话列表"}>
-      <div className="cy-conversation-sidebar__title">{supportsProjects ? "项目" : "对话"}</div>
+    <nav className="cy-conversation-sidebar" aria-label={supportsProjects ? t("reactChat.sidebarAriaProjects") : t("reactChat.sidebarAriaConversations")}>
+      <div className="cy-conversation-sidebar__title">{supportsProjects ? t("reactChat.projects") : t("reactChat.conversations")}</div>
       {items.length === 0 ? (
         <div className="cy-conversation-sidebar__empty">
-          {supportsProjects ? "还没有项目任务" : "还没有对话"}
+          {supportsProjects ? t("reactChat.noProjectTasks") : t("reactChat.noConversations")}
         </div>
       ) : (
         <>
@@ -332,13 +334,13 @@ export function ConversationSidebar({
             >
               <Menu
                 items={[
-                  { key: "rename", label: "重命名", icon: <EditOutlined /> },
+                  { key: "rename", label: t("reactChat.rename"), icon: <EditOutlined /> },
                   {
                     key: "toggle-pin",
-                    label: contextMenu.pinned ? "取消置顶" : "置顶",
+                    label: contextMenu.pinned ? t("reactChat.unpin") : t("reactChat.pin"),
                     icon: <PushpinOutlined />,
                   },
-                  { key: "delete", label: "删除", icon: <DeleteOutlined />, danger: true },
+                  { key: "delete", label: t("reactChat.delete"), icon: <DeleteOutlined />, danger: true },
                 ]}
                 onClick={({ key }) => handleMenuClick(key)}
               />

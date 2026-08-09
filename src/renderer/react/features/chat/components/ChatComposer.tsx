@@ -2,6 +2,7 @@ import { Sender } from "@ant-design/x";
 import { Popover } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { resolveAsset } from "../../../../../shared/renderer-base";
+import { t } from "../../../../../shared/i18n";
 import { ReasoningControl } from "./ReasoningControl";
 import { StyleControl } from "./StyleControl";
 import { PermissionControl } from "./PermissionControl";
@@ -109,8 +110,8 @@ function StickerPicker({ onChoose }: { onChoose: (id: string) => void }) {
       placement="topLeft"
       rootClassName="cy-sticker-popover"
       content={(
-        <div className="cy-sticker-picker" aria-label="表情包列表">
-          {stickers.length === 0 && <span className="cy-sticker-picker__empty">没有可用的表情包</span>}
+        <div className="cy-sticker-picker" aria-label={t("reactChat.stickerPickerAria")}>
+          {stickers.length === 0 && <span className="cy-sticker-picker__empty">{t("reactChat.noStickers")}</span>}
           {stickers.map((sticker) => (
             <button
               type="button"
@@ -127,7 +128,7 @@ function StickerPicker({ onChoose }: { onChoose: (id: string) => void }) {
         </div>
       )}
     >
-      <button type="button" className="cy-composer__icon-button cy-composer__sticker-button" aria-label="表情包" title="表情包">
+      <button type="button" className="cy-composer__icon-button cy-composer__sticker-button" aria-label={t("reactChat.sticker")} title={t("reactChat.sticker")}>
         <img src={resolveAsset("icons/sticker-picker.png")} alt="" aria-hidden="true" draggable={false} />
       </button>
     </Popover>
@@ -202,10 +203,10 @@ export function ChatComposer({
   const welcomeImageUrl = WELCOME_IMAGE_BY_MODE[mode] ?? chatWelcomeUrl;
   const requiresWorkspace = supportsWorkFiles;
   const placeholder = mode === "chat"
-    ? "昔涟期待和你一起聊天♪"
+    ? t("reactChat.placeholderChat")
     : requiresWorkspace && !workspaceName
-      ? "有什么问题 / 任务，来找昔涟♪（ps：请先选中一个项目路径哦♪）"
-      : "有什么问题 / 任务，来找昔涟♪";
+      ? t("reactChat.placeholderWorkspaceRequired")
+      : t("reactChat.placeholderDefault");
   const selectedStickerIds = [...value.matchAll(/\[sticker:([^\]]+)\]/gi)]
     .map((match) => match[1].trim())
     .filter(Boolean);
@@ -264,7 +265,7 @@ export function ChatComposer({
         <Sender
         rootClassName="cy-composer"
         value={value}
-        placeholder={modelBusy ? "按 Enter 停止 · Shift+Enter 加入队列" : placeholder}
+        placeholder={modelBusy ? t("reactChat.placeholderBusy") : placeholder}
         loading={modelBusy}
         disabled={requiresWorkspace && !workspaceName}
         autoSize={{ minRows: 3, maxRows: 7 }}
@@ -282,13 +283,13 @@ export function ChatComposer({
           }
         }}
         header={hasComposerHeader ? (
-          <div className="cy-composer__attachments" aria-label="待发送附件">
+          <div className="cy-composer__attachments" aria-label={t("reactChat.pendingAttachments")}>
             {pendingQueue.length > 0 && (
-              <div className="cy-composer__queue" aria-label="待发送消息">
+              <div className="cy-composer__queue" aria-label={t("reactChat.pendingMessages")}>
                 {pendingQueue.map((item) => (
                   <div className="cy-composer__queue-item" key={item.id}>
                     <span className="cy-composer__queue-text" title={item.content}>{item.content.slice(0, 40)}{item.content.length > 40 ? "..." : ""}</span>
-                    <button type="button" aria-label="移除" onClick={() => onRemoveQueuedMessage?.(item.id)}>×</button>
+                    <button type="button" aria-label={t("reactChat.remove")} onClick={() => onRemoveQueuedMessage?.(item.id)}>×</button>
                   </div>
                 ))}
               </div>
@@ -300,13 +301,13 @@ export function ChatComposer({
                 ) : (
                   <span title={attachment.name}>{attachment.name}</span>
                 )}
-                <button type="button" aria-label={`移除 ${attachment.name}`} onClick={() => onRemoveAttachment(index)}>×</button>
+                <button type="button" aria-label={t("reactChat.removeAttachment", { name: attachment.name })} onClick={() => onRemoveAttachment(index)}>×</button>
               </div>
             ))}
             {selectedStickers.map(({ id, occurrence, sticker }) => (
               <div className="cy-composer__attachment cy-composer__attachment--sticker" key={`${id}-${occurrence}`}>
-                <img src={stickerUrl(sticker.src)} alt={sticker.description ?? "已选表情包"} draggable={false} />
-                <button type="button" aria-label="移除表情包" onClick={() => removeSelectedSticker(id, occurrence)}>×</button>
+                <img src={stickerUrl(sticker.src)} alt={sticker.description ?? t("reactChat.selectedSticker")} draggable={false} />
+                <button type="button" aria-label={t("reactChat.removeSticker")} onClick={() => removeSelectedSticker(id, occurrence)}>×</button>
               </div>
             ))}
           </div>
@@ -316,8 +317,8 @@ export function ChatComposer({
             <button
               type="button"
               className="cy-composer__icon-button"
-              aria-label="上传文件"
-              title="上传文件"
+              aria-label={t("reactChat.uploadFile")}
+              title={t("reactChat.uploadFile")}
               disabled={attachmentBusy}
               onClick={() => fileInputRef.current?.click()}
             >
@@ -326,8 +327,8 @@ export function ChatComposer({
             <button
               type="button"
               className="cy-composer__icon-button"
-              aria-label="截图"
-              title="截图 (Alt+Shift+S)"
+              aria-label={t("reactChat.screenshot")}
+              title={t("reactChat.screenshotShortcut")}
               onClick={onScreenshot}
             >
               <ScreenshotIcon />
@@ -338,23 +339,23 @@ export function ChatComposer({
         />
         <div className="cy-composer__footer">
         {supportsWorkFiles && (
-          <button type="button" className="cy-composer__footer-button" aria-label="选择工作文件夹" onClick={onChooseWorkspace}>
+          <button type="button" className="cy-composer__footer-button" aria-label={t("reactChat.chooseWorkspace")} onClick={onChooseWorkspace}>
             {mode === "code" ? <CodeFolderIcon /> : <FolderIcon />}
-            <span>{workspaceName ?? (docked ? "工作文件夹" : "进入项目工作")}</span>
+            <span>{workspaceName ?? (docked ? t("reactChat.workspaceFolder") : t("reactChat.enterProjectWork"))}</span>
             <ChevronIcon />
           </button>
         )}
         {supportsObsidianLibrary && (
-          <button type="button" className="cy-composer__footer-button" aria-label="选择 Obsidian 项目库" onClick={onChooseWorkspace}>
+          <button type="button" className="cy-composer__footer-button" aria-label={t("reactChat.chooseObsidianVault")} onClick={onChooseWorkspace}>
             <ObsidianVaultIcon />
-            <span>{workspaceName ?? "Obsidian 项目库"}</span>
+            <span>{workspaceName ?? t("reactChat.obsidianVault")}</span>
             <ChevronIcon />
           </button>
         )}
         {supportsObsidianLibrary && workspaceName && onInitVaultStructure && (
-          <button type="button" className="cy-composer__footer-button" aria-label="添加 Cyrene 学习结构" onClick={onInitVaultStructure}>
+          <button type="button" className="cy-composer__footer-button" aria-label={t("reactChat.addLearnStructureAria")} onClick={onInitVaultStructure}>
             <PlusIcon />
-            <span>添加学习结构</span>
+            <span>{t("reactChat.addLearnStructure")}</span>
           </button>
         )}
         {supportsPermission && <span className="cy-composer__footer-separator" />}
@@ -369,10 +370,10 @@ export function ChatComposer({
             type="button"
             className="cy-composer__footer-button cy-composer__cline-task-button"
             disabled={modelBusy}
-            title="结束当前 Cline Task；下一条消息从新上下文开始"
+            title={t("reactChat.endClineTaskTitle")}
             onClick={onNewClineTask}
           >
-            新 Cline Task
+            {t("reactChat.newClineTask")}
           </button>
         )}
         {supportsStyle && <StyleControl />}

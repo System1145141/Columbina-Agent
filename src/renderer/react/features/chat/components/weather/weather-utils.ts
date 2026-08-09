@@ -1,4 +1,5 @@
 import type { WeatherCategory } from "./weather-types";
+import { t } from "../../../../../../shared/i18n";
 
 export const WMO_MAP: Record<number, [WeatherCategory, string]> = {
   0: ["clear", "晴"],
@@ -32,7 +33,7 @@ export const WMO_MAP: Record<number, [WeatherCategory, string]> = {
 };
 
 export function mapWmoCode(code: number): [WeatherCategory, string] {
-  return WMO_MAP[code] ?? ["cloudy", "未知天气"];
+  return WMO_MAP[code] ?? ["cloudy", t("reactChat.weatherUnknown")];
 }
 
 export const AMAP_MAP: Record<string, WeatherCategory> = {
@@ -88,10 +89,14 @@ export function omWindDir(deg: number): string {
 
 export function formatReportTime(reporttime: string): string {
   const timePart = reporttime.split(" ")[1] ?? "";
-  return timePart.slice(0, 5) + " 更新";
+  return t("reactChat.weatherUpdatedAt", { time: timePart.slice(0, 5) });
 }
 
 export function formatDateText(date = new Date()): string {
   const weekNames = ["日", "一", "二", "三", "四", "五", "六"];
-  return `${date.getMonth() + 1}月${date.getDate()}日 星期${weekNames[date.getDay()]}`;
+  return t("reactChat.weatherDateText", {
+    month: String(date.getMonth() + 1),
+    day: String(date.getDate()),
+    weekday: weekNames[date.getDay()],
+  });
 }

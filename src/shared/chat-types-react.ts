@@ -91,6 +91,8 @@ export interface ChatMessage {
   attachments?: MessageAttachment[];
   /** 表情包 ID（内置或用户自定义） */
   sticker?: string | null;
+  /** 消息对应的角色身份（columbina / sandrone），用于显示正确头像。user 消息为 null。 */
+  identityId?: string | null;
   /** 工具调用过程；与模型推理 reasoning 分开保存和展示。 */
   toolExecutions?: ToolExecutionRecord[];
   /** 本轮处理与公开推理的展示指标。 */

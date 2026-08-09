@@ -39,7 +39,8 @@ vi.mock("./orchestrator/history-tools", () => ({
 }));
 
 describe("agui-bridge sticker event ordering", () => {
-  it("delivers sticker side effects before RUN_FINISHED so renderer keeps listening", async () => {
+  // 全量并行时该用例所在 worker 可能因模块转换排队而超过默认 5s；放宽到 20s
+  it("delivers sticker side effects before RUN_FINISHED so renderer keeps listening", { timeout: 20_000 }, async () => {
     vi.resetModules();
     mocks.handlers.clear();
     const { registerAgUiIpc } = await import("./agui-bridge");

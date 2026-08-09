@@ -36,6 +36,8 @@ export interface ChatMessage {
   at: number;
   /** 表情包 ID（内置或用户自定义） */
   sticker?: string | null;
+  /** 消息对应的角色身份（columbina / sandrone），用于显示正确头像。user 消息为 null。 */
+  identityId?: string | null;
   /** TTS 缓存 key。只存 key，不存绝对路径，避免 userData 路径变化后 session JSON 失效。 */
   ttsCacheKey?: string;
 }

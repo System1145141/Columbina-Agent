@@ -764,6 +764,29 @@
   opacity: 1;
 }
 
+/* 渠道消息镜像（columbina.botMessage）来源标签 */
+.cy-message__channel-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--cy-text-secondary, #8e8e93);
+  background: var(--cy-channel-badge-bg, rgba(127, 127, 127, 0.1));
+}
+
+.cy-message__channel-badge-icon {
+  font-size: 10px;
+}
+
+/* 音乐候选卡片（columbina.music）容器 */
+.cy-message--music {
+  margin-bottom: 8px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cy-tts-button,
   .cy-tts-button__wave,

@@ -65,7 +65,17 @@ let currentOffSessionEvent: (() => void) | null = null;
 let requestGeneration = 0;
 
 function browserApis(): { tts?: TtsSessionApi; live2dSpeech?: Live2dSpeechApi } {
-  return window as typeof window & { tts?: TtsSessionApi; live2dSpeech?: Live2dSpeechApi };
+  const windowWithApis = window as typeof window & {
+    reactBridge?: { tts?: TtsSessionApi };
+    tts?: TtsSessionApi;
+    live2dSpeech?: Live2dSpeechApi;
+  };
+  // UI 移植（阶段 C）：优先走 preload 适配层（reactBridge.tts，把 Columbina 流式合成
+  // 包装成会话式 startSession/onSessionEvent），缺失时回退原生 window.tts。
+  return {
+    tts: windowWithApis.reactBridge?.tts ?? windowWithApis.tts,
+    live2dSpeech: windowWithApis.live2dSpeech,
+  };
 }
 
 function publish(next: TtsPlaybackSnapshot): void {

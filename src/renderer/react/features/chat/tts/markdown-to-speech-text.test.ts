@@ -70,8 +70,8 @@ describe("markdownToSpeechText", () => {
   });
 
   it("reads small tables by row and summarizes large tables", () => {
-    const small = markdownToSpeechText("|姓名|分数|\n|-|-|\n|昔涟|100|\n|伙伴|99|", {});
-    expect(small.text).toContain("第一行，姓名是昔涟，分数是100");
+    const small = markdownToSpeechText("|姓名|分数|\n|-|-|\n|哥伦比娅|100|\n|伙伴|99|", {});
+    expect(small.text).toContain("第一行，姓名是哥伦比娅，分数是100");
     expect(small.text).toContain("第二行，姓名是伙伴，分数是99");
 
     const large = markdownToSpeechText("|列|\n|-|\n|1|\n|2|\n|3|\n|4|\n|5|", { maxTableRows: 4 });

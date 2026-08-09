@@ -5,6 +5,7 @@ import {
   type ReasoningDropdownView,
 } from "../../../../lib/reasoning-dropdown";
 import type { ReasoningPreference } from "../../../../shared/reasoning";
+import { t } from "../../../../../shared/i18n";
 import thinkingIconUrl from "../../../assets/status-moods/思考强度.png?url";
 
 interface ReasoningState {
@@ -78,7 +79,7 @@ export function ReasoningControl() {
         size="small"
         disabled={!view || view.disabled}
         value={activeKey}
-        options={(view?.items ?? [{ label: "跟随模型", preference: { mode: "auto" as const }, disabled: true }]).map((item) => ({
+        options={(view?.items ?? [{ label: t("reactChat.followModel"), preference: { mode: "auto" as const }, disabled: true }]).map((item) => ({
           label: preferenceLabel(item.preference),
           value: preferenceKey(item.preference),
           disabled: item.disabled,

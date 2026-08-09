@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { t } from "../../../../shared/i18n";
 
 interface SidebarToggleProps {
   collapsed?: boolean;
@@ -21,7 +22,7 @@ export function SidebarToggle({ collapsed: controlledCollapsed, onToggle }: Side
       onClick={handleClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      aria-label="切换侧栏"
+      aria-label={t("reactChat.toggleSidebar")}
     >
       <svg width="20" height="20" viewBox="0 0 48 48" fill="none">
         {/* 框 - 不变 */}

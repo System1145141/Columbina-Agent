@@ -1,19 +1,22 @@
+import { t } from "../../../../../shared/i18n";
 import "./RunExperience.css";
 
 export type RunOutcomeKind = "direct_fallback" | "partial" | "failed";
 
-const DEFAULT_MESSAGE: Record<RunOutcomeKind, string> = {
-  direct_fallback: "已切换为直接执行，接下来会继续完成任务。",
-  partial: "部分步骤没有完成，昔涟会在回复中说明可用结果。",
-  failed: "这一轮没有顺利完成，请查看回复中的说明后再试一次。",
-};
+function outcomeMessage(kind: RunOutcomeKind): string {
+  switch (kind) {
+    case "direct_fallback": return t("reactChat.outcomeDirectFallback");
+    case "partial": return t("reactChat.outcomePartial");
+    case "failed": return t("reactChat.outcomeFailed");
+  }
+}
 
 export function RunOutcomeNotice({
   kind,
-  message = DEFAULT_MESSAGE[kind],
+  message,
 }: {
   kind: RunOutcomeKind;
   message?: string;
 }) {
-  return <div className={`cy-run-outcome cy-run-outcome--${kind}`} role="status">{message}</div>;
+  return <div className={`cy-run-outcome cy-run-outcome--${kind}`} role="status">{message ?? outcomeMessage(kind)}</div>;
 }
