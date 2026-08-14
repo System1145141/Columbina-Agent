@@ -3,7 +3,7 @@
 > 状态：✅ 全部完成（阶段 A~E + 打磨批次 P1；2026-08-09 至 08-10）
 > 计划日期：2026-08-09
 > 前置：功能迁移（docs/migration-plan.md 第 1~5 阶段）已全部完成
-> git：阶段 A/B 提交 `551d916`，阶段 C/D/E 提交 `8074a3f`，P1 打磨未提交（待用户确认）
+> git：阶段 A/B 提交 `551d916`，阶段 C/D/E 提交 `8074a3f`；P1 + 深色适配 + 头像/StatusFloat 微调未提交（待用户确认）
 
 ## 1. 背景与目标
 
@@ -127,7 +127,13 @@ ChatPage 期望的 `window.*` 接口（src/renderer/react/features/chat/pages/Ch
 - [x] 全量 `npm run build` + `npm test` 零失败（939/939，124 文件）。
 - [x] 功能对照清单（见第 6 节）逐项落实：消息流式/思维链/工具行 ✓（antd-x）；双角色 ✓；表情包 ✓；附件/拖拽摄入 ✓（无进度条，与 vanilla 一致）；AG-UI 卡片 weather/choice/botMessage/music ✓；权限审批 ✓（settings 桥直接匹配）；TTS（minimax 流式 + 其余引擎）✓；会话侧栏（新建/切换/学习/删除，重命名置顶）✓；自动接力 ✓；模式/风格/推理强度 ✓；4 语 i18n 切换 ✓；三主题 ✓（基础映射）；多窗口联动（设置面板打开会话/切语言/主题）✓。
 - [x] 更新 README 功能速览；本计划文档即变更报告（符合 AGENTS.md 工作区规则）。
-- [ ] （待用户确认）git 提交——**未提交，工作区含全部 UI 移植改动**。
+- [ ] （待用户确认）git 提交——**阶段 A/B `551d916`、C/D/E `8074a3f` 已提交**；P1 + 深色适配 + 头像/StatusFloat 微调未提交。
+
+### 交付后微调（2026-08-10，已验证 945/945）
+- **深色主题全量适配**：`theme-overrides.css` 追加约 90 条 `[data-ui-theme="deep-blue"]` 组件级覆盖（ChatComposer/Sidebar/RunExperience/TodoPanel 等硬编码浅色 → 深海军蓝系），追加式不改亮色值；vanilla `theme.css` 补 `.channels-qr-modal__card` 微信扫码弹窗白卡。天气卡自带暗色变体不动。
+- **移除会话栏浮动状态图**：删除 `StatusFloat`（4 张 status-float png 在侧栏区域浮动旋转）及其资源。
+- **修复头像路径**：`resolveAsset` 子目录回退列表补 `react/`（`src/shared/renderer-base.ts`）——修复前 React 窗口头像解析到 `dist/renderer/react/avatars/` 404，实际资源在 `dist/renderer/avatars/`（源 `src/renderer/public/avatars/`）。
+- 文档：HANDOVER.md 新增 §3.8 聊天窗口 React 移植章节 + 架构地图 + 踩坑项 8-11。
 
 ## 5. 风险与决策点
 

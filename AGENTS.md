@@ -135,6 +135,12 @@
 - 架构原则：状态单一来源（`services/state.ts`）、IPC 不穿透组件（统一封装到 service）、Agent 逻辑收敛在 `services/agent-bridge.ts`、主进程服务隔离（Git/LSP/文件系统各自管理子进程）。
 - 验收基线：`npm run build` 通过。
 
+### 2.8 聊天窗口（React UI 移植，2026-08-10 完成）
+
+- 聊天窗口已从手写 vanilla DOM 全量替换为 **React 19 + antd 6 + @ant-design/x**（`src/renderer/react/`，vite 入口 `chat-react`），沿用上游 Cyrene 的聊天体验（流式 Markdown、思维链折叠、工具调用行、AG-UI 卡片），并保留 Columbina 独有功能：双角色切换、4 语 i18n、三主题（含深色适配）、表情包、六引擎 TTS、学习模式、自动接力、图片附件（视觉 caption）。
+- 实现细节：`src/preload/react-bridge.ts`（preload 适配层，主进程零改动）、`src/shared/renderer-base.ts`（`resolveAsset` 子目录列表含 `react/`）、`docs/ui-port-plan.md`（逐阶段记录，含交付后微调）。
+- IDE 与聊天窗口并存：IDE（§2.1~2.7）保持 vanilla + CodeMirror/xterm 实现，不受 React 化影响。
+
 ## 3. 未来计划
 
 ### 近期：AI Agent 体验深化
