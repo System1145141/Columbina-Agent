@@ -199,8 +199,8 @@ export class MemoryManager {
   }
 
   /**
-   * 手动触发的 L2 权重衰减。当前尚未挂载到生产调度；
-   * 后续会由 memory-scheduler 统一决定触发策略。
+   * L2 权重衰减（-1/次）。由 memory-scheduler.startDailyDecay 每日触发，
+   * 经 MemoryMaintenance 队列串行执行。
    */
   async runDecay(): Promise<void> {
     const changed = await memoryStore.decayL2Weights()

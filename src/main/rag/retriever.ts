@@ -1,5 +1,7 @@
 import { JsonVectorStore, SearchResult } from "./vectorstore";
 import { EmbeddingProvider, getEmbeddingProvider } from "./embedding";
+// 仅类型导入：编译期擦除，retriever 不依赖 reranker 的 electron 运行时
+import type { RerankerProvider } from "./reranker";
 
 // ── @node-rs/jieba 分词（Node 24 兼容；nodejieba 已弃用） ──
 import { Jieba } from "@node-rs/jieba";
@@ -44,6 +46,12 @@ const NOUN_TAGS = new Set(["n", "nr", "ns", "nt", "nz", "ng", "vn", "an"]);
 const STOP_WEIGHT = 0.3;
 /** 名词加权系数 */
 const NOUN_WEIGHT = 1.3;
+
+// ── Rerank 融合参数 ──
+/** 送入 cross-encoder 的候选池大小（融合排序后的顶部条目） */
+const RERANK_POOL_SIZE = 16;
+/** rerank 分数在最终分数中的权重；余下保留给融合分（含记忆权重/时间衰减信号） */
+const RERANK_WEIGHT = 0.7;
 
 // ── 自定义词表（entity-graph 维护） ──
 // @node-rs/jieba 没有运行时 insertWord()，改用「后处理重组」方案：
@@ -190,10 +198,18 @@ function bm25Score(
 export class HybridRetriever {
   private store: JsonVectorStore;
   private provider: EmbeddingProvider | null;
+  private rerankerGetter: () => RerankerProvider | null;
+  private rerankWarned = false;
 
-  constructor(store: JsonVectorStore, provider?: EmbeddingProvider | null) {
+  constructor(
+    store: JsonVectorStore,
+    provider?: EmbeddingProvider | null,
+    rerankerGetter?: () => RerankerProvider | null,
+  ) {
     this.store = store;
     this.provider = provider ?? null;
+    // getter 形式注入：跟随设置热切换（initRerarker 模式变化即时生效），且默认降级为直通
+    this.rerankerGetter = rerankerGetter ?? (() => null);
   }
 
   async retrieve(
@@ -209,8 +225,8 @@ export class HybridRetriever {
 
     // 如果没有 provider，向量检索不可用，只用 BM25
     if (!this.provider) {
-      const bm25Results = this.bm25Search(query, source, topK, options);
-      return bm25Results;
+      const bm25Results = this.bm25Search(query, source, topK * 3, options);
+      return this.applyRerank(query, bm25Results, topK);
     }
 
     // 1. Vector 检索
@@ -246,7 +262,56 @@ export class HybridRetriever {
     }));
 
     scored.sort((a, b) => b.score - a.score);
-    return scored.slice(0, topK);
+
+    // 4. Rerank 精排（cross-encoder 可用时）：融合分排序 → 顶部候选池重排
+    return this.applyRerank(query, scored, topK);
+  }
+
+  /**
+   * 用 cross-encoder 对融合结果的顶部候选池重排。
+   * - reranker 未初始化/模型未安装时直通（getReranker() 为 null）
+   * - rerank 抛错时告警一次并回退融合顺序，不阻塞检索
+   * - 最终分 = RERANK_WEIGHT·rerank + (1-RERANK_WEIGHT)·融合分，
+   *   保留少量记忆权重/时间衰减信号，避免 cross-encoder 完全抹掉 PMRS 的调度意图
+   */
+  private async applyRerank(query: string, results: SearchResult[], topK: number): Promise<SearchResult[]> {
+    const sorted = results.slice().sort((a, b) => b.score - a.score);
+    if (sorted.length <= 1) return sorted.slice(0, topK);
+
+    let reranker: RerankerProvider | null = null;
+    try {
+      reranker = this.rerankerGetter();
+    } catch {
+      reranker = null;
+    }
+    if (!reranker) return sorted.slice(0, topK);
+
+    const pool = sorted.slice(0, Math.max(RERANK_POOL_SIZE, topK));
+    try {
+      const reranked = await reranker.rerank(query, pool.map((r) => r.entry.text));
+      const rerankScoreById = new Map<string, number>();
+      pool.forEach((r, i) => {
+        const score = reranked[i]?.score;
+        if (typeof score === "number" && Number.isFinite(score)) {
+          rerankScoreById.set(r.entry.id, score);
+        }
+      });
+
+      const blended = pool.map((r) => {
+        const rerankScore = rerankScoreById.get(r.entry.id);
+        if (rerankScore === undefined) return r;
+        return { ...r, score: RERANK_WEIGHT * rerankScore + (1 - RERANK_WEIGHT) * r.score };
+      });
+
+      const tail = sorted.slice(pool.length);
+      return [...blended.sort((a, b) => b.score - a.score), ...tail].slice(0, topK);
+    } catch (err) {
+      if (!this.rerankWarned) {
+        console.warn("[Retriever] rerank 失败，本轮使用融合排序结果:", err);
+        this.rerankWarned = true;
+      }
+      return sorted.slice(0, topK);
+    }
   }
 
   private bm25Search(query: string, source?: string, topK = 15, options?: { importIds?: string[] }): SearchResult[] {

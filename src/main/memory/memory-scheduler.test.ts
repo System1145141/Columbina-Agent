@@ -40,6 +40,9 @@ function createScheduler(overrides: Partial<MemorySchedulerDeps> = {}) {
     runResolverQueueOnce: vi.fn(async () => {
       calls.push("resolver")
     }),
+    runDecay: vi.fn(async () => {
+      calls.push("decay")
+    }),
     ...overrides,
   }
 
@@ -167,5 +170,42 @@ describe("MemoryScheduler", () => {
     await vi.waitFor(() => expect(deps.runResolverQueueOnce).toHaveBeenCalled())
 
     expect(deps.replaceL1Field).toHaveBeenCalledWith("roundCount", 5)
+  })
+
+  it("runs L2 decay on the daily timer through the maintenance queue", async () => {
+    vi.useFakeTimers()
+    try {
+      const { scheduler, deps, enqueueLabels } = createScheduler()
+      scheduler.startDailyDecay(0, 1_000)
+
+      // 初始延迟后立即跑一次，之后按间隔重复
+      await vi.advanceTimersByTimeAsync(0)
+      expect(deps.runDecay).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(deps.runDecay).toHaveBeenCalledTimes(2)
+      expect(enqueueLabels.every((label) => label === "MemoryMaintenance")).toBe(true)
+
+      // stopDailyDecay 后不再触发
+      scheduler.stopDailyDecay()
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(deps.runDecay).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("does not double-start the decay timer", async () => {
+    vi.useFakeTimers()
+    try {
+      const { scheduler, deps } = createScheduler()
+      scheduler.startDailyDecay(0, 1_000)
+      scheduler.startDailyDecay(0, 1_000)
+
+      await vi.advanceTimersByTimeAsync(1_000)
+      // 重复 start 被忽略：只有初始 1 次 + 1 个间隔 1 次
+      expect(deps.runDecay).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

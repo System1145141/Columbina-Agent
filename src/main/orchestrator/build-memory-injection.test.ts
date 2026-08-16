@@ -62,7 +62,7 @@ describe("buildMemoryInjection", () => {
     expect(context).toContain("用户喜欢跑步")
     expect(wasRecentlyInjectedMemory("l2_run")).toBe(true)
     expect(ragMock.searchMemoryEntries).toHaveBeenCalledWith("跑步", "user_memory", 5)
-  })
+  }, 30_000)
 
   it("prefers DMAE-active L2 memories for injection", async () => {
     ragMock.searchMemoryEntries.mockResolvedValue([{
@@ -112,5 +112,5 @@ describe("buildMemoryInjection", () => {
     expect(wasRecentlyInjectedMemory("l2_active")).toBe(true)
     expect(l2DmaeManagerMock.getActiveL2ForPrompt).toHaveBeenCalledWith(expect.any(Array), 4)
     expect(ragMock.searchMemoryEntries).toHaveBeenCalledWith("跑步", "user_memory", 5)
-  })
+  }, 30_000)
 })

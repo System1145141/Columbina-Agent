@@ -19,11 +19,19 @@ export interface MemorySchedulerDeps {
   replaceL1Field: (field: "roundCount", value: number) => Promise<void>
   runReflectionAndCompression: () => Promise<void>
   runResolverQueueOnce: () => Promise<unknown>
+  runDecay: () => Promise<void>
 }
+
+/** L2 权重每日衰减：-1/天，与召回侧 updateL2RecallStats(+1/次) 对冲，构成「常 recalled 常新」的稳态 */
+const DECAY_INTERVAL_MS = 24 * 60 * 60 * 1000
+/** 首次衰减延迟：避开启动期（对账 / Obsidian watcher / 索引重建） */
+const DECAY_INITIAL_DELAY_MS = 60 * 1000
 
 export class MemoryScheduler {
   private recentTurns: Array<MemoryJudgeTurn & { seq: number }> = []
   private nextTurnSeq = 0
+  private decayKickoff: ReturnType<typeof setTimeout> | null = null
+  private decayTimer: ReturnType<typeof setInterval> | null = null
 
   constructor(private readonly deps: MemorySchedulerDeps) {}
 
@@ -83,6 +91,43 @@ export class MemoryScheduler {
       await this.deps.runReflectionAndCompression()
     }
   }
+
+  /**
+   * 启动 L2 权重每日衰减（时间驱动，与对话轮次解耦——长时间不聊天也应遗忘）。
+   * 经 enqueueTask 走 MemoryMaintenance 队列，与 Judge/Compressor 串行执行，
+   * 避免 decayL2Weights 的 load→modify→save 与其他写操作竞态丢失更新。
+   */
+  startDailyDecay(
+    initialDelayMs = DECAY_INITIAL_DELAY_MS,
+    intervalMs = DECAY_INTERVAL_MS,
+  ): void {
+    // 守卫必须同时覆盖 kickoff 延迟阶段与定时器阶段，否则启动窗口内重复调用会开出双定时器
+    if (this.decayTimer !== null || this.decayKickoff !== null) return
+
+    const tick = () => {
+      this.deps.enqueueTask("MemoryMaintenance", () => this.deps.runDecay()).catch((err) => {
+        console.warn("[Memory] L2 权重衰减失败，不影响主流程:", err)
+      })
+    }
+
+    this.decayKickoff = setTimeout(() => {
+      this.decayKickoff = null
+      tick()
+      this.decayTimer = setInterval(tick, intervalMs)
+    }, initialDelayMs)
+    this.decayKickoff.unref?.()
+  }
+
+  stopDailyDecay(): void {
+    if (this.decayKickoff !== null) {
+      clearTimeout(this.decayKickoff)
+      this.decayKickoff = null
+    }
+    if (this.decayTimer !== null) {
+      clearInterval(this.decayTimer)
+      this.decayTimer = null
+    }
+  }
 }
 
 export const memoryScheduler = new MemoryScheduler({
@@ -94,4 +139,5 @@ export const memoryScheduler = new MemoryScheduler({
   replaceL1Field: (field, value) => memoryStore.replaceL1Field(field, value),
   runReflectionAndCompression,
   runResolverQueueOnce,
+  runDecay: () => memoryManager.runDecay(),
 })

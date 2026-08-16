@@ -5,6 +5,7 @@ import { getEmbeddingProvider, resetEmbeddingProvider, EmbeddingProvider, switch
 import { JsonVectorStore } from "./vectorstore";
 import type { MemoryEntry } from "./vectorstore";
 import { HybridRetriever } from "./retriever";
+import { getReranker } from "./reranker";
 import { WorldbookManager } from "./worldbook";
 export { INJECTION_HEADER, INJECTION_PREAMBLE } from "./worldbook-constants";
 import { chunkText } from "./chunk";
@@ -35,8 +36,9 @@ export async function initRAG(
   provider = getEmbeddingProvider(ragMode, cloudBaseUrl, cloudApiKey, embeddingModel);
   store = new JsonVectorStore(dataDir);
   // 只有 provider 存在时才创建 retriever（向量检索依赖 embedding）
+  // reranker 以 getter 注入：跟随 initReranker 的模式热切换，未安装时 getReranker() 为 null 自动降级
   if (provider) {
-    retriever = new HybridRetriever(store, provider);
+    retriever = new HybridRetriever(store, provider, getReranker);
   }
   worldbook = new WorldbookManager(
     path.join(app.getAppPath(), "prompts", "worldbook"),
@@ -121,7 +123,7 @@ export async function switchEmbeddingModel(modelKey: string): Promise<{ ok: bool
     // Update provider reference and retriever
     provider = newProvider;
     if (store) {
-      retriever = new HybridRetriever(store, provider);
+      retriever = new HybridRetriever(store, provider, getReranker);
     }
 
     console.log("[RAG] switched embedding model to", modelKey, "dims:", newDims, "cleared:", clearedEntries);

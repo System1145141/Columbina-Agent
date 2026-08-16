@@ -5644,6 +5644,10 @@ app.whenReady().then(async () => {
     console.warn("[Memory/RAG] startup reconciliation failed:", err);
   }
 
+  // L2 权重每日衰减（时间驱动，与轮次解耦；延迟 60s 避开启动高峰，走 MemoryMaintenance 队列串行）
+  const { memoryScheduler } = await import("./memory/memory-scheduler");
+  memoryScheduler.startDailyDecay();
+
   // Obsidian vault：若已绑定，恢复 Obsidian → PMRS 回流监听
   const obsidianConfig = loadObsidianVaultConfig();
   if (obsidianConfig.vaultPath) {
