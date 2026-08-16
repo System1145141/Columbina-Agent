@@ -20,6 +20,8 @@ import {
   type ChatMessage,
   type ChatSession,
   type ChatSessionMeta,
+  type ChatSessionMode,
+  type ChatSessionPurpose,
 } from "../../shared/chat-types";
 
 const ROOT_DIR_NAME = "columbina-chats";
@@ -104,6 +106,9 @@ function metaFromSession(session: ChatSession): ChatSessionMeta {
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     messageCount: session.messages.length,
+    purpose: session.purpose,
+    mode: session.mode,
+    workspaceRoot: session.workspaceRoot,
   };
 }
 
@@ -156,6 +161,12 @@ export function createSession(opts?: {
   title?: string;
   identityId?: string | null;
   initialMessages?: ChatMessage[];
+  /** 系统用途会话的稳定标识（如主动聊天的专属会话）；普通用户会话不传。 */
+  purpose?: ChatSessionPurpose;
+  /** 会话模式：chat（默认）| learn（Obsidian 学习模式）。 */
+  mode?: ChatSessionMode;
+  /** learn 模式绑定的 Vault 工作区目录（仅 mode === "learn" 时使用）。 */
+  workspaceRoot?: string;
 }): ChatSession {
   const now = Date.now();
   const messages = opts?.initialMessages ?? [];
@@ -167,6 +178,9 @@ export function createSession(opts?: {
     createdAt: now,
     updatedAt: now,
     schemaVersion: CHAT_SCHEMA_VERSION,
+    ...(opts?.purpose ? { purpose: opts.purpose, titleIsCustom: true } : {}),
+    ...(opts?.mode && opts.mode !== "chat" ? { mode: opts.mode } : {}),
+    ...(opts?.mode === "learn" && opts.workspaceRoot ? { workspaceRoot: opts.workspaceRoot } : {}),
   };
   writeSessionFile(session);
   upsertMeta(metaFromSession(session));
@@ -209,6 +223,30 @@ export function renameSession(id: string, title: string): ChatSession | null {
   if (!trimmed) return session;
   session.title = trimmed.slice(0, 80);
   session.titleIsCustom = true;
+  session.updatedAt = Date.now();
+  writeSessionFile(session);
+  upsertMeta(metaFromSession(session));
+  return session;
+}
+
+/**
+ * 设置/切换会话模式（chat | learn）与 learn 模式的 Vault 工作区目录。
+ * mode 非 learn 时清空 workspaceRoot。会话不存在返回 null。
+ */
+export function updateSessionMode(
+  id: string,
+  mode: ChatSessionMode,
+  workspaceRoot?: string | null,
+): ChatSession | null {
+  const session = readSessionFile(id);
+  if (!session) return null;
+  if (mode === "learn") {
+    session.mode = "learn";
+    session.workspaceRoot = workspaceRoot || undefined;
+  } else {
+    session.mode = "chat";
+    delete session.workspaceRoot;
+  }
   session.updatedAt = Date.now();
   writeSessionFile(session);
   upsertMeta(metaFromSession(session));
@@ -259,4 +297,28 @@ export function migrateLegacyMessages(messages: ChatMessage[]): ChatSession | nu
 export async function openStorageFolder(): Promise<void> {
   ensureDirs();
   await shell.openPath(rootDir);
+}
+
+/** 按系统用途会话标识查找会话；不存在返回 null。 */
+export function getSessionByPurpose(purpose: ChatSessionPurpose): ChatSession | null {
+  const meta = indexCache.find((session) => session.purpose === purpose);
+  return meta ? readSessionFile(meta.id) : null;
+}
+
+/**
+ * 获取（不存在则创建）指定用途的会话。
+ * 主进程内 store API 是同步的：查询与创建之间没有 await，
+ * 因此同一事件循环上的并发调用也无法穿插出两个同用途会话。
+ */
+export function getOrCreateSessionByPurpose(
+  purpose: ChatSessionPurpose,
+  opts?: { title?: string; identityId?: string | null },
+): ChatSession {
+  const existing = getSessionByPurpose(purpose);
+  if (existing) return existing;
+  return createSession({
+    title: opts?.title,
+    identityId: opts?.identityId ?? null,
+    purpose,
+  });
 }

@@ -2430,3 +2430,20 @@
   border-color: var(--rb-blue-500) !important;
   box-shadow: 0 0 0 3px var(--rb-blue-100) !important;
 }
+
+/* ===== deep-blue 补齐段 =====
+   deep-blue 是默认主题（tokens.css :root 深色变量），theme.css 只给浅色主题
+   做覆盖。但 settings.css 的 .channels-qr-modal__card 硬编码纯白底，light-blue /
+   pearl-white 上方已有对应覆盖，deep-blue 缺失 —— 这里补齐，避免深色窗口里
+   弹出白色卡片。 */
+[data-ui-theme="deep-blue"] .channels-qr-modal__card {
+  background: var(--rb-bg-2);
+  border: 1px solid var(--rb-border-soft);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.55);
+}
+[data-ui-theme="deep-blue"] .channels-qr-modal__title {
+  color: var(--rb-text-strong);
+}
+[data-ui-theme="deep-blue"] .channels-qr-modal__tip {
+  color: var(--rb-text-muted);
+}

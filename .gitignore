@@ -5,7 +5,7 @@ dist/main/
 dist/preload/
 dist/renderer/assets
 dist/renderer/call/index.html
-dist/renderer/chat/index.html
+dist/renderer/call/index.html
 dist/renderer/settings/index.html
 dist/renderer/sidebar/index.html
 dist/renderer/sticker-manager/index.html
@@ -80,3 +80,7 @@ dist/renderer/ide/index.html
 reasonix.toml
 # electron-builder 安装包输出
 release/
+Cyrene-Agent.code-workspace
+
+# IDE 工作区运行时状态文件（用户自选位置保存，可能落在仓库内）
+*.columbina-workspace.json

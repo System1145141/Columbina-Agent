@@ -21,6 +21,10 @@ import {
 } from "./orchestrator/columbina-agent";
 import { indexConversationTurn } from "./orchestrator/history-tools";
 import type { RelationshipChannel } from "./relationship/relationship-log";
+import * as chatsStore from "./chats/chats-store";
+import { obsidianWorkspace } from "./learn/obsidian/obsidian-workspace-service";
+import { registerObsidianTools, unregisterObsidianTools } from "./learn/obsidian/obsidian-tools";
+import { runLearnPostTurnHook } from "./learn/progress/learn-post-turn";
 
 /** 渲染进程发起 run 时传的输入。 */
 export interface AguiRunInput {
@@ -31,6 +35,12 @@ export interface AguiRunInput {
   channel?: RelationshipChannel;
   /** 本轮附件（文本内容，临时注入系统上下文，不存历史）。 */
   attachments?: { name: string; text: string }[];
+  /**
+   * 图片附件（文件路径形态，UI 移植阶段 P1）。
+   * 主进程在 buildOptions 阶段统一走 caption（独立视觉模型分析），
+   * 把【图片视觉信息】文本拼入最新 user 消息——Columbina run 无图片直发通道。
+   */
+  imageAttachments?: { name: string; filePath: string; mime?: string }[];
   /** 角色身份标识。不传时使用默认（columbina）。 */
   identityId?: string;
   /** 指定使用的模型 ID（模型列表中的 id）。不传时使用全局默认模型。 */
@@ -55,14 +65,25 @@ export type BuildOptionsFn = (input: AguiRunInput) => Promise<{
   latestUserText: string;
 }>;
 
-/** 调用方注入：agent 跑完后的副作用（记忆/sticker/表情/广播）。 */
-export type OnRunFinishedFn = (result: ColumbinaRunResult, latestUserText: string) => Promise<void> | void;
+/** 调用方注入：agent 跑完后的副作用（记忆/sticker/表情/广播）。conversationId = run 的会话 ID（sessionId）。 */
+export type OnRunFinishedFn = (result: ColumbinaRunResult, latestUserText: string, conversationId?: string) => Promise<void> | void;
 
 /** 调用方注入：拿聊天窗口（广播副作用用，可空）。 */
 export type GetChatWindowFn = () => { webContents: WebContents; isDestroyed(): boolean } | null;
 
+/**
+ * 会话生命周期钩子（Proactive 主动聊天消费）。
+ * - onUserMessage：用户发来新消息 → 使正在进行的主动生成失效（防打扰）；
+ * - onConversationStarted / onConversationEnded：标记正常对话忙碌与静默期。
+ */
+export interface AguiConversationLifecycle {
+  onUserMessage(): void;
+  onConversationStarted(): void;
+  onConversationEnded(): void;
+}
+
 /** 单次对话的活跃订阅（用于取消）。键 = runId；值含发起窗口，取消时按窗口过滤。 */
-const activeRuns = new Map<string, { sub: Subscription; sender: WebContents }>();
+const activeRuns = new Map<string, { sub: Subscription; sender: WebContents; endLifecycle?: () => void }>();
 
 // ── 工具确认桥：FC 循环内 needsConfirm 工具执行前，向发起 run 的窗口弹确认卡片 ──
 interface PendingToolApproval {
@@ -158,6 +179,7 @@ export function cancelRunsForWindow(sender: WebContents): void {
   const senderId = sender.id;
   for (const [runId, entry] of activeRuns) {
     if (entry.sender.id !== senderId) continue;
+    entry.endLifecycle?.();
     entry.sub.unsubscribe();
     activeRuns.delete(runId);
   }
@@ -170,6 +192,7 @@ export function registerAgUiIpc(
   buildOptions: BuildOptionsFn,
   onRunFinished: OnRunFinishedFn,
   getChatWindow: GetChatWindowFn,
+  lifecycle?: AguiConversationLifecycle,
 ): void {
   buildOptionsFn = buildOptions;
   getChatWindowFn = getChatWindow;
@@ -181,14 +204,55 @@ export function registerAgUiIpc(
     if (!buildOptionsFn || !onFinished) {
       throw new Error("AG-UI 桥未初始化");
     }
+    // 会话生命周期：用户发来新消息 + 正常对话开始（Proactive 据此失效生成/记忙碌）
+    lifecycle?.onUserMessage();
+    lifecycle?.onConversationStarted();
+    let lifecycleEnded = false;
+    // Learn 模式（mode === "learn" 的会话 run）：注册 Obsidian 工具、run 后静默更新进度。
+    // 声明在 endLifecycle 之前，供其注销工具；run 取消/出错/完成三条路径都会走 endLifecycle。
+    let learnRunActive = false;
+    const endLifecycle = (): void => {
+      if (lifecycleEnded) return;
+      lifecycleEnded = true;
+      // Learn 模式：注销 Obsidian 工具（防止工具泄漏到后续 run 的全局工具集）
+      if (learnRunActive) {
+        try { unregisterObsidianTools(); } catch { /* ignore */ }
+        learnRunActive = false;
+      }
+      lifecycle?.onConversationEnded();
+    };
     const input = rawInput as AguiRunInput;
     // 事件转发目标：优先用 invoke 的 sender（发起 run 的窗口），兜底用聊天窗口
     const sender = event.sender;
-    const { options, latestUserText } = await buildOptionsFn(input);
+    let options: { options: ColumbinaRunOptions; latestUserText: string };
+    try {
+      options = await buildOptionsFn(input);
+    } catch (err) {
+      endLifecycle();
+      throw err;
+    }
+    const { options: runOptions, latestUserText } = options;
+    // Learn 模式：会话 mode === "learn" 且绑定 workspaceRoot 时，配置 Obsidian Vault 并注册工具。
+    // 桌面聊天 run 未传 options.tools（回退全局注册表），注册后本轮即可调用；
+    // IDE / talk / noTools 的 run 显式指定 tools，不受影响。
+    const learnSession = input.sessionId ? chatsStore.getSession(input.sessionId) : null;
+    if (learnSession?.mode === "learn" && learnSession.workspaceRoot) {
+      obsidianWorkspace.configure({
+        enabled: true,
+        vaultPath: learnSession.workspaceRoot,
+      });
+      try {
+        registerObsidianTools();
+        learnRunActive = true;
+        console.log("[Learn] Obsidian 工具已注册，Vault:", learnSession.workspaceRoot);
+      } catch (err) {
+        console.warn("[Learn] Obsidian 工具注册失败：", err);
+      }
+    }
     // IDE 模式：注入工具确认桥（needsConfirm 工具先经渲染层确认卡片把关）。
     // 仅只读工具的后台 run（confirmed === false）不需要确认桥。
     if (input.ideTools && input.ideTools.confirmed !== false) {
-      options.toolApprovalHandler = (req) => requestToolApproval(sender, req);
+      runOptions.toolApprovalHandler = (req) => requestToolApproval(sender, req);
     }
 
     const threadId = `thread-${Date.now()}`;
@@ -215,7 +279,7 @@ export function registerAgUiIpc(
 
     // 订阅 agent 事件流：每个事件透传渲染端；
     // complete/error 时做副作用，并补发一个终态事件让渲染端知道这轮结束。
-    const sub = agent.runWithEvents(options).subscribe({
+    const sub = agent.runWithEvents(runOptions).subscribe({
       next: (baseEvent) => {
         // sticker / memory 等副作用在 complete 回调里执行。前端收到 RUN_FINISHED 后会收尾并取消监听，
         // 所以必须把 RUN_FINISHED 延后到副作用事件之后发送，否则 columbina.sticker 会晚到而被丢掉。
@@ -230,13 +294,17 @@ export function registerAgUiIpc(
         console.error("[AgUiBridge] run 失败:", message);
         // 补发 RUN_ERROR 事件，渲染端据此收尾（invoke 早已 resolve，靠事件驱动）
         send({ type: "RUN_ERROR", error: message, threadId, runId });
+        endLifecycle();
         activeRuns.delete(runId);
       },
       complete: async () => {
+        // 先捕获 learn 标记（endLifecycle 会注销工具并复位）
+        const isLearnRun = learnRunActive;
+        endLifecycle();
         activeRuns.delete(runId);
         try {
           if (agent.lastResult) {
-            await onFinished(agent.lastResult, latestUserText);
+            await onFinished(agent.lastResult, latestUserText, input.sessionId);
             // 历史召回用：把这轮对话存入向量库（异步，不阻塞，失败不影响主流程）
             // 放在 onFinished 之后，确保记忆/sticker 等副作用先跑完
             void indexConversationTurn(
@@ -244,6 +312,16 @@ export function registerAgUiIpc(
               latestUserText,
               agent.lastResult.reply,
             );
+
+            // Learn 模式：静默更新学习进度（异步，不阻塞，失败不影响主流程）
+            if (isLearnRun) {
+              const systemMessage = runOptions.messages.find((m) => m.role === "system");
+              void runLearnPostTurnHook({
+                systemPrompt: systemMessage?.content ?? "",
+                userMessage: latestUserText,
+                assistantMessage: agent.lastResult.reply,
+              });
+            }
           }
         } catch (err) {
           console.warn("[AgUiBridge] 副作用失败（不影响结果）:", err);
@@ -253,7 +331,7 @@ export function registerAgUiIpc(
         }
       },
     });
-    activeRuns.set(runId, { sub, sender });
+    activeRuns.set(runId, { sub, sender, endLifecycle });
 
     // invoke 立刻返回 ack，不等 Observable 结束。
     // 终态（RUN_FINISHED/RUN_ERROR）由事件流承载，渲染端据此 offEvent + 收尾。

@@ -25,8 +25,9 @@ const VISION_TIMEOUT_MS = 30_000;
  * 构造框架指令。判断全交给视觉模型——它本身是语言模型，
  * 理解"几只猫"是要数数、"有没有错别字"是 OCR，比本地正则/分类都准。
  * 指令含简洁约束，防止长文本回灌撑爆主模型上下文（连续看多图时尤其关键）。
+ * 导出供单测覆盖 prompt 构建纯逻辑。
  */
-function buildInstruction(userQuery: string): string {
+export function buildInstruction(userQuery: string): string {
   if (userQuery && userQuery.trim()) {
     return (
       "你是图片分析助手。用户给你一张图，用户的问题如下：\n" +

@@ -44,7 +44,11 @@ function resolveText(key: string, l: Lang, vars?: Record<string, string>): strin
   if (typeof node !== "string") return key;
 
   const mergedVars = { ...globalVars, ...vars };
-  return node.replace(/\{\{(\w+)\}\}/g, (_, k: string) => mergedVars[k] ?? `{{${k}}}`);
+  // 同时支持 {{var}}（经典用法）与 {var}（React 聊天窗口新 key 用法）；
+  // 无对应变量时原样保留占位符，vanilla 侧手动 .replace() 的调用不受影响。
+  return node
+    .replace(/\{\{(\w+)\}\}/g, (_, k: string) => mergedVars[k] ?? `{{${k}}}`)
+    .replace(/\{(\w+)\}/g, (_, k: string) => mergedVars[k] ?? `{${k}}`);
 }
 
 /** 获取翻译文本

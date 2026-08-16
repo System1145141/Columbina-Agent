@@ -1,7 +1,7 @@
 # Columbina-IDE 交接文档（HANDOVER）
 
 > 目标读者：没有任何本项目上下文的 AI 或开发者。本文汇总**近期完成的核心变更**、架构地图、关键机制与踩坑记录，看完即可接手继续开发。
-> 配套文档：[AGENTS.md](AGENTS.md)（发展计划，随功能更新）、`Reordering Context System.md`（跨轮历史上下文方案）。
+> 配套文档：[AGENTS.md](AGENTS.md)（发展计划，随功能更新）、`Reordering Context System.md`（跨轮历史上下文方案）、[docs/ui-port-plan.md](docs/ui-port-plan.md)（聊天窗口 React UI 移植记录）、[docs/migration-plan.md](docs/migration-plan.md)（功能迁移记录）。
 
 ---
 
@@ -24,7 +24,7 @@ npm run start        # 直接用 dist 启动
 **重要坑**：
 - 渲染层走 vite（esbuild），**不做类型检查**——TS 错误可能漏过 build。改渲染层后用 IDE 诊断（GetDiagnostics）检查。
 - **主进程不热重载**：vite HMR 只更新渲染层。改了 `src/main/**` 必须重启应用才生效。
-- 应用版本号在 `src/shared/version.ts`（当前 1.1.5）。
+- 应用版本号在 `src/shared/version.ts`（当前 2.0.0）。
 
 ---
 
@@ -111,6 +111,29 @@ npm run start        # 直接用 dist 启动
 4. **`No handler registered` 教训**：改完主进程要 grep 验证调用点存在 + 检查 dist 编译产物，且**必须重启应用**（主进程不热重载）。
 5. 渲染层 `agentToolConfirmResult` 回传 invoke 已加 `.catch` 兜底。
 
+### 3.8 聊天窗口 React UI 移植（全量替换 vanilla，最新核心变更）
+
+**背景**：参照上游 Cyrene-Agent 的 React 19 + antd 6 + @ant-design/x 聊天窗口（Bubble / Think / ThoughtChain / CodeHighlighter + XMarkdown + shiki），把 Columbina 聊天窗口从手写 vanilla DOM（`src/renderer/chat/main.ts`，3313 行）**全量替换为 React 版**，同时保留 Columbina 独有功能（双角色、四语 i18n、三主题、表情包、六引擎 TTS、学习模式、AG-UI 卡片）。逐阶段记录见 [docs/ui-port-plan.md](docs/ui-port-plan.md)（阶段 A~E + 打磨批次 P1，全部完成）。
+
+**新增文件与入口**：
+- `src/renderer/react/`：React 聊天窗口（vite 入口 `chat-react`）。核心：`features/chat/pages/ChatPage.tsx`（runModel / onEvent 分发器 / 接力状态机）、`ChatComposer.tsx`、`ChatMessageList.tsx`、`ConversationSidebar.tsx`、`features/chat/tts/`（early-tts-queue 等）、`styles/theme-overrides.css`（三主题映射 + deep-blue 组件覆盖）。
+- `src/preload/react-bridge.ts`：**preload 适配层**——`chatStore`/`agui` 桥接 + CUSTOM 事件映射 + TTS 会话式桥。核心职责：把 Cyrene 侧调用契约翻译成 Columbina 的 IPC/事件（主进程零改动）。
+- `src/shared/chat-types-react.ts`：React 侧类型；`src/shared/chat-types.ts` 的 `ChatMessage` 补 `identityId`（落盘持久化，兼容旧数据）。
+- 旧 `src/renderer/chat/`（5 文件）已删除；`createChatWindow` 恒加载 `/react/`（`src/main/index.ts`）。
+
+**关键机制**：
+- **双角色**：`RoleToggle`（哥伦比娅/桑多涅 + 各自独立模型下拉，复用 `modelConfig.selectedModelIds`）；ChatPage `currentRole` → runModel 传 `identityId`/`modelId`；消息按 `identityId` 渲染角色头像（资源 `src/renderer/public/avatars/{Columbina,Sandrone}.jpg` → 构建到 `dist/renderer/avatars/`）。
+- **自动接力**：`features/chat/pages/handoff.ts`（纯函数 + 8 测试）——回复含 `[HANDOFF:CONTINUE]` 时自动切另一角色回复（读 `settings.getGeneral` 的 `agentAutoHandoff`/`maxHandoffRounds`，默认关 / 最多 1 轮；接力提示 `[system:handoff]` 不进本地历史；防死循环）。
+- **AG-UI 卡片**：weather（小卡 + 15 日预览）、choice（Ask 卡）、botMessage（渠道消息镜像，用户侧渠道徽标）、music（完整音乐卡含 `window.music.playTrack`）。事件名映射集中在 `react-bridge.ts` 的 `mapAguiEvent`。
+- **TTS**：`react-bridge.ts` 的 `tts` 桥——minimax 走 `streamStart` 流式（单活跃流路由 + `conversationId:messageId→cacheKey` 磁盘缓存回听），其余引擎（gptsovits/custom-cloud/mimo/mossland）走 `synthesizeCached*` 一次性 ready；参数映射 `buildTtsSynthesizePayload` 纯函数（8 测试）。
+- **i18n**：`src/shared/i18n/*.json` 各增 229 个 `reactChat.*` key（4 语 key 集合一致）；`t()` 支持 `{var}` 插值；入口 `bootstrapI18n()`（`window.__LANG__` → `loadLangBundle` → 挂载根组件）+ `columbinaI18n.onReload` → reload 即时生效。
+- **图片附件闭环**（P1）：`chat:get-image-send-strategy` / `chat:caption-image` / `chat:get-image-preview` IPC + preload 三方法 + `src/main/orchestrator/vision-captioner.ts`（复用 `loadVisionConfig`，与 `read_image`/`testVision` 同链路）+ `AguiRunInput.imageAttachments` 透传 + `buildAgentRunOptions` 把图片描述以【图片视觉信息】拼入系统上下文（失败诚实降级）。策略恒 caption（主进程无图片直发通道，`decideImageSendStrategy` 保留 direct 扩展点）。
+- **深色主题**：`theme-overrides.css` 的 deep-blue 块（约 90 条组件级覆盖，硬编码浅色 → 深海军蓝 `#11183a/#192154/#222c66` 系）+ antd `ConfigProvider` darkAlgorithm（`app/providers/AppProviders.tsx`）+ vanilla `theme.css` 补微信扫码弹窗白卡（`.channels-qr-modal__card`）。weather-card 自带暗色变体不动。
+- **长会话懒渲染**：消息 >80 条时按滚动位置渲染可见窗口（±14 条缓冲 + 估算高度 spacer），无新依赖。
+- 已知缺口：文档摄入无进度条（`chat:ingest-files` 链路本身无进度事件，与 vanilla 行为一致）；图片恒 caption 策略。
+
+**验证**：`npm run build` 全绿；`npm test` **945/945（125 文件）**；冒烟启动聊天窗口无 Uncaught/TypeError（仅既有 CSP 警告与 Live2D 模型资源缺失日志）。git：阶段 A/B `551d916`、阶段 C/D/E `8074a3f` 已提交；P1 + 深色适配 + 头像/StatusFloat 微调未提交（待用户确认）。
+
 ---
 
 ## 4. 架构速览（关键文件地图）
@@ -137,6 +160,13 @@ npm run start        # 直接用 dist 启动
 - `components/ai-panel.ts`：AI 面板 UI + 流式渲染 + 确认卡片 + 会话菜单。
 - `components/editor-pane.ts`（CodeMirror + 编辑器右键菜单 + inline chat/补全）、`terminal-panel.ts`（xterm + 终端右键菜单）、`file-tree.ts`（文件树 + 右键菜单）、`git-panel.ts`、`command-palette.ts`、`lsp-integration.ts`、`refactor-preview.ts`、`diff-view.ts`、`inline-completion.ts`。
 - `ide.css`：全部 IDE 样式。
+
+**渲染层聊天（`src/renderer/react/`，React 19 + antd 6 + @ant-design/x，vite 入口 `chat-react`）**
+- `features/chat/pages/ChatPage.tsx`：聊天页主控（runModel / onEvent 分发 / 接力状态机 / 拖拽摄入）；`features/chat/pages/handoff.ts`：自动接力纯函数（HANDOFF 正则/角色切换/防死循环）。
+- `features/chat/components/`：ChatComposer（Sender + 贴纸/附件/图片）、ChatMessageList（气泡/思维链折叠/工具行/角色头像/懒渲染）、ConversationSidebar（会话列表/右键菜单/learn 📚 徽标）、tts-playback + early-tts-queue、weather/music 卡片、run-presentation（describeRunStage）。
+- `app/providers/AppProviders.tsx`：antd ConfigProvider 主题（deep-blue → darkAlgorithm）；`styles/theme-overrides.css`：三主题 `--cy-*` 映射 + deep-blue 组件级覆盖。
+- `src/preload/react-bridge.ts`：preload 适配层（chatStore/agui/TTS 桥 + `mapAguiEvent` CUSTOM 事件映射 + `buildTtsSynthesizePayload`）。
+- 静态资源：`src/renderer/public/`（avatars/stickers/models/status 等）→ vite 构建到 `dist/renderer/`，渲染层经 `resolveAsset()`（`src/shared/renderer-base.ts`）解析。
 
 **AG-UI 事件流**（渲染层 `window.agui.onEvent` 订阅）
 `RUN_STARTED` → 每轮 `STEP_STARTED` → （模型调用工具时）`TOOL_CALL_START/RESULT/END` → `TEXT_MESSAGE_START/CONTENT(逐片)/END` → `RUN_FINISHED`；推理时 `REASONING_MESSAGE_START/CONTENT/END`。错误发 `RUN_ERROR`。
@@ -173,3 +203,9 @@ npm run start        # 直接用 dist 启动
 5. 工具确认桥的卡 UI 在 `ai-panel.ts`，结果回传必须带 `requestId`；主进程 120s 超时自动拒绝是兜底不是正常路径。
 6. `callAgentStream` 的 `tools` 参数三态：主对话 full / 规划 read / 摘要与补全 none（避免后台 run 弹确认卡片）。
 7. 会话持久化在 `workspace-service.ts`，新增 AiMessage 字段会自动透传（JSON 序列化），无需改白名单。
+
+**React 聊天窗口专属**：
+8. `src/renderer/react/**` 走 vite（esbuild）不类型检查，改完用 IDE 诊断；vite 入口名 `chat-react`，单独跑 `npm run build:renderer` 即可验证。
+9. 头像等静态资源在 `src/renderer/public/`（构建到 `dist/renderer/` 根），渲染层用 `resolveAsset("avatars/x.jpg")` 解析。`src/shared/renderer-base.ts` 的子目录回退列表**必须包含 `react/`**——否则 React 窗口资源路径少跳一级 → 404。
+10. AG-UI CUSTOM 事件名映射集中在 `src/preload/react-bridge.ts` 的 `mapAguiEvent`；新增事件按「`columbina.*` 直发」或「改名映射」二选一接线，保持与 ChatPage 的 onEvent 分发器一致。
+11. 深色主题 = `theme-overrides.css` 的 `[data-ui-theme="deep-blue"]` 组件覆盖（只追加、不改亮色值）+ antd ConfigProvider darkAlgorithm；新增组件若硬编码浅色背景，记得在覆盖段补一条。

@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { IPC } from "../shared/ipc-channels";
+import { exposeMusicApi } from "./music";
+import { createReactBridge } from "./react-bridge";
 
 // 主进程通过 additionalArguments 注入当前语言，供 renderer 初始化 i18n 使用。
 const langArg =
@@ -61,6 +63,25 @@ const chatApi = {
     if (paths.length === 0) return [];
     return ipcRenderer.invoke(IPC.CHAT_INGEST_FILES, paths);
   },
+  /** 后台文档索引：大文件经队列切分 + embedding + 写入向量库，进度经 onDocumentIndexProgress 订阅 */
+  processDocuments: (filePaths: string[], query: string) =>
+    ipcRenderer.invoke(IPC.CHAT_PROCESS_DOCUMENTS, { filePaths, query }),
+  onDocumentIndexProgress: (callback: (progress: unknown) => void) => {
+    const listener = (_event: unknown, progress: unknown) => callback(progress);
+    ipcRenderer.on(IPC.CHAT_DOCUMENT_INDEX_PROGRESS, listener);
+    return () => ipcRenderer.removeListener(IPC.CHAT_DOCUMENT_INDEX_PROGRESS, listener);
+  },
+  cancelDocumentIndex: (jobId: string) =>
+    ipcRenderer.invoke(IPC.CHAT_CANCEL_DOCUMENT_INDEX, { jobId }) as Promise<boolean>,
+  /** 图片附件发送策略：返回 { mode: "direct" | "caption" }（Columbina 无图片直发通道，恒 caption）。 */
+  getImageSendStrategy: () =>
+    ipcRenderer.invoke(IPC.CHAT_GET_IMAGE_SEND_STRATEGY) as Promise<{ mode: "direct" | "caption" }>,
+  /** 图片描述：调视觉模型生成文本描述（供附件展示与模型上下文）。 */
+  captionImage: (filePath: string, hasAnnotations = false) =>
+    ipcRenderer.invoke(IPC.CHAT_CAPTION_IMAGE, { filePath, hasAnnotations }) as Promise<{ ok: boolean; caption?: string; error?: string }>,
+  /** 图片预览：返回 dataUrl 供消息气泡内联展示。 */
+  getImagePreview: (filePath: string) =>
+    ipcRenderer.invoke(IPC.CHAT_GET_IMAGE_PREVIEW, { filePath }) as Promise<{ ok: boolean; dataUrl?: string; error?: string }>,
   onStreamChunk: (cb: (chunk: string) => void) => { ipcRenderer.on(IPC.CHAT_STREAM_CHUNK, (_e: unknown, chunk: string) => cb(chunk)); },
   onStreamDone: (cb: (payload: unknown) => void) => { ipcRenderer.on(IPC.CHAT_STREAM_DONE, (_e: unknown, payload: unknown) => cb(payload)); },
   removeStreamListeners: () => { ipcRenderer.removeAllListeners(IPC.CHAT_STREAM_CHUNK); ipcRenderer.removeAllListeners(IPC.CHAT_STREAM_DONE); },
@@ -458,6 +479,11 @@ const userApi = {
   saveProfile: (profile: unknown) => ipcRenderer.invoke(IPC.USER_SAVE_PROFILE, profile),
   uploadAvatar: () => ipcRenderer.invoke(IPC.USER_UPLOAD_AVATAR),
   getAvatar: () => ipcRenderer.invoke(IPC.USER_GET_AVATAR),
+  // React 聊天窗口（ui-port-plan 阶段 A）需要这两个订阅；Columbina 主进程暂无
+  // 头像/资料变更广播通道，先提供 no-op（getProfile/getAvatar 拉取仍可用），
+  // 实时跨窗口联动在阶段 B 补广播后接入。
+  onAvatarChanged: (_callback: () => void) => () => {},
+  onProfileChanged: (_callback: (profile: unknown) => void) => () => {},
 };
 
 const memoryPanelApi = {
@@ -465,6 +491,13 @@ const memoryPanelApi = {
   deleteImportedDoc: (importId: string, fileName?: string) => ipcRenderer.invoke(IPC.MEMORY_PANEL_DELETE_IMPORTED_DOC, { importId, fileName }),
   saveL0: (patch: Record<string, unknown>) => ipcRenderer.invoke(IPC.MEMORY_PANEL_SAVE_L0, patch),
   saveL1: (patch: Record<string, unknown>) => ipcRenderer.invoke(IPC.MEMORY_PANEL_SAVE_L1, patch),
+  // Obsidian vault 双向同步
+  exportToVault: () => ipcRenderer.invoke(IPC.MEMORY_EXPORT_OBSIDIAN_VAULT),
+  bindVault: () => ipcRenderer.invoke(IPC.OBSIDIAN_VAULT_BIND),
+  unbindVault: () => ipcRenderer.invoke(IPC.OBSIDIAN_VAULT_UNBIND),
+  getVaultConfig: () => ipcRenderer.invoke(IPC.OBSIDIAN_VAULT_GET_CONFIG),
+  setAutoSync: (enabled: boolean) => ipcRenderer.invoke(IPC.OBSIDIAN_VAULT_SET_AUTO_SYNC, enabled),
+  syncNow: () => ipcRenderer.invoke(IPC.OBSIDIAN_VAULT_SYNC_NOW),
 };
 
 contextBridge.exposeInMainWorld("user", userApi);
@@ -519,8 +552,13 @@ contextBridge.exposeInMainWorld("openerBridge", openerApi);
 const chatStoreApi = {
   list: () => ipcRenderer.invoke(IPC.CHATS_LIST),
   get: (id: string) => ipcRenderer.invoke(IPC.CHATS_GET, id),
-  create: (payload?: { title?: string; identityId?: string | null }) =>
+  create: (payload?: { title?: string; identityId?: string | null; mode?: "chat" | "learn"; workspaceRoot?: string }) =>
     ipcRenderer.invoke(IPC.CHATS_CREATE, payload ?? {}),
+  // 设置/切换会话模式（chat | learn）与 learn 模式的 Vault 工作区目录
+  setMode: (id: string, mode: "chat" | "learn", workspaceRoot?: string | null) =>
+    ipcRenderer.invoke(IPC.CHATS_SET_MODE, { id, mode, workspaceRoot }),
+  // 为 learn 模式选择 Vault 工作区目录（系统目录选择对话框）
+  pickVaultFolder: () => ipcRenderer.invoke(IPC.CHATS_PICK_VAULT_FOLDER) as Promise<string | null>,
   append: (id: string, message: unknown) =>
     ipcRenderer.invoke(IPC.CHATS_APPEND, { id, message }),
   replaceMessages: (id: string, messages: unknown[]) =>
@@ -613,6 +651,26 @@ const ttsApi = {
     apiKey: string; voiceAudioPath?: string; text: string; stylePrompt?: string;
     expectedCacheKey?: string;
   }) => ipcRenderer.invoke(IPC.TTS_SYNTHESIZE_CACHED_MIMO, payload),
+  // Mossland TTS（api.mosi.cn，POST /v1/audio/speech）
+  synthesizeMossland: (payload: {
+    apiKey: string; voiceId: string; text: string;
+    speed?: number; volume?: number; model?: string;
+    format?: "mp3" | "wav" | "pcm";
+  }) => ipcRenderer.invoke(IPC.TTS_SYNTHESIZE_MOSSLAND, payload),
+  synthesizeCachedMossland: (payload: {
+    apiKey: string; voiceId: string; text: string;
+    speed?: number; volume?: number; model?: string;
+    format?: "mp3" | "wav" | "pcm";
+    expectedCacheKey?: string;
+  }) => ipcRenderer.invoke(IPC.TTS_SYNTHESIZE_CACHED_MOSSLAND, payload),
+  // Mossland 音色克隆（POST /v1/audio/voices，multipart 上传本地文件）
+  cloneMossland: (payload: {
+    apiKey: string; filePath: string; name?: string; description?: string;
+  }) => ipcRenderer.invoke(IPC.TTS_CLONE_MOSSLAND, payload),
+  // Mossland 拉取账号下音色列表（GET /v1/audio/voices）
+  listMosslandVoices: (payload: {
+    apiKey: string; limit?: number;
+  }) => ipcRenderer.invoke(IPC.TTS_LIST_MOSSLAND_VOICES, payload),
   // 选择音频文件（复用 TTS_PICK_AUDIO，gptsovits 选 ref audio 也用这个）
   pickAudioFile: () => ipcRenderer.invoke(IPC.TTS_PICK_AUDIO),
   // 流式语音合成（边合成边播）
@@ -659,9 +717,15 @@ const gameBotApi = {
 };
 contextBridge.exposeInMainWorld("gameBot", gameBotApi);
 
+// 网易云音乐（Music）：登录 / 搜索 / 播放 / 歌单（settings 音乐面板 + 聊天卡片用）
+exposeMusicApi();
+
 // i18n 国际化翻译包加载
 const i18nApi = {
   getBundle: (lang: string) => ipcRenderer.invoke(IPC.I18N_GET_BUNDLE, lang),
 };
 contextBridge.exposeInMainWorld("getI18nBundle", i18nApi.getBundle);
+
+// UI 移植（阶段 A 骨架）：React 聊天窗口的接口适配层（Phase B 填充映射实现）
+contextBridge.exposeInMainWorld("reactBridge", createReactBridge());
 

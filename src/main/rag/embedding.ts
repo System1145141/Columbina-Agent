@@ -4,11 +4,24 @@ import * as path from "path";
 import * as os from "os";
 
 // ── 类型 ──
+export type EmbeddingProviderIdentity = {
+  provider: string;
+  model: string;
+  dimensions: number;
+  endpoint?: string;
+};
+
+export type EmbeddingWorkerConfig =
+  | { provider: "local"; modelKey: string }
+  | { provider: "openai-compat"; baseUrl: string; apiKey: string; model: string };
+
 export interface EmbeddingProvider {
   embed(text: string): Promise<number[]>;
   embedBatch(texts: string[]): Promise<number[][]>;
   readonly dims: number;
   readonly name: string;
+  readonly cacheIdentity?: EmbeddingProviderIdentity;
+  readonly workerConfig?: EmbeddingWorkerConfig;
 }
 
 // ── 模型注册表 ──
@@ -68,6 +81,12 @@ export function createLocalEmbeddingProvider(modelKey?: string): EmbeddingProvid
   return {
     name: "local-" + config.hfName.split("/").pop(),
     dims: config.dims,
+    cacheIdentity: {
+      provider: "local",
+      model: config.hfName,
+      dimensions: config.dims,
+    },
+    workerConfig: { provider: "local", modelKey: key },
 
     async embed(text: string): Promise<number[]> {
       const pipe = await getLocalPipeline(key);
@@ -91,13 +110,54 @@ export function createLocalEmbeddingProvider(modelKey?: string): EmbeddingProvid
 export function createOpenAIEmbeddingProvider(
   baseUrl: string,
   apiKey: string,
-  model = "text-embedding-ada-002"
+  model = "text-embedding-ada-002",
+  declaredDimensions?: number
 ): EmbeddingProvider {
-  const endpoint = baseUrl.replace(/\/+$/, "") + "/embeddings";
+  const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
+  const endpoint = normalizedBaseUrl + "/embeddings";
+
+  // 维度状态：可能由用户声明，也可能在首次调用后自动探测
+  let resolvedDims: number | undefined = declaredDimensions;
+
+  function getDims(): number {
+    if (resolvedDims !== undefined) return resolvedDims;
+    throw new Error("Embedding dimensions not yet resolved — call embed() first");
+  }
+
+  function resolveDimensions(embedding: number[], context: string): void {
+    if (resolvedDims === undefined) {
+      resolvedDims = embedding.length;
+    } else if (resolvedDims !== embedding.length) {
+      throw new Error(`Embedding dimension mismatch: ${context} — declared ${resolvedDims}, got ${embedding.length}`);
+    }
+  }
 
   return {
     name: "openai-compat-" + model,
-    dims: 1536,
+
+    get dims() {
+      return getDims();
+    },
+
+    get cacheIdentity(): EmbeddingProviderIdentity | undefined {
+      // 维度未探测前返回 undefined（identity 依赖真实维度）
+      if (resolvedDims === undefined) return undefined;
+      return {
+        provider: "openai-compat",
+        model,
+        dimensions: resolvedDims,
+        endpoint: normalizedBaseUrl,
+      };
+    },
+
+    get workerConfig(): EmbeddingWorkerConfig {
+      return {
+        provider: "openai-compat",
+        baseUrl: normalizedBaseUrl,
+        apiKey,
+        model,
+      };
+    },
 
     async embed(text: string): Promise<number[]> {
       const res = await fetch(endpoint, {
@@ -112,7 +172,9 @@ export function createOpenAIEmbeddingProvider(
         throw new Error("Embedding API error: " + res.status + " " + await res.text());
       }
       const data = await res.json() as { data: Array<{ embedding: number[] }> };
-      return data.data[0].embedding;
+      const embedding = data.data[0].embedding;
+      resolveDimensions(embedding, `embed() for model "${model}"`);
+      return embedding;
     },
 
     async embedBatch(texts: string[]): Promise<number[][]> {
@@ -128,7 +190,11 @@ export function createOpenAIEmbeddingProvider(
         throw new Error("Embedding API error: " + res.status + " " + await res.text());
       }
       const data = await res.json() as { data: Array<{ embedding: number[] }> };
-      return data.data.map((d) => d.embedding);
+      const embeddings = data.data.map((d) => d.embedding);
+      for (const emb of embeddings) {
+        resolveDimensions(emb, `embedBatch() for model "${model}"`);
+      }
+      return embeddings;
     },
   };
 }
@@ -147,20 +213,64 @@ export function getEmbeddingProvider(
   if (mode === "local") {
     cachedProvider = createLocalEmbeddingProvider(modelKey);
   } else if (mode === "cloud" && cloudBaseUrl && cloudApiKey) {
-    cachedProvider = createOpenAIEmbeddingProvider(cloudBaseUrl, cloudApiKey);
+    cachedProvider = createOpenAIEmbeddingProvider(cloudBaseUrl, cloudApiKey, modelKey);
   } else {
     // auto 模式：优先 local，local 不存在且 cloud 配置完整时用 cloud，否则 null
     const local = createLocalEmbeddingProvider(modelKey);
     if (local) {
       cachedProvider = local;
     } else if (cloudBaseUrl && cloudApiKey) {
-      cachedProvider = createOpenAIEmbeddingProvider(cloudBaseUrl, cloudApiKey);
+      cachedProvider = createOpenAIEmbeddingProvider(cloudBaseUrl, cloudApiKey, modelKey);
     } else {
       cachedProvider = null;
     }
   }
 
   return cachedProvider;
+}
+
+/**
+ * 获取当前 embedding provider 的 identity（provider / model / dimensions / endpoint）。
+ * 本地模型维度恒已知；cloud provider 的维度在首次 embed() 后才会探测，
+ * 未探测时调用本函数会抛错（调用方应按缓存未命中降级）。
+ */
+export async function getEmbeddingProviderIdentity(): Promise<EmbeddingProviderIdentity> {
+  const provider = getEmbeddingProvider();
+  if (!provider) throw new Error("Embedding provider is not available");
+
+  if (provider.cacheIdentity) return provider.cacheIdentity;
+
+  // 兼容无 cacheIdentity 的 provider：按名称从本地模型表推断
+  const localModel = Object.values(LOCAL_MODELS).find(
+    (model) => provider.name === "local-" + model.hfName.split("/").pop(),
+  );
+  if (localModel) {
+    return {
+      provider: "local",
+      model: localModel.hfName,
+      dimensions: provider.dims,
+    };
+  }
+
+  const cloudModelPrefix = "openai-compat-";
+  if (provider.name.startsWith(cloudModelPrefix)) {
+    throw new Error(
+      "Embedding dimensions not yet resolved for cloud provider. " +
+      "Call embed() first, or declare dimensions in settings."
+    );
+  }
+
+  throw new Error("Embedding dimensions not yet resolved for provider: " + provider.name);
+}
+
+/**
+ * 获取传递给文档索引 worker 线程的 embedding 配置（worker 内重建 provider 用）。
+ */
+export function getEmbeddingWorkerConfig(): EmbeddingWorkerConfig {
+  const provider = getEmbeddingProvider();
+  if (!provider) throw new Error("Embedding provider is not available");
+  if (provider.workerConfig) return provider.workerConfig;
+  return { provider: "local", modelKey: currentModelKey };
 }
 
 export function getCurrentModelKey(): string {

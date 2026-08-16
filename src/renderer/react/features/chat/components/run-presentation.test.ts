@@ -1,0 +1,305 @@
+import { describe, expect, it } from "vitest";
+import {
+  buildAskSubmission,
+  createAskDrafts,
+  describePermissionRequest,
+  describeRunStage,
+  isAskComplete,
+  normalizeChoiceInteraction,
+  normalizeTaskPlanPresentation,
+  resolveComposerSlot,
+  selectAskOption,
+  shouldDismissAsk,
+  updateAskCustomText,
+  type ComposerInteraction,
+} from "./run-presentation";
+import * as runPresentation from "./run-presentation";
+import { loadBundle } from "../../../../../shared/i18n";
+import zhCN from "../../../../../shared/i18n/zh-CN.json";
+
+// describeRunStage / describePermissionRequest 等已改为 t() 输出，
+// 先加载 zh-CN 语言包，断言中文文案。
+loadBundle(zhCN as Record<string, unknown>);
+
+describe("work run presentation", () => {
+  it("replaces the composer only while an ask or permission interaction is pending", () => {
+    const ask: ComposerInteraction = {
+      kind: "ask",
+      id: "ask-1",
+      question: "你想先处理哪一项？",
+      options: [{ id: "one", label: "第一项" }],
+    };
+    const permission: ComposerInteraction = {
+      kind: "permission",
+      id: "approve-1",
+      toolName: "write_word",
+      summary: "在工作区创建报告",
+    };
+
+    expect(resolveComposerSlot(undefined)).toBe("composer");
+    expect(resolveComposerSlot(ask)).toBe("ask");
+    expect(resolveComposerSlot(permission)).toBe("permission");
+  });
+
+  it("keeps internal routing out of the user-facing stage copy", () => {
+    expect(describeRunStage({ kind: "understanding" })).toBe("哥伦比娅正在理解需求…");
+    expect(describeRunStage({ kind: "planning" })).toBe("哥伦比娅正在规划任务…");
+    expect(describeRunStage({ kind: "executing", detail: "查询淄博天气" }))
+      .toBe("哥伦比娅正在执行：查询淄博天气…");
+    expect(describeRunStage({ kind: "waiting_permission" })).toBe("哥伦比娅正在获取审批…");
+    expect(describeRunStage({ kind: "waiting_user" })).toBe("哥伦比娅正在询问…");
+    expect(describeRunStage({ kind: "responding" })).toBe("哥伦比娅正在组织回复…");
+  });
+
+  it("reduces permission requests to the action a person needs to approve", () => {
+    expect(describePermissionRequest({
+      toolId: "weather",
+      toolName: "查天气",
+      args: { city: "淄博" },
+    })).toBe("查询淄博天气");
+    expect(describePermissionRequest({
+      toolId: "web_search",
+      toolName: "搜索网页",
+      args: { query: "今天的科技新闻" },
+    })).toBe("搜索“今天的科技新闻”");
+    expect(describePermissionRequest({
+      toolId: "write_word",
+      toolName: "写入 Word",
+      args: { filename: "日报.docx" },
+    })).toBe("创建 Word 文档：日报.docx");
+    expect(describePermissionRequest({
+      toolId: "unknown_tool",
+      toolName: "自定义操作",
+      args: {},
+    })).toBe("执行「自定义操作」");
+  });
+
+  it("turns a pending Code verification command into the shared approval slot", () => {
+    const normalize = (runPresentation as typeof runPresentation & {
+      normalizeCodeVerificationInteraction?: (value: unknown) => ComposerInteraction | undefined;
+    }).normalizeCodeVerificationInteraction;
+
+    expect(normalize?.({
+      approvalId: "verification-1",
+      runId: "run-1",
+      chatSessionId: "chat-1",
+      clineSessionId: "cline-1",
+      stepId: "step-1",
+      trust: "workspace_script",
+      executable: "npm",
+      args: ["test"],
+      cwd: "C:\\repo",
+      source: "package_script",
+      status: "pending",
+      createdAt: 1,
+    })).toEqual({
+      kind: "permission",
+      id: "verification-1",
+      source: "code_verification",
+      sessionId: "chat-1",
+      toolName: "验证命令",
+      summary: "npm test",
+      workspaceName: "C:\\repo",
+      targetPath: "package_script",
+    });
+  });
+
+  it("turns a Cline Ask into the shared Ask slot with custom input", () => {
+    const normalize = (runPresentation as typeof runPresentation & {
+      normalizeCodeAskInteraction?: (value: unknown) => ComposerInteraction | undefined;
+    }).normalizeCodeAskInteraction;
+
+    expect(normalize?.({
+      promptId: "ask-1",
+      chatSessionId: "chat-1",
+      clineSessionId: "cline-1",
+      runId: "run-1",
+      question: "最喜欢什么水果？",
+      options: ["草莓", "西瓜"],
+      createdAt: 1,
+    })).toEqual({
+      kind: "ask",
+      id: "ask-1",
+      source: "code",
+      runId: "run-1",
+      question: "最喜欢什么水果？",
+      options: [
+        { id: "草莓", label: "草莓" },
+        { id: "西瓜", label: "西瓜" },
+      ],
+      allowCustomInput: true,
+      responseKind: "choice",
+    });
+  });
+
+  it("normalizes both legacy choices and structured clarification into the same composer slot", () => {
+    expect(normalizeChoiceInteraction({
+      id: "choice-1",
+      question: "要生成哪一种报告？",
+      options: [{ value: "daily", label: "日报", description: "汇总今天的信息" }],
+    })).toMatchObject({
+      kind: "ask",
+      id: "choice-1",
+      responseKind: "choice",
+      options: [{ id: "daily", label: "日报" }],
+    });
+
+    expect(normalizeChoiceInteraction({
+      id: "choice-2",
+      intro: "还需要确认两个细节。",
+      questions: [{
+        field: "format",
+        question: "想要什么格式？",
+        type: "single_select",
+        allowCustom: false,
+        freeTextPlaceholder: "",
+        options: [{ value: "docx", label: "Word" }],
+      }],
+    })).toMatchObject({
+      kind: "ask",
+      id: "choice-2",
+      responseKind: "clarification",
+      questions: [{ id: "format", options: [{ id: "docx", label: "Word" }] }],
+    });
+  });
+
+  it("normalizes the opaque public Ask payload without requiring canonical option values", () => {
+    expect(normalizeChoiceInteraction({
+      interactionId: "choice-3",
+      runId: "run-7",
+      revision: 2,
+      mode: "semantic_clarification",
+      intro: "还需要确认两个细节。",
+      questions: [{
+        id: "question-1",
+        prompt: "希望生成哪种格式？",
+        required: true,
+        multiple: false,
+        options: [
+          { id: "option-word", label: "Word" },
+          { id: "option-pdf", label: "PDF" },
+        ],
+        customInput: { enabled: true, placeholder: "填写其他格式" },
+      }],
+    })).toEqual({
+      kind: "ask",
+      id: "choice-3",
+      runId: "run-7",
+      revision: 2,
+      intro: "还需要确认两个细节。",
+      responseKind: "submission",
+      question: "希望生成哪种格式？",
+      options: [
+        { id: "option-word", label: "Word" },
+        { id: "option-pdf", label: "PDF" },
+      ],
+      questions: [{
+        id: "question-1",
+        question: "希望生成哪种格式？",
+        options: [
+          { id: "option-word", label: "Word" },
+          { id: "option-pdf", label: "PDF" },
+        ],
+        allowCustomInput: true,
+        freeTextPlaceholder: "填写其他格式",
+        multiple: false,
+      }],
+    });
+  });
+
+  it("keeps unordered multi-question drafts and enforces option XOR custom", () => {
+    const interaction = normalizeChoiceInteraction({
+      interactionId: "choice-4",
+      runId: "run-8",
+      revision: 1,
+      mode: "semantic_clarification",
+      intro: "确认两件事。",
+      questions: [
+        {
+          id: "q1",
+          prompt: "格式？",
+          required: true,
+          multiple: false,
+          options: [{ id: "word", label: "Word" }, { id: "pdf", label: "PDF" }],
+          customInput: { enabled: true },
+        },
+        {
+          id: "q2",
+          prompt: "语气？",
+          required: true,
+          multiple: false,
+          options: [{ id: "formal", label: "正式" }, { id: "light", label: "轻松" }],
+          customInput: { enabled: true },
+        },
+      ],
+    })!;
+    let drafts = createAskDrafts(interaction.questions!);
+    drafts = updateAskCustomText(drafts, "q2", "  活泼一点  ");
+    expect(isAskComplete(interaction.questions!, drafts)).toBe(false);
+    drafts = selectAskOption(drafts, interaction.questions![0], "word");
+    drafts = selectAskOption(drafts, interaction.questions![1], "formal");
+    expect(drafts.q2).toEqual({ source: "option", optionIds: ["formal"], customText: "" });
+    expect(isAskComplete(interaction.questions!, drafts)).toBe(true);
+    drafts = updateAskCustomText(drafts, "q2", "活泼一点");
+    expect(drafts.q2).toEqual({ source: "custom", optionIds: [], customText: "活泼一点" });
+
+    expect(buildAskSubmission(interaction, drafts)).toEqual({
+      interactionId: "choice-4",
+      runId: "run-8",
+      revision: 1,
+      answers: [
+        { questionId: "q1", source: "option", optionId: "word" },
+        { questionId: "q2", source: "custom", text: "活泼一点" },
+      ],
+    });
+  });
+
+  it("dismisses an Ask only for the matching run and revision", () => {
+    const interaction = normalizeChoiceInteraction({
+      interactionId: "choice-5",
+      runId: "run-current",
+      revision: 4,
+      mode: "semantic_clarification",
+      intro: "确认一下。",
+      questions: [{
+        id: "q1",
+        prompt: "选择？",
+        required: true,
+        multiple: false,
+        options: [{ id: "a", label: "A" }, { id: "b", label: "B" }],
+        customInput: { enabled: true },
+      }],
+    })!;
+
+    expect(shouldDismissAsk(interaction, {
+      id: "choice-5",
+      runId: "run-old",
+      revision: 4,
+      reason: "timeout",
+    })).toBe(false);
+    expect(shouldDismissAsk(interaction, {
+      id: "choice-5",
+      runId: "run-current",
+      revision: 4,
+      reason: "timeout",
+    })).toBe(true);
+  });
+
+  it("keeps one plan card updated from task-plan snapshots", () => {
+    expect(normalizeTaskPlanPresentation({
+      goal: "整理今日信息",
+      steps: [
+        { stepId: "s1", objective: "搜索新闻", status: "completed" },
+        { stepId: "s2", objective: "生成报告", status: "running" },
+        { stepId: "s3", objective: "清理旧文件", status: "superseded" },
+      ],
+    })).toEqual({
+      title: "整理今日信息",
+      steps: [
+        { id: "s1", title: "搜索新闻", status: "completed" },
+        { id: "s2", title: "生成报告", status: "running" },
+        { id: "s3", title: "清理旧文件", status: "pending" },
+      ],
+    });
+  });
+});

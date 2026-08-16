@@ -7,10 +7,11 @@
 // 注意：`chats:open-in-chat-window` 涉及 BrowserWindow 创建逻辑，
 // 由 src/main/index.ts 自行注册，不在本模块；本模块只管纯数据操作。
 
-import { BrowserWindow, ipcMain } from "electron";
+import { BrowserWindow, dialog, ipcMain } from "electron";
 import { IPC } from "../../shared/ipc-channels";
 import type { ChatMessage } from "../../shared/chat-types";
 import * as chatsStore from "./chats-store";
+import { ensureVaultStructure } from "../learn/obsidian/vault-init";
 
 function broadcastChanged(): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -34,16 +35,50 @@ export function registerChatsIpc(): void {
     IPC.CHATS_CREATE,
     (
       _event,
-      payload?: { title?: string; identityId?: string | null },
+      payload?: { title?: string; identityId?: string | null; mode?: "chat" | "learn"; workspaceRoot?: string },
     ) => {
       const session = chatsStore.createSession({
         title: payload?.title,
         identityId: payload?.identityId ?? null,
+        mode: payload?.mode,
+        workspaceRoot: payload?.workspaceRoot,
       });
+      // learn 模式绑定目录时异步初始化 Vault 脚手架（幂等，失败不影响）
+      if (session?.mode === "learn" && session.workspaceRoot) {
+        void initVaultIfNeeded(session.workspaceRoot);
+      }
       broadcastChanged();
       return session;
     },
   );
+
+  ipcMain.handle(
+    IPC.CHATS_SET_MODE,
+    (
+      _event,
+      payload: { id: string; mode?: "chat" | "learn"; workspaceRoot?: string | null },
+    ) => {
+      if (!payload || !payload.id) return null;
+      const session = chatsStore.updateSessionMode(
+        payload.id,
+        payload.mode === "learn" ? "learn" : "chat",
+        payload.workspaceRoot,
+      );
+      if (session) {
+        if (session.mode === "learn" && session.workspaceRoot) {
+          void initVaultIfNeeded(session.workspaceRoot);
+        }
+        broadcastChanged();
+      }
+      return session;
+    },
+  );
+
+  // 为 learn 模式选择 Vault 工作区目录（系统目录选择对话框）。
+  ipcMain.handle(IPC.CHATS_PICK_VAULT_FOLDER, async () => {
+    const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
+  });
 
   ipcMain.handle(
     IPC.CHATS_APPEND,
@@ -99,3 +134,11 @@ export function registerChatsIpc(): void {
 
 // 给 main/index.ts 用的便捷 broadcast（删除当前活跃会话后由 index.ts 调一次）。
 export { broadcastChanged as broadcastChatsChanged };
+
+/** 异步初始化 learn 模式的 Vault 脚手架（README / materials / notes / templates / progress）。
+ *  幂等：只创建缺失文件，从不覆盖已有内容；失败仅 console.warn。 */
+function initVaultIfNeeded(workspaceRoot: string): void {
+  void ensureVaultStructure(workspaceRoot).catch((err) => {
+    console.warn("[Learn] Vault 初始化失败：", err);
+  });
+}

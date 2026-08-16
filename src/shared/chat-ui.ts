@@ -11,6 +11,10 @@ export interface ChatSessionMetaUI {
   createdAt: number;
   updatedAt: number;
   messageCount: number;
+  /** 会话模式：chat（默认）| learn（Obsidian 学习模式）。 */
+  mode?: "chat" | "learn";
+  /** learn 模式绑定的 Vault 工作区目录。 */
+  workspaceRoot?: string;
 }
 
 // 默认 identity 显示名（职位面板未做，所有会话先用这个）

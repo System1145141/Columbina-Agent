@@ -1,5 +1,5 @@
 import { state } from "./services/state";
-import { loadIdeSettings, toggleSearchPanel, toggleTerminalPanel, changeEditorFontSize, toggleOutlinePanel } from "./services/layout";
+import { loadIdeSettings, toggleSearchPanel, toggleTerminalPanel, changeEditorFontSize, toggleOutlinePanel, toggleProblemsPanel } from "./services/layout";
 import { restoreWorkspace, saveWorkspaceSync } from "./services/workspace-service";
 import { initFileWatcher } from "./services/file-service";
 import { initStatusBar } from "./components/status-bar";

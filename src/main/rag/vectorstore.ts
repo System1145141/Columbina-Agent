@@ -283,13 +283,41 @@ export class JsonVectorStore {
     return results;
   }
 
+  // 批量写入预计算好的 embedding（文档后台索引 worker 产出，无需重新 embed）
+  addPreparedBatch(
+    items: Array<{ text: string; source: string; embedding: number[]; metadata?: Record<string, unknown> }>,
+  ): MemoryEntry[] {
+    const results: MemoryEntry[] = [];
+
+    for (let i = 0; i < items.length; i++) {
+      const entry: MemoryEntry = {
+        id: `${items[i].source}_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+        text: items[i].text,
+        embedding: items[i].embedding,
+        source: items[i].source,
+        weight: 1.0,
+        createdAt: Date.now(),
+        lastRecalledAt: Date.now(),
+        metadata: items[i].metadata,
+      };
+      this.entries.push(entry);
+      results.push(entry);
+    }
+
+    this.dirty = true;
+    this.markIndexDirty();
+    this.save();
+    return results;
+  }
+
   // 搜索（使用 IVF 索引加速）
   async search(
     query: string,
     source?: string,
     provider?: EmbeddingProvider,
     topK = 5,
-    minScore = 0.3
+    minScore = 0.3,
+    options?: { importIds?: string[] }
   ): Promise<SearchResult[]> {
     if (this.entries.length === 0) return [];
 
@@ -303,6 +331,9 @@ export class JsonVectorStore {
 
     const now = Date.now();
     const results: SearchResult[] = [];
+    const allowedImportIds = new Set(options?.importIds ?? []);
+    const shouldKeep = (entry: MemoryEntry) =>
+      !allowedImportIds.size || allowedImportIds.has(String(entry.metadata?.importId ?? ""));
 
     if (this.ivf && !source) {
       // ── IVF 加速路径（无 source 过滤时） ──
@@ -323,6 +354,7 @@ export class JsonVectorStore {
       for (const clusterIdx of probeClusters) {
         for (const entryIdx of this.ivf.clusters[clusterIdx]) {
           const entry = this.entries[entryIdx];
+          if (!shouldKeep(entry)) continue;
           const sim = cosineSimilarity(queryEmbedding, entry.embedding);
           const hoursSinceRecall = (now - entry.lastRecalledAt) / (1000 * 60 * 60);
           const decayFactor = Math.pow(0.95, hoursSinceRecall / 24);
@@ -337,6 +369,7 @@ export class JsonVectorStore {
       // ── 全量搜索路径（有 source 过滤时，或索引未就绪） ──
       for (const entry of this.entries) {
         if (source && entry.source !== source) continue;
+        if (!shouldKeep(entry)) continue;
 
         const sim = cosineSimilarity(queryEmbedding, entry.embedding);
         // 时间衰减：24h 未提及权重 ×0.95
@@ -399,6 +432,27 @@ export class JsonVectorStore {
       this.save();
     }
     return deleted;
+  }
+
+  // 按 id 批量删除向量（memory/RAG 对账清理用）
+  deleteByIds(ids: string[]): number {
+    if (ids.length === 0) return 0;
+    const idSet = new Set(ids);
+    const before = this.entries.length;
+    this.entries = this.entries.filter((e) => !idSet.has(e.id));
+    const deleted = before - this.entries.length;
+    if (deleted > 0) {
+      this.dirty = true;
+      this.markIndexDirty();
+      this.save();
+    }
+    return deleted;
+  }
+
+  hasImportedDocumentChunks(importId: string): boolean {
+    return this.entries.some(
+      (entry) => entry.source === "imported_doc" && String(entry.metadata?.importId ?? "") === importId,
+    );
   }
 
   // 统计

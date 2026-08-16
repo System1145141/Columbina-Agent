@@ -23,6 +23,7 @@
 - 面板显示 Agent 思考过程与操作结果，操作确认卡片逐条展示，可撤销。
 - **右键「添加到对话」**：编辑器选区（带文件与行号标注）、终端选区、文件树整个文件，均可一键插入 AI 输入框（`【添加到对话｜来源】` + 代码块，语言高亮），自动打开 AI 面板并聚焦；独立 `ai-context.ts` 模块避免组件循环依赖。
 - **界面为分隔线布局（无气泡）**：用户消息纯文本 + 分隔线；助手消息 =「深度思考」可折叠块（流式累积 AG-UI `REASONING_MESSAGE_CONTENT` 思维链，模型不返回 reasoning 时隐藏）+ 涉及文件标签（write/edit/delete 高亮为已修改）+ 正文；**正文与思维链均流式增量渲染**（订阅 AG-UI 事件逐字更新，`<action>`/`[recall]` 标记实时剥离，不污染显示）。
+- **消息时间线（segments）**：深度思考与工具调用按真实执行时序交替存储/渲染（`AiMessage.segments`：reasoning 段独立折叠块 + tool 段独立工具行，多轮工具调用不再合并思维链）；最新思考块默认展开、用户折叠状态持久化到段（重渲染不重置）；旧消息（无 segments）回退合并显示。
 - **真实 tool-call 流式**：IDE 模式全部 16 个工具原生化为主进程原生 function calling——渲染层随每次 run 传工作区 roots（`AguiRunInput.ideTools`，`confirmed=false` 时仅只读工具用于摘要/规划等后台 run），主进程 `buildIdeTools` 构建 ToolDefinition 注入 FC 循环；AI 面板订阅 `TOOL_CALL_START/RESULT/END` 事件流式展示调用过程（⏳ 运行中 → ✓/✗ 结果预览）。**只读工具**（read_file / search_files / list_dir / list_files，risk=fs-read）自动执行、无需确认；**写操作工具**（write_file / edit_file / delete_file / run_command / rename_symbol / generate_tests / review_changes / get_diagnostics / check_command_status / stop_command / todo / plugin）声明 `needsConfirm`，FC 循环执行前经**确认桥**（`toolApprovalHandler`）向 AI 面板弹确认卡片，用户点「确认执行/拒绝」后由渲染层执行既有逻辑（快照撤销 / 标签同步 / diff 预览 / LSP / 终端 / todo）并回填结果（120s 未响应自动拒绝，run 取消/出错时清空悬挂请求）；`<action>` 文本协议已完全废弃（解析、确认卡、消息 actions/actionResults 字段与渲染均已删除，工具调用完全走原生 function calling + 确认桥；`stripActions` 仅保留用于清理旧版本会话消息残留）。
 
 **Agent 工具集（16 种；read_file / search_files / list_dir / list_files 自动执行，其余经确认卡片把关后执行）**
@@ -134,6 +135,12 @@
 - 架构原则：状态单一来源（`services/state.ts`）、IPC 不穿透组件（统一封装到 service）、Agent 逻辑收敛在 `services/agent-bridge.ts`、主进程服务隔离（Git/LSP/文件系统各自管理子进程）。
 - 验收基线：`npm run build` 通过。
 
+### 2.8 聊天窗口（React UI 移植，2026-08-10 完成）
+
+- 聊天窗口已从手写 vanilla DOM 全量替换为 **React 19 + antd 6 + @ant-design/x**（`src/renderer/react/`，vite 入口 `chat-react`），沿用上游 Cyrene 的聊天体验（流式 Markdown、思维链折叠、工具调用行、AG-UI 卡片），并保留 Columbina 独有功能：双角色切换、4 语 i18n、三主题（含深色适配）、表情包、六引擎 TTS、学习模式、自动接力、图片附件（视觉 caption）。
+- 实现细节：`src/preload/react-bridge.ts`（preload 适配层，主进程零改动）、`src/shared/renderer-base.ts`（`resolveAsset` 子目录列表含 `react/`）、`docs/ui-port-plan.md`（逐阶段记录，含交付后微调）。
+- IDE 与聊天窗口并存：IDE（§2.1~2.7）保持 vanilla + CodeMirror/xterm 实现，不受 React 化影响。
+
 ## 3. 未来计划
 
 ### 近期：AI Agent 体验深化
@@ -161,4 +168,4 @@
 
 ## Notes
 
-- 每次修改文件后，都视为一次git变更，需要写变更内容
+- 每次修改文件后，在对话总结时需要写变更报告

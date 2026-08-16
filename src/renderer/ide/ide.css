@@ -2671,6 +2671,11 @@ html, body, .ide {
   overflow: hidden;
 }
 
+/* segments 时间线模式：工具行作为消息行直接子级（与思考块交替），行间留间距 */
+.ide__ai-toolcall[data-seg] {
+  margin: 2px 0;
+}
+
 .ide__ai-toolcall.is-running {
   color: #a5c8ff;
 }
@@ -2733,6 +2738,49 @@ html, body, .ide {
 .ide__ai-input-row {
   display: flex;
   gap: 8px;
+}
+
+/* 「添加到对话」引用卡片栏：[文件名 行范围 ×] */
+.ide__ai-refs {
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.ide__ai-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  background: #1f3b2d;
+  border: 1px solid #2f6f4f;
+  color: #9cdcfe;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.ide__ai-ref-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ide__ai-ref-close {
+  background: none;
+  border: none;
+  color: #9cdcfe;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 1px;
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+.ide__ai-ref-close:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.15);
 }
 
 .ide__ai-input {

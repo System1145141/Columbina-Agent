@@ -1,6 +1,6 @@
 // TTS 引擎共享类型（main / renderer 共用）。
 
-export type TtsEngine = "off" | "minimax" | "gptsovits" | "custom-cloud" | "mimo";
+export type TtsEngine = "off" | "minimax" | "gptsovits" | "custom-cloud" | "mimo" | "mossland";
 
 /** GPT-SoVITS 合成请求（渲染端 → 主进程 IPC payload）。 */
 export interface GptsovitsSynthesizeRequest {

@@ -8,9 +8,20 @@ import { createHash } from "crypto";
 import { pathToFileURL } from "url";
 import { IPC } from "../shared/ipc-channels";
 import { STATUS_KEYWORDS } from "./status-keywords";
-import { initRAG, buildMemoryContext, addMemory, importDocument, switchEmbeddingModel, deleteImportedDoc } from "./rag";
+import { initRAG, buildMemoryContext, addMemory, importDocument, switchEmbeddingModel, deleteImportedDoc, getEntriesBySource, isUserMemoryVectorStoreReady, deleteUserMemoryVectors } from "./rag";
 import { getEmbeddingProvider, getSceneEmbeddingProvider } from "./rag/embedding";
 import { ingestPaths } from "./rag/file-ingest";
+// 文档后台索引：队列 + worker runner + IPC 处理（worker 内部使用 require 延迟加载，避免循环依赖）
+import {
+  configureDocumentIndexQueue,
+  enqueueDocumentIndexJob,
+  cancelDocumentIndexJob,
+} from "./rag/document-index-queue";
+import { runDocumentIndexJob, retrieveQueuedDocumentChunks } from "./rag/document-index-worker";
+import { processDocumentIndexRequest } from "./rag/document-index-ipc";
+// 图片附件：发送策略裁决 + 路径校验/caption prompt（由 Cyrene-Agent 移植）
+import { decideImageSendStrategy } from "./chat/image-send-strategy";
+import { validateCaptionImagePath, buildImageCaptionPrompt } from "./chat/image-caption";
 import { buildAlwaysOnContext, buildMemoryInjection, runFunctionCallingLoop, scheduleMemoryWrite } from "./orchestrator";
 import { ColumbinaAgent } from "./orchestrator/columbina-agent";
 import { indexConversationTurn } from "./orchestrator/history-tools";
@@ -30,6 +41,9 @@ import { initMcpManager, addMcpServer, removeMcpServer, listMcpServers, pruneMcp
 import { syncPlaywrightMcp, PLAYWRIGHT_MCP_ID, REMOVED_BUILTIN_MCP_IDS } from "./sync-mcp-builtin";
 import { buildEnvironmentContext } from "./orchestrator/environment";
 import { initPermissionFromDisk, registerPermissionIpc, getCurrentLevel } from "./permission";
+import { resolveMusicPaths } from "./music/paths";
+import { bootstrapMusicService, type MusicBootstrap } from "./music/bootstrap";
+import { installShutdownLatch } from "./music/shutdown-latch";
 import { registerChoiceIpc, setChoiceCardSender } from "./user-choice";
 import { enqueueLLMTask } from "./llm-queue";
 import { getEmbeddingStatus, downloadEmbeddingModel, deleteEmbeddingModel } from "./embedding-manager";
@@ -49,15 +63,25 @@ import { detectFileEncoding, decodeFileBuffer, encodeFileString } from "./file-e
 import { isFileEncoding } from "../shared/file-encoding";
 import { memoryStore } from "./memory/memory-store"
 import type { L0Profile, L1Profile } from "./memory/memory-types";
+import { reconcileMemoryRag, backupMemoryRagFiles } from "./memory/memory-rag-reconciliation";
+import { exportMemoryToObsidianVault, syncToBoundVault } from "./memory/obsidian-exporter";
+import { loadObsidianVaultConfig, saveObsidianVaultConfig, unbindVault } from "./memory/obsidian-vault-config";
+import { startVaultWatcher, stopVaultWatcher } from "./memory/obsidian-importer";
 import { registerChatsIpc } from "./chats/chats-ipc";
 import { recordUsage, getUsage, flush as flushTokenUsage } from "./token-usage-store";
 import { uploadFile as ttsUploadFile, cloneVoice as ttsCloneVoice, synthesize as ttsSynthesize } from "./tts/minimax-engine";
 import { synthesize as gptsovitsSynthesize } from "./tts/gptsovits-engine";
 import { synthesize as customCloudSynthesize } from "./tts/custom-cloud-engine";
 import { synthesize as mimoSynthesize } from "./tts/mimo-engine";
+import { cloneVoice as mosslandCloneVoice, listVoices as mosslandListVoices, synthesize as mosslandSynthesize } from "./tts/mossland-engine";
 import { synthesizeByEngine } from "./tts/tts-dispatcher";
 import { startOpener, stopOpener, setLive2dWindow, reloadManifest, handleBubbleClick, handleChatWindowOpened, testFire } from "./opener/opener-runner";
+import { createProactiveLifecycle, type ProactiveLifecycle } from "./proactive/proactive-lifecycle";
 import { registerAgUiIpc, cancelRunsForWindow, type AguiRunInput } from "./agui-bridge";
+import { createCitaService } from "./services/cita/cita-service";
+import { createSocialContextService } from "./services/social-context/social-context-service";
+import { compileSocialContextBlock } from "./social-context/context";
+import { rankSocialAtoms } from "./social-context/retrieval";
 import { setWeatherConfig, setSearchConfig, loadTodos, onTodosChange, setKuuhenkiSettings } from "./orchestrator/built-in-tools";
 import { registerRecallHistoryTool } from "./orchestrator/history-tools";
 import { registerDocumentTools } from "./orchestrator/document-tools";
@@ -95,9 +119,38 @@ let callWindow: BrowserWindow | null = null;
 let ideWindow: BrowserWindow | null = null;
 let currentIdeWorkspaceFile: string | null = null;
 let schedulerEngine: SchedulerEngine | null = null;
+/** Proactive 主动聊天生命周期（whenReady 创建；before-quit 停止 trigger）。 */
+let proactiveLifecycle: ProactiveLifecycle | null = null;
+/** Music（网易云）bootstrap：whenReady 创建；退出由 installShutdownLatch 兜底。 */
+let musicBootstrap: MusicBootstrap | null = null;
 // 聊天窗口当前活跃的会话 id（通过 IPC 由聊天窗口上报）；
 // 设置面板"删除当前会话"差异化提示用。聊天窗口关闭时由 closed 事件置 null。
 let activeChatSessionId: string | null = null;
+
+/**
+ * Memory/RAG 启动对账：对齐 memory.json（L2）与向量库（user_memory）。
+ * - 可召回 L2 的向量缺失 → 重建；ragId 指向错误向量 → 重建
+ * - 已存在的映射 → 仅校正 L2.syncStatus
+ * - 孤儿向量（无对应可召回 L2）→ 删除
+ * 对账前自动备份 memory.json 与 memory-store.json。
+ */
+async function reconcileUserMemoryIndex(): Promise<void> {
+  if (!isUserMemoryVectorStoreReady()) {
+    console.warn("[Memory/RAG] reconciliation skipped: vector store is not writable");
+    return;
+  }
+  const report = await reconcileMemoryRag({
+    getMemories: () => memoryStore.getAllL2(),
+    getVectors: () => getEntriesBySource("user_memory"),
+    backup: async () => backupMemoryRagFiles(app.getPath("userData")),
+    addVector: (text, l2Id, metadata) => addMemory(text, "user_memory", { ...metadata, l2Id }),
+    markSynced: (l2Id, ragId) => memoryStore.markL2SyncStatus(l2Id, "synced", ragId),
+    markSyncFailed: (l2Id, error) => memoryStore.markL2SyncStatus(l2Id, "sync_failed", undefined, error),
+    deleteVectors: (ids) => deleteUserMemoryVectors(ids),
+    warn: (message, error) => console.warn(`[Memory/RAG] ${message}:`, error),
+  });
+  console.info("[Memory/RAG] reconciliation:", report);
+}
 
 const isDev = process.env.VITE_DEV === "1";
 
@@ -202,12 +255,26 @@ function appendMimoTtsLog(entry: Record<string, unknown>): void {
   }
 }
 
+function appendMosslandTtsLog(entry: Record<string, unknown>): void {
+  try {
+    const logDir = path.join(app.getPath("userData"), "logs");
+    fs.mkdirSync(logDir, { recursive: true });
+    const logFile = path.join(logDir, "mossland-tts.log");
+    fs.appendFileSync(logFile, JSON.stringify(entry, null, 2) + "\n", "utf8");
+    if (entry.phase === "cache.hit" || entry.phase === "cache.write") {
+      console.log("[TTS Mossland] 诊断日志:", logFile);
+    }
+  } catch (err) {
+    console.warn("[TTS Mossland] 写诊断日志失败:", err);
+  }
+}
+
 function getTtsCacheDir(): string {
   return path.join(app.getPath("userData"), "columbina-tts-cache");
 }
 
 function assertTtsCacheKey(cacheKey: string): string {
-  if (!/^(minimax|gptsovits|custom-cloud|mimo)-[a-f0-9]{64}$/.test(cacheKey)) {
+  if (!/^(minimax|gptsovits|custom-cloud|mimo|mossland)-[a-f0-9]{64}$/.test(cacheKey)) {
     throw new Error("非法 TTS 缓存 key");
   }
   return cacheKey;
@@ -293,6 +360,23 @@ function buildMimoCacheKey(payload: {
     text: payload.text,
   });
   return "mimo-" + createHash("sha256").update(source, "utf8").digest("hex");
+}
+
+function buildMosslandCacheKey(payload: {
+  voiceId?: string;
+  text: string;
+  model?: string;
+  format?: "mp3" | "wav" | "pcm";
+}): string {
+  const source = JSON.stringify({
+    version: 1,
+    engine: "mossland",
+    model: payload.model ?? "moss-tts",
+    voiceId: payload.voiceId ?? "",
+    format: payload.format ?? "mp3",
+    text: payload.text,
+  });
+  return "mossland-" + createHash("sha256").update(source, "utf8").digest("hex");
 }
 
 function getTtsCachePath(cacheKey: string, format: "mp3" | "wav" | "pcm" = "mp3"): string {
@@ -444,7 +528,7 @@ interface GeneralSettings {
   language: "zh-CN" | "en" | "ja" | "ko";
   uiTheme: "classic" | "polished-pink" | "pearl-white" | "deep-blue" | "light-blue";
   // TTS 配置
-  ttsEngine: "off" | "minimax" | "gptsovits" | "custom-cloud" | "mimo";
+  ttsEngine: "off" | "minimax" | "gptsovits" | "custom-cloud" | "mimo" | "mossland";
   ttsAutoRead: boolean;
   ttsSpeed: number;
   ttsVolume: number;
@@ -470,6 +554,10 @@ interface GeneralSettings {
   ttsMimoKey: string;
   ttsMimoVoiceAudioPath: string;
   ttsMimoStylePrompt: string;
+  // Mossland TTS（api.mosi.cn）
+  ttsMosslandKey: string;
+  ttsMosslandVoiceId: string;
+  ttsMosslandModel: string;
   /** 天气源：open-meteo(免配置默认) | amap(高德,需填key) */
   weatherSource: "open-meteo" | "amap";
   /** 天气插件是否启用（开关） */
@@ -525,6 +613,16 @@ interface GeneralSettings {
   recentWorkspaces: { path: string; name: string; lastOpenedAt: number }[];
   /** 上次打开的 IDE 工作区文件路径 */
   lastIdeWorkspaceFile?: string;
+  /** CITA（上下文认知服务）是否启用。默认 false。 */
+  citaEnabled: boolean;
+  /** CITA 语义引擎：remote（远程 LLM 理解）| local（本地，暂只返回 unavailable 降级包）。默认 "remote"。 */
+  citaSemanticEngine: "remote" | "local";
+  /** 主动聊天（Proactive）总开关。默认 false。 */
+  proactiveEnabled: boolean;
+  /** 主动消息最终投递目标：本地桌面聊天窗口 | wechat | feishu。默认 "local"。 */
+  proactiveDeliveryTarget: "local" | "wechat" | "feishu";
+  /** 手机渠道（微信/飞书）文本消息分段发送偏好。默认 "off"。 */
+  mobileMessageSegmentation: "on" | "off";
 }
 
 interface IdeSettings {
@@ -641,6 +739,9 @@ const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   ttsMimoKey: "",
   ttsMimoVoiceAudioPath: "",
   ttsMimoStylePrompt: "温柔、自然、略带亲近感，像在轻声陪用户聊天。",
+  ttsMosslandKey: "",
+  ttsMosslandVoiceId: "",
+  ttsMosslandModel: "moss-tts",
   weatherSource: "open-meteo",
   weatherEnabled: false,
   amapKey: "",
@@ -673,6 +774,11 @@ const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
     tabSize: 2,
   },
   recentWorkspaces: [],
+  citaEnabled: false,
+  citaSemanticEngine: "remote",
+  proactiveEnabled: false,
+  proactiveDeliveryTarget: "local",
+  mobileMessageSegmentation: "off",
 };
 
 function getSettingsPath(): string {
@@ -832,7 +938,7 @@ const DEFAULT_USER_PROFILE: UserProfile = {
   defaultCity: "",
 };
 
-function loadUserProfile(): UserProfile {
+export function loadUserProfile(): UserProfile {
   try {
     const filePath = getUserProfilePath();
     if (!fs.existsSync(filePath)) return DEFAULT_USER_PROFILE;
@@ -1042,7 +1148,7 @@ function normalizeModelSettings(input: Partial<ModelSettings> | null | undefined
   };
 }
 
-function loadModelSettings(): ModelSettings {
+export function loadModelSettings(): ModelSettings {
   try {
     const filePath = getSettingsPath();
     if (!fs.existsSync(filePath)) return DEFAULT_MODEL_SETTINGS;
@@ -1178,7 +1284,7 @@ function normalizeGeneralSettings(input: Partial<GeneralSettings> | null | undef
     language: (["zh-CN", "en", "ja", "ko"].includes(input?.language as string) ? input?.language : "zh-CN") as GeneralSettings["language"],
     uiTheme: input?.uiTheme === "pearl-white" ? "pearl-white" : (input?.uiTheme === "polished-pink" || input?.uiTheme === "light-blue") ? "polished-pink" : (input?.uiTheme === "deep-blue" || input?.uiTheme === "classic") ? "classic" : "classic",
     // TTS 配置
-    ttsEngine: (["off", "minimax", "gptsovits", "custom-cloud", "mimo"].includes(input?.ttsEngine as string) ? input?.ttsEngine : "off") as GeneralSettings["ttsEngine"],
+    ttsEngine: (["off", "minimax", "gptsovits", "custom-cloud", "mimo", "mossland"].includes(input?.ttsEngine as string) ? input?.ttsEngine : "off") as GeneralSettings["ttsEngine"],
     ttsAutoRead: input?.ttsAutoRead === undefined ? DEFAULT_GENERAL_SETTINGS.ttsAutoRead : Boolean(input.ttsAutoRead),
     ttsSpeed: typeof input?.ttsSpeed === "number" ? Math.max(0.5, Math.min(2, input.ttsSpeed)) : DEFAULT_GENERAL_SETTINGS.ttsSpeed,
     ttsVolume: typeof input?.ttsVolume === "number" ? Math.max(0, Math.min(1, input.ttsVolume)) : DEFAULT_GENERAL_SETTINGS.ttsVolume,
@@ -1242,6 +1348,11 @@ function normalizeGeneralSettings(input: Partial<GeneralSettings> | null | undef
     ttsMimoKey: typeof input?.ttsMimoKey === "string" ? input.ttsMimoKey : "",
     ttsMimoVoiceAudioPath: typeof input?.ttsMimoVoiceAudioPath === "string" ? input.ttsMimoVoiceAudioPath : "",
     ttsMimoStylePrompt: typeof input?.ttsMimoStylePrompt === "string" ? input.ttsMimoStylePrompt : DEFAULT_GENERAL_SETTINGS.ttsMimoStylePrompt,
+    ttsMosslandKey: typeof input?.ttsMosslandKey === "string" ? input.ttsMosslandKey : "",
+    ttsMosslandVoiceId: typeof input?.ttsMosslandVoiceId === "string" ? input.ttsMosslandVoiceId : "",
+    ttsMosslandModel: typeof input?.ttsMosslandModel === "string" && input.ttsMosslandModel.length > 0
+      ? input.ttsMosslandModel
+      : DEFAULT_GENERAL_SETTINGS.ttsMosslandModel,
     ideSettings: {
       theme: input?.ideSettings?.theme === "light" ? "light" : "dark",
       fontSize: typeof input?.ideSettings?.fontSize === "number" && Number.isFinite(input.ideSettings.fontSize)
@@ -1263,10 +1374,17 @@ function normalizeGeneralSettings(input: Partial<GeneralSettings> | null | undef
           .slice(0, 20)
       : DEFAULT_GENERAL_SETTINGS.recentWorkspaces,
     lastIdeWorkspaceFile: typeof input?.lastIdeWorkspaceFile === "string" ? input.lastIdeWorkspaceFile : undefined,
+    citaEnabled: input?.citaEnabled === undefined ? DEFAULT_GENERAL_SETTINGS.citaEnabled : Boolean(input.citaEnabled),
+    citaSemanticEngine: input?.citaSemanticEngine === "local" ? "local" : "remote",
+    proactiveEnabled: input?.proactiveEnabled === undefined ? DEFAULT_GENERAL_SETTINGS.proactiveEnabled : Boolean(input.proactiveEnabled),
+    proactiveDeliveryTarget: input?.proactiveDeliveryTarget === "wechat" || input?.proactiveDeliveryTarget === "feishu"
+      ? input.proactiveDeliveryTarget
+      : DEFAULT_GENERAL_SETTINGS.proactiveDeliveryTarget,
+    mobileMessageSegmentation: input?.mobileMessageSegmentation === "on" ? "on" : DEFAULT_GENERAL_SETTINGS.mobileMessageSegmentation,
   };
 }
 
-function loadGeneralSettings(): GeneralSettings {
+export function loadGeneralSettings(): GeneralSettings {
   try {
     const filePath = getGeneralSettingsPath();
     if (!fs.existsSync(filePath)) return DEFAULT_GENERAL_SETTINGS;
@@ -2022,6 +2140,17 @@ async function observeRuntimeState(
 }
 
 async function requestModelReply(inputMessages: unknown, styleFile = "01_default.md"): Promise<ChatReplyPayload> {
+  // 会话生命周期：用户发来新消息 + 正常对话开始（Proactive 据此失效进行中的生成 / 记忙碌）。
+  proactiveLifecycle?.proactiveConversationLifecycle.onUserMessage();
+  proactiveLifecycle?.proactiveConversationLifecycle.onConversationStarted();
+  try {
+    return await requestModelReplyInner(inputMessages, styleFile);
+  } finally {
+    proactiveLifecycle?.proactiveConversationLifecycle.onConversationEnded();
+  }
+}
+
+async function requestModelReplyInner(inputMessages: unknown, styleFile = "01_default.md"): Promise<ChatReplyPayload> {
   const settings = loadModelSettings();
   const generalSettings = loadGeneralSettings();
   const promptLang = langToPromptDir(generalSettings.language);
@@ -2107,7 +2236,7 @@ async function requestModelReply(inputMessages: unknown, styleFile = "01_default
       fcMessages,
       CHAT_REQUEST_TIMEOUT_MS,
     );
-    chatContent = fcResult.reply;
+    chatContent = stripThinkBlocks(fcResult.reply);
 
     // 工具执行日志
     if (fcResult.toolResults.length > 0) {
@@ -2117,13 +2246,13 @@ async function requestModelReply(inputMessages: unknown, styleFile = "01_default
   } catch (err) {
     console.error("[Columbina] Function Calling 失败，降级为普通对话", err);
     // 降级：不带 tools 的普通 LLM 调用
-    chatContent = await callChatCompletions(
+    chatContent = stripThinkBlocks(await callChatCompletions(
       settings,
       fcMessages as Array<{ role: "system" | "user" | "assistant"; content: string }>,
       undefined,
       CHAT_REQUEST_TIMEOUT_MS,
       "主聊天（降级）",
-    );
+    ));
   }
 
   if (!chatContent) {
@@ -2533,10 +2662,10 @@ function createChatWindow(sessionId?: string): void {
   // 后续切换走 CHATS_SWITCH_SESSION 事件，避免重新加载页面。
   const queryString = sessionId ? "?sessionId=" + encodeURIComponent(sessionId) : "";
   if (isDev) {
-    chatWindow.loadURL(devServerUrl("/chat/" + queryString));
+    chatWindow.loadURL(devServerUrl("/react/" + queryString));
   } else {
     chatWindow.loadFile(
-      path.join(__dirname, "..", "..", "renderer", "chat", "index.html"),
+      path.join(__dirname, "..", "..", "renderer", "react", "index.html"),
       sessionId ? { search: queryString } : undefined,
     );
   }
@@ -3055,6 +3184,81 @@ ipcMain.handle(IPC.CHAT_INGEST_FILES, async (_event, paths: unknown) => {
     console.error("[Columbina] ingestFiles ERROR:", err?.message || err);
     return [];
   }
+});
+
+// 文档后台索引：拖入/选择大文件后经队列切分 + embedding + 写入向量库（后台执行，进度经 CHAT_DOCUMENT_INDEX_PROGRESS 上报）
+ipcMain.handle(IPC.CHAT_PROCESS_DOCUMENTS, async (event, payload: unknown) => {
+  const filePaths = payload && typeof payload === "object" && Array.isArray((payload as { filePaths?: unknown }).filePaths)
+    ? (payload as { filePaths: unknown[] }).filePaths.filter((p): p is string => typeof p === "string")
+    : [];
+  if (filePaths.length === 0) return [];
+  const query = typeof (payload as { query?: unknown }).query === "string"
+    ? (payload as { query: string }).query
+    : "";
+  return processDocumentIndexRequest({
+    filePaths,
+    query,
+    sender: event.sender,
+    enqueue: enqueueDocumentIndexJob,
+    retrieve: retrieveQueuedDocumentChunks,
+  });
+});
+
+ipcMain.handle(IPC.CHAT_CANCEL_DOCUMENT_INDEX, (_event, payload: unknown) => {
+  const jobId = payload && typeof payload === "object" ? (payload as { jobId?: unknown }).jobId : undefined;
+  return typeof jobId === "string" && cancelDocumentIndexJob(jobId);
+});
+
+// ── 图片附件（UI 移植阶段 P1，由 Cyrene-Agent 移植）──
+// 图片发送策略：Columbina AGUI run 的 attachments 为文本形态、无图片直发通道，
+// 因此暂不支持 direct（multimodal 直发主模型），统一 caption（独立视觉模型分析）。
+ipcMain.handle(IPC.CHAT_GET_IMAGE_SEND_STRATEGY, () => {
+  return decideImageSendStrategy({ multimodal: false, vision: loadVisionConfig() });
+});
+
+// 图片描述：校验路径 → 读图 → 调视觉模型生成描述（供 ChatPage 附件展示 + 模型上下文注入）。
+ipcMain.handle(IPC.CHAT_CAPTION_IMAGE, async (_event, payload: unknown) => {
+  const filePath = payload && typeof payload === "object"
+    ? (payload as { filePath?: unknown }).filePath
+    : undefined;
+  const hasAnnotations = payload && typeof payload === "object"
+    ? (payload as { hasAnnotations?: unknown }).hasAnnotations === true
+    : false;
+  const validated = validateCaptionImagePath(filePath);
+  if (!validated.ok) return { ok: false, error: validated.error };
+
+  const visionCfg = loadVisionConfig();
+  if (!visionCfg) {
+    return { ok: false, error: "未配置视觉模型，无法分析图片" };
+  }
+
+  try {
+    const { captionImage } = await import("./orchestrator/vision-captioner");
+    const caption = await captionImage(
+      { base64: validated.buffer.toString("base64"), mime: validated.mime },
+      buildImageCaptionPrompt(hasAnnotations),
+      visionCfg,
+    );
+    if (caption.startsWith("[错误")) {
+      return { ok: false, error: caption };
+    }
+    return { ok: true, caption };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+});
+
+// 图片预览：返回 dataUrl 供消息气泡内联展示。
+ipcMain.handle(IPC.CHAT_GET_IMAGE_PREVIEW, (_event, payload: unknown) => {
+  const filePath = payload && typeof payload === "object"
+    ? (payload as { filePath?: unknown }).filePath
+    : undefined;
+  const validated = validateCaptionImagePath(filePath);
+  if (!validated.ok) return { ok: false, error: validated.error };
+  return {
+    ok: true,
+    dataUrl: `data:${validated.mime};base64,${validated.buffer.toString("base64")}`,
+  };
 });
 
 // IDE 窗口 IPC
@@ -4227,6 +4431,60 @@ ipcMain.handle(IPC.MEMORY_PANEL_SAVE_L1, async (_event, raw: Record<string, unkn
   await memoryStore.updateL1(patch);
   return { ok: true };
 });
+// ── Obsidian Vault 绑定 / 同步 / 配置 ──
+
+// 一次性导出（不绑定）：弹目录选择框 → 调导出器
+ipcMain.handle(IPC.MEMORY_EXPORT_OBSIDIAN_VAULT, async () => {
+  const result = await dialog.showOpenDialog({
+    title: "选择 Obsidian Vault 导出位置",
+    properties: ["openDirectory", "createDirectory"],
+  });
+  if (result.canceled || result.filePaths.length === 0) {
+    return { ok: false, canceled: true };
+  }
+  return exportMemoryToObsidianVault(result.filePaths[0]);
+});
+
+// 绑定 vault：弹目录选择 → 保存路径 → 立即同步一次 → 启动回流监听
+ipcMain.handle(IPC.OBSIDIAN_VAULT_BIND, async () => {
+  const result = await dialog.showOpenDialog({
+    title: "选择要绑定的 Obsidian Vault 文件夹",
+    properties: ["openDirectory", "createDirectory"],
+  });
+  if (result.canceled || result.filePaths.length === 0) {
+    return { ok: false, canceled: true };
+  }
+  const vaultPath = result.filePaths[0];
+  saveObsidianVaultConfig({ vaultPath });
+  // 绑定后立即同步一次
+  const syncResult = await syncToBoundVault();
+  // 启动 Obsidian → PMRS 回流监听
+  startVaultWatcher(vaultPath);
+  return { ok: syncResult.ok, vaultPath, fileCount: syncResult.fileCount, error: syncResult.error };
+});
+
+// 解绑：先停监听再清配置
+ipcMain.handle(IPC.OBSIDIAN_VAULT_UNBIND, () => {
+  stopVaultWatcher();
+  unbindVault();
+  return { ok: true };
+});
+
+// 读配置
+ipcMain.handle(IPC.OBSIDIAN_VAULT_GET_CONFIG, () => {
+  return loadObsidianVaultConfig();
+});
+
+// 设置自动同步开关
+ipcMain.handle(IPC.OBSIDIAN_VAULT_SET_AUTO_SYNC, (_event, autoSync: boolean) => {
+  const updated = saveObsidianVaultConfig({ autoSync: Boolean(autoSync) });
+  return { ok: true, config: updated };
+});
+
+// 立即同步
+ipcMain.handle(IPC.OBSIDIAN_VAULT_SYNC_NOW, async () => {
+  return syncToBoundVault();
+});
 ipcMain.handle(IPC.USER_GET_PROFILE, () => loadUserProfile());
 ipcMain.handle(IPC.USER_SAVE_PROFILE, (_event, profile: Partial<UserProfile>) => saveUserProfile(profile));
 ipcMain.handle(IPC.USER_UPLOAD_AVATAR, async () => {
@@ -4834,8 +5092,139 @@ app.whenReady().then(async () => {
     };
   });
 
+  // Mossland 合成 → base64 音频（Settings「测试发音」用，无缓存）
+  ipcMain.handle(IPC.TTS_SYNTHESIZE_MOSSLAND, async (_event, payload: {
+    apiKey: string; voiceId: string; text: string;
+    speed?: number; volume?: number; model?: string;
+    format?: "mp3" | "wav" | "pcm";
+  }) => {
+    if (!payload?.apiKey || !payload?.voiceId || !payload?.text) {
+      throw new Error("缺少必要参数（apiKey/voiceId/text）");
+    }
+    const result = await mosslandSynthesize({
+      apiKey: payload.apiKey,
+      voiceId: payload.voiceId,
+      text: payload.text,
+      speed: payload.speed,
+      volume: payload.volume,
+      model: payload.model,
+      format: payload.format,
+    });
+    const cacheKey = buildMosslandCacheKey(payload);
+    return {
+      base64: result.audio.toString("base64"),
+      cacheKey,
+      cached: false,
+      format: result.format,
+    };
+  });
+
+  // Mossland 合成 + 本地缓存（聊天自动朗读用；cache-only 兜底由 chat 侧传 "cache-only"）
+  ipcMain.handle(IPC.TTS_SYNTHESIZE_CACHED_MOSSLAND, async (_event, payload: {
+    apiKey: string; voiceId: string; text: string;
+    speed?: number; volume?: number; model?: string;
+    format?: "mp3" | "wav" | "pcm";
+    expectedCacheKey?: string;
+  }) => {
+    const format: "mp3" | "wav" | "pcm" = payload.format ?? "mp3";
+
+    // 回听优先：如果 expectedCacheKey 对应的缓存文件存在，直接返回，不需要 apiKey/voiceId。
+    let expectedPath: string | null = null;
+    if (payload.expectedCacheKey) {
+      try {
+        expectedPath = getTtsCachePath(payload.expectedCacheKey, format);
+      } catch { /* expectedCacheKey 格式非法，忽略 */ }
+    }
+    if (expectedPath && fs.existsSync(expectedPath)) {
+      const cachedBuffer = fs.readFileSync(expectedPath);
+      appendMosslandTtsLog({
+        requestId: `mossland-cache-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        ts: new Date().toISOString(),
+        phase: "cache.hit",
+        cacheKey: payload.expectedCacheKey,
+        audioBytes: cachedBuffer.length,
+        textChars: Array.from(payload.text).length,
+      });
+      return {
+        base64: cachedBuffer.toString("base64"),
+        cacheKey: payload.expectedCacheKey,
+        cached: true,
+        format,
+      };
+    }
+
+    // 缓存未命中 + 缺关键参数（或 chat 端 cache-only 占位）→ 抛错
+    if (!payload?.apiKey || !payload?.voiceId || !payload?.text
+        || payload.apiKey === "cache-only" || payload.voiceId === "cache-only") {
+      throw new Error("缓存未命中且缺少必要参数（apiKey/voiceId/text）");
+    }
+
+    const cacheKey = buildMosslandCacheKey(payload);
+    const audioPath = getTtsCachePath(cacheKey, format);
+    fs.mkdirSync(path.dirname(audioPath), { recursive: true });
+
+    const result = await mosslandSynthesize({
+      apiKey: payload.apiKey,
+      voiceId: payload.voiceId,
+      text: payload.text,
+      speed: payload.speed,
+      volume: payload.volume,
+      model: payload.model,
+      format,
+    });
+    fs.writeFileSync(audioPath, result.audio);
+    appendMosslandTtsLog({
+      requestId: `mossland-cache-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      ts: new Date().toISOString(),
+      phase: "cache.write",
+      cacheKey,
+      audioBytes: result.audio.length,
+      textChars: Array.from(payload.text).length,
+    });
+    return {
+      base64: result.audio.toString("base64"),
+      cacheKey,
+      cached: false,
+      format: result.format,
+    };
+  });
+
+  // Mossland 音色克隆（multipart 上传）
+  ipcMain.handle(IPC.TTS_CLONE_MOSSLAND, async (_event, payload: {
+    apiKey: string; filePath: string; name?: string; description?: string;
+  }) => {
+    const result = await mosslandCloneVoice({
+      apiKey: payload.apiKey,
+      filePath: payload.filePath,
+      name: payload.name,
+      description: payload.description,
+    });
+    return {
+      voiceId: result.voiceId,
+      name: result.name,
+      createdAt: result.createdAt,
+    };
+  });
+
+  // Mossland 拉取账号下音色列表
+  ipcMain.handle(IPC.TTS_LIST_MOSSLAND_VOICES, async (_event, payload: {
+    apiKey: string; limit?: number;
+  }) => {
+    const result = await mosslandListVoices({
+      apiKey: payload.apiKey,
+      limit: payload.limit,
+    });
+    return { voices: result.voices };
+  });
+
   // 聊天会话存储 IPC（chats-store.initialize 会建好 columbina-chats 目录并加载 index）
   registerChatsIpc();
+
+  // Proactive 主动聊天：创建生命周期 + 初始化 service（60s 周期扫描由 trigger 接管，
+  // 首轮 90s 后执行；开关 proactiveEnabled 为 false 时 trigger 直接跳过）。
+  proactiveLifecycle = createProactiveLifecycle();
+  proactiveLifecycle.initializeProactiveChatService();
+  proactiveLifecycle.initializeProactiveTrigger();
 
   // 历史召回工具（recall_history）——让模型能回忆滚出窗口的对话
   registerRecallHistoryTool();
@@ -4938,7 +5327,7 @@ app.whenReady().then(async () => {
       });
     });
     if (agent.lastResult) {
-      await onAgentRunFinished(agent.lastResult, msg.text, onRunFinishedDeps, msg.channel);
+      await onAgentRunFinished(agent.lastResult, msg.text, onRunFinishedDeps, msg.channel, sessionId);
     }
     // 落历史
     void indexConversationTurn(sessionId, msg.text, reply);
@@ -5079,6 +5468,10 @@ app.whenReady().then(async () => {
   // Phase 0 重构：抽出到 orchestrator/build-options.ts，三处共用（桌面 / scheduler / bot）
   // deps 函数签名故意宽 (unknown/ReadonlyArray)；这里做一次包装把强类型函数适配进去
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const citaService = createCitaService();
+  const socialContextService = createSocialContextService({
+    enqueueLLMTask: (label, task) => enqueueLLMTask(label, task),
+  });
   const buildOptionsDeps: BuildOptionsDeps = {
     loadModelSettings: () => loadModelSettings(),
     loadUserProfile: () => loadUserProfile(),
@@ -5102,6 +5495,39 @@ app.whenReady().then(async () => {
     normalizeChatMessages: ((raw: ReadonlyArray<unknown>) =>
       normalizeChatMessages(raw as any)) as BuildOptionsDeps["normalizeChatMessages"],
     chatRequestTimeoutMs: CHAT_REQUEST_TIMEOUT_MS,
+    // CITA：工作模式（非 talk）run 前注入上下文认知证据块。CITA 内部自带 try/catch，
+    // 异常时返回空 contextBlock，绝不阻断主流程。
+    prepareCitaTurn: (input) => citaService.prepareTurn(input),
+    // social-context：Chat/talk 风格 run 前检索 top-5 atoms 拼社交背景块。
+    buildChatSocialContext: async ({ conversationId, query }) => {
+      const now = Date.now();
+      const active = socialContextService.store.listActive(conversationId, now);
+      const retrievedAtoms = rankSocialAtoms(query, active, { now, limit: 5 });
+      return {
+        contextBlock: compileSocialContextBlock(retrievedAtoms),
+        retrievedAtoms,
+      };
+    },
+    // 图片附件 caption 兜底（UI 移植阶段 P1）：复用 loadVisionConfig + vision-captioner。
+    // 失败返回 { ok:false }，绝不抛异常阻断主流程。
+    captionImageForFallback: async (filePath) => {
+      const validated = validateCaptionImagePath(filePath);
+      if (!validated.ok) return { ok: false, error: validated.error };
+      const visionCfg = loadVisionConfig();
+      if (!visionCfg) return { ok: false, error: "未配置视觉模型，无法分析图片" };
+      try {
+        const { captionImage } = await import("./orchestrator/vision-captioner");
+        const caption = await captionImage(
+          { base64: validated.buffer.toString("base64"), mime: validated.mime },
+          buildImageCaptionPrompt(false),
+          visionCfg,
+        );
+        if (caption.startsWith("[错误")) return { ok: false, error: caption };
+        return { ok: true, caption };
+      } catch (err: any) {
+        return { ok: false, error: err?.message || String(err) };
+      }
+    },
   };
   const onRunFinishedDeps: OnRunFinishedDeps = {
     loadModelSettings: () => loadModelSettings(),
@@ -5129,11 +5555,21 @@ app.whenReady().then(async () => {
       observeRuntimeState(settings as any, history as any, userText, reply)) as OnRunFinishedDeps["observeRuntimeState"],
     recordRelationshipTurn,
     getChatWindow: () => chatWindow,
+    // social-context：run 正常结束后异步抽取社交原子（失败只 console.warn，不影响主流程）。
+    scheduleSocialAtomExtraction: (input) => {
+      socialContextService.scheduler.schedule({
+        ...input,
+        // 抽取时从 store 补齐当前 active atoms，供 supersede/resolve 引用。
+        retrievedAtoms: socialContextService.store.listActive(input.conversationId, input.now),
+      });
+    },
   };
   registerAgUiIpc(
     async (input: AguiRunInput) => buildAgentRunOptions(input, buildOptionsDeps),
-    async (result, latestUserText) => onAgentRunFinished(result, latestUserText, onRunFinishedDeps),
+    async (result, latestUserText, conversationId) =>
+      onAgentRunFinished(result, latestUserText, onRunFinishedDeps, undefined, conversationId),
     () => chatWindow,
+    proactiveLifecycle?.proactiveConversationLifecycle,
   );
 
   ipcMain.handle(IPC.CHATS_OPEN_IN_CHAT_WINDOW, (_event, sessionId: string) => {
@@ -5151,6 +5587,27 @@ app.whenReady().then(async () => {
     return true;
   });
   ipcMain.handle(IPC.CHATS_GET_ACTIVE_SESSION, () => activeChatSessionId);
+
+  // Music（网易云）：MusicService + 11 个 IPC handler + 10 个 music_* Agent 工具 + 退出 latch。
+  // hooks 接 CITA ingest（音乐上下文投影）与 AG-UI CUSTOM 卡片事件（columbina.music）。
+  // vendor 目录缺失时自动降级（backend=degraded，登录/搜索返回"未安装音乐依赖"），不阻塞启动。
+  const musicPaths = resolveMusicPaths();
+  musicBootstrap = bootstrapMusicService(musicPaths, {
+    ingestContextEvent: (event) => citaService.ingest(event),
+    sendCard: (card) => {
+      const payload = { type: "CUSTOM", name: "columbina.music", value: card };
+      let delivered = false;
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (win.isDestroyed()) continue;
+        try {
+          win.webContents.send(IPC.AGUI_EVENT, payload);
+          delivered = true;
+        } catch { /* ignore 单个窗口失败不影响其它窗口 */ }
+      }
+      return delivered;
+    },
+  });
+  installShutdownLatch(musicBootstrap);
 
   const generalSettings = loadGeneralSettings();
   createWindow();
@@ -5174,6 +5631,23 @@ app.whenReady().then(async () => {
     await initReranker(modelSettings.rerankerMode);
   } catch (err) {
     console.error("[Columbina] RAG init FAILED:", err);
+  }
+
+  // 文档后台索引队列接线（放在 RAG 初始化之后；worker 内部 require 延迟加载依赖，
+  // 因此即使 RAG 初始化失败，队列本身也保持可用）
+  configureDocumentIndexQueue(runDocumentIndexJob);
+
+  // Memory/RAG 启动对账：对齐 memory.json 与向量库（孤儿向量清理 / 缺失向量重建 / 状态重链）
+  try {
+    await reconcileUserMemoryIndex();
+  } catch (err) {
+    console.warn("[Memory/RAG] startup reconciliation failed:", err);
+  }
+
+  // Obsidian vault：若已绑定，恢复 Obsidian → PMRS 回流监听
+  const obsidianConfig = loadObsidianVaultConfig();
+  if (obsidianConfig.vaultPath) {
+    startVaultWatcher(obsidianConfig.vaultPath);
   }
 
   // 初始化表情包 embedding 索引
@@ -5216,8 +5690,11 @@ app.on("window-all-closed", () => {});
 app.on("before-quit", () => {
   schedulerEngine?.stop();
   stopOpener();
+  proactiveLifecycle?.stopProactiveTrigger();
   flushTokenUsage();
   void shutdownChannels();
+  // Music 的异步关闭由 installShutdownLatch 接管（preventDefault → shutdown → app.quit），
+  // 不在本 handler 里直接调用，避免先置 shuttingDown 导致 latch 跳过等待。
 });
 
 app.on("activate", () => {

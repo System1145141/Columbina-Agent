@@ -12,7 +12,7 @@ import { defaultKeymap, indentWithTab } from "@codemirror/commands";
 import { state, subscribe, notify, type InlineChatState } from "../services/state";
 import { saveTab, getFileExtension, loadFullFile, readFile, normalizeLineEndings } from "../services/file-service";
 import { callAgentStream, buildPersonaPrompt } from "../services/agent-bridge";
-import { appendToAiInput, formatConversationBlock } from "../services/ai-context";
+import { addContextRef, detectLanguageName } from "../services/ai-context";
 import {
   lspExtension,
   notifyLspOpen,
@@ -225,6 +225,7 @@ export function flushAutoSave(): void {
   void saveTab(tabId);
 }
 
+/** 语言名（用于「添加到对话」代码块标注） */
 function detectLanguage(filePath: string) {
   const override = state.fileLanguageOverrides[filePath];
   if (override === "plaintext") return [];
@@ -577,7 +578,7 @@ function renderLargeFileBanner(tab: import("../services/state").Tab | null) {
   loadBtn.type = "button";
   loadBtn.className = "ide__large-file-banner-btn";
   loadBtn.textContent = "加载完整文件";
-  loadBtn.disabled = tab.loadedFull;
+  loadBtn.disabled = !!tab.loadedFull;
   loadBtn.addEventListener("click", () => {
     if (state.activeTabId) void loadFullFile(state.activeTabId);
   });
@@ -654,13 +655,20 @@ function addSelectedToConversation(): void {
   const source = filePath
     ? `代码选区: ${filePath} 行 ${lineStart}-${lineEnd}`
     : `代码选区 行 ${lineStart}-${lineEnd}`;
-  appendToAiInput(formatConversationBlock(source, text, detectLanguage(filePath)));
+  addContextRef({
+    source,
+    filePath: filePath || undefined,
+    lineStart,
+    lineEnd,
+    language: detectLanguageName(filePath) || undefined,
+    content: text,
+  });
 }
 
 /** 把当前打开文件（完整内容）添加到对话；读取失败时回退到编辑器当前内容 */
 async function addFileToConversation(): Promise<void> {
   const filePath = state.activeTabId || "";
-  const lang = detectLanguage(filePath);
+  const lang = detectLanguageName(filePath) || undefined;
   let content = state.editorView?.state.doc.toString() ?? "";
   if (filePath) {
     try {
@@ -670,7 +678,12 @@ async function addFileToConversation(): Promise<void> {
       // 读取失败（如 diff 标签无真实文件）时使用编辑器当前内容
     }
   }
-  appendToAiInput(formatConversationBlock(`整个文件: ${filePath || "未命名"}`, content, lang));
+  addContextRef({
+    source: `整个文件: ${filePath || "未命名"}`,
+    filePath: filePath || undefined,
+    language: lang,
+    content,
+  });
 }
 
 async function promptRenameSymbol() {

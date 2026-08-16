@@ -52,6 +52,61 @@ describe("build-options", () => {
     expect(system).not.toContain("你正在通过飞书回复用户")
   })
 
+  it("injects image vision info into system when captions succeed", async () => {
+    const deps = {
+      ...createBuildDeps(),
+      captionImageForFallback: async (filePath: string) => {
+        if (filePath.includes("ok.png")) return { ok: true, caption: "一张夕阳下的海边照片" }
+        return { ok: false, error: "文件不存在" }
+      },
+    }
+    const result = await buildAgentRunOptions({
+      messages: [{ role: "user", content: "看图" }],
+      style: "01_default.md",
+      imageAttachments: [
+        { name: "ok.png", filePath: "C:\\tmp\\ok.png", mime: "image/png" },
+        { name: "broken.png", filePath: "C:\\tmp\\broken.png", mime: "image/png" },
+      ],
+    }, deps)
+
+    const system = result.options.messages[0].content
+    expect(system).toContain("【图片视觉信息】")
+    expect(system).toContain("ok.png：一张夕阳下的海边照片")
+    expect(system).toContain("broken.png：图片分析失败：文件不存在")
+    expect(system).toContain("不要编造")
+  })
+
+  it("marks unconnected captions and does not inject when no images", async () => {
+    const noFallback = await buildAgentRunOptions({
+      messages: [{ role: "user", content: "看图" }],
+      style: "01_default.md",
+      imageAttachments: [{ name: "a.png", filePath: "C:\\tmp\\a.png" }],
+    }, createBuildDeps())
+    expect(noFallback.options.messages[0].content).toContain("a.png：图片分析未接线")
+
+    const withoutImages = await buildAgentRunOptions({
+      messages: [{ role: "user", content: "你好" }],
+      style: "01_default.md",
+    }, createBuildDeps())
+    expect(withoutImages.options.messages[0].content).not.toContain("【图片视觉信息】")
+  })
+
+  it("survives caption errors thrown by the fallback implementation", async () => {
+    const deps = {
+      ...createBuildDeps(),
+      captionImageForFallback: async () => { throw new Error("boom") },
+    }
+    const result = await buildAgentRunOptions({
+      messages: [{ role: "user", content: "看图" }],
+      style: "01_default.md",
+      imageAttachments: [{ name: "a.png", filePath: "C:\\tmp\\a.png" }],
+    }, deps)
+
+    const system = result.options.messages[0].content
+    expect(system).toContain("a.png：图片分析失败：boom")
+    expect(system).toContain("【图片视觉信息】")
+  })
+
   it("has distinct system text for Feishu work chat", () => {
     expect(buildChannelSystem("feishu")).toContain("你正在通过飞书回复用户")
     expect(buildChannelSystem("feishu")).toContain("工作上下文")
