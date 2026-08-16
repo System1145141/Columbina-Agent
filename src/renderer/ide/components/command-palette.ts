@@ -13,7 +13,7 @@ import {
   findReferences,
   formatDocument,
 } from "./lsp-integration";
-import { runAgentPlan, undoLastRefactor, runAgentTurn } from "../services/agent-bridge";
+import { runAgentPlan, undoLastRefactor, runAgentTurn, requestErrorFix } from "../services/agent-bridge";
 import {
   toggleSearchPanel,
   toggleProblemsPanel,
@@ -139,6 +139,19 @@ function getBaseCommands(): CommandItem[] {
           "请为当前打开的文件生成单元测试：先用 generate_tests 工具获取文件内容与项目测试框架，再生成覆盖核心逻辑和边界情况的测试代码，用 write_file 写入合适的测试文件，并给出运行命令。",
           "file"
         );
+      },
+    },
+    {
+      id: "ai-fix-diagnostics",
+      label: "AI: 修复当前文件的问题",
+      icon: "✨",
+      run: () => {
+        const tab = state.activeTabId ? state.tabs.get(state.activeTabId) : null;
+        if (!tab) return;
+        const diags = state.lspDiagnostics.get(tab.filePath);
+        if (!diags || diags.length === 0) return;
+        toggleAiPanel();
+        void requestErrorFix(tab.filePath, diags);
       },
     },
     {

@@ -779,6 +779,41 @@ html, body, .ide {
   color: #6b6b6b;
 }
 
+/* 一键 AI 修复按钮：单条 hover 显示，文件组「全部修复」常驻 */
+.ide__problems-fix-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: #3794ff;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 6px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.ide__problems-fix-btn--all {
+  opacity: 0.85;
+}
+
+.ide__problems-file:hover .ide__problems-fix-btn--all,
+.ide__problems-row:hover .ide__problems-fix-btn {
+  opacity: 1;
+}
+
+.ide__problems-fix-btn:hover {
+  background: rgba(55, 148, 255, 0.18);
+}
+
+.ide__problems-fix-btn.is-disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .ide__problems-line {
   flex-shrink: 0;
   min-width: 46px;

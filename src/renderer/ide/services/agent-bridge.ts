@@ -34,8 +34,11 @@ import {
   encodeLineEndings,
   detectLineEnding,
   collectProjectContextAcrossRoots,
+  openFile,
 } from "./file-service";
 import { queryGitStatus, getGitDiff } from "./git-service";
+import { showAiPanel } from "./layout";
+import type { LspDiagnostic } from "./lsp-client";
 
 let runCommandInTerminalImpl: ((command: string, cwd?: string) => Promise<string | null>) | null = null;
 
@@ -1328,6 +1331,39 @@ export async function runAgentTurn(userText: string, scope: AiContextScope, maxR
     }
     notify();
   }
+}
+
+// ── 一键修复（自动错误修复） ──
+
+/**
+ * 把目标文件的 LSP 诊断交给 Agent 修复。
+ * - 先打开目标文件并跳到首个问题（用户可见 Agent 在修什么；scope="file" 注入的即目标文件内容）
+ * - Agent 侧 read_file 只读自动执行；修复走 edit_file 确认卡（Solo 模式按 aiMode 自动批准）
+ * - 只处理错误/警告（severity 1/2），信息与提示级别视为噪音不修
+ */
+export async function requestErrorFix(filePath: string, diagnostics: LspDiagnostic[]): Promise<void> {
+  const diags = diagnostics.filter((d) => d.severity == null || d.severity <= 2);
+  if (diags.length === 0 || state.aiRunning) return;
+
+  if (!state.aiPanelVisible) showAiPanel();
+  await openFile(filePath, diags[0].range.start.line + 1, diags[0].range.start.character + 1);
+
+  const list = diags
+    .map((d, i) => {
+      const sev = d.severity === 2 ? "警告" : "错误";
+      const src = d.source ? `（来源: ${d.source}）` : "";
+      return `${i + 1}. [${sev}] 第 ${d.range.start.line + 1} 行 第 ${d.range.start.character + 1} 列：${d.message}${src}`;
+    })
+    .join("\n");
+
+  await runAgentTurn(
+    `请修复文件 \`${filePath}\` 中语言服务器报告的 ${diags.length} 个问题：\n\n${list}\n\n要求：\n` +
+      `- 先用 read_file 读取目标文件全文，结合诊断行列定位每个问题的根因；\n` +
+      `- 用 edit_file 做最小化修复，只改动与诊断相关的代码，不重构无关内容；\n` +
+      `- 修复后可用 get_diagnostics 工具（文件路径 \`${filePath}\`）验证问题是否消除；\n` +
+      `- 最后逐条简要说明问题原因与修法。`,
+    "file",
+  );
 }
 
 // Task planning

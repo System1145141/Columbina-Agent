@@ -1,6 +1,7 @@
 import { state, subscribe, notify } from "../services/state";
 import { toggleProblemsPanel } from "../services/layout";
 import { openFile, basename } from "../services/file-service";
+import { requestErrorFix } from "../services/agent-bridge";
 import type { LspDiagnostic } from "../services/lsp-client";
 
 const problemsToggleBtn = document.getElementById("problems-toggle-btn") as HTMLButtonElement;
@@ -22,6 +23,26 @@ function severityClass(severity?: number): string {
     default:
       return "hint";
   }
+}
+
+/** severity 1/2 之外的问题不参与一键修复（信息/提示级别视为噪音） */
+function fixable(diags: LspDiagnostic[]): LspDiagnostic[] {
+  return diags.filter((d) => d.severity == null || d.severity <= 2);
+}
+
+/** 构建一键修复按钮；Agent 运行中渲染为禁用态（每次 notify 重渲染自动刷新） */
+function createFixButton(label: string, title: string, onClick: () => void): HTMLButtonElement {
+  const btn = document.createElement("button");
+  btn.className = "ide__problems-fix-btn" + (label !== "✨" ? " ide__problems-fix-btn--all" : "") + (state.aiRunning ? " is-disabled" : "");
+  btn.textContent = label;
+  btn.title = title;
+  if (!state.aiRunning) {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onClick();
+    });
+  }
+  return btn;
 }
 
 /** 渲染问题面板：按文件分组，错误优先，点击跳转到对应位置 */
@@ -74,6 +95,14 @@ function renderProblemsPanel(): void {
     filePathText.textContent = filePath;
     fileHeader.appendChild(fileName);
     fileHeader.appendChild(filePathText);
+    const fixableDiags = fixable(diags);
+    if (fixableDiags.length > 0) {
+      fileHeader.appendChild(
+        createFixButton("✨ 全部修复", "让 AI 修复此文件的所有错误与警告", () => {
+          void requestErrorFix(filePath, fixableDiags);
+        }),
+      );
+    }
     fileGroup.appendChild(fileHeader);
 
     for (const diag of diags) {
@@ -96,6 +125,13 @@ function renderProblemsPanel(): void {
       row.appendChild(icon);
       row.appendChild(lineNo);
       row.appendChild(message);
+      if (diag.severity == null || diag.severity <= 2) {
+        row.appendChild(
+          createFixButton("✨", `AI 修复：${diag.message.slice(0, 60)}`, () => {
+            void requestErrorFix(filePath, [diag]);
+          }),
+        );
+      }
       // LSP 行列从 0 开始，编辑器从 1 开始
       row.addEventListener("click", () => {
         void openFile(filePath, diag.range.start.line + 1, diag.range.start.character + 1);
