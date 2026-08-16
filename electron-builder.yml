@@ -20,7 +20,6 @@ files:
 # 原生模块不能放 asar（node-pty 等需要 fs 直接访问）
 asarUnpack:
   - "**/node_modules/node-pty/**"
-  - "**/node_modules/@lancedb/lancedb/**"
   - "**/node_modules/@node-rs/jieba/**"
   - "**/node_modules/sharp/**"
 
