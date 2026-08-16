@@ -89,10 +89,9 @@ export function getCurrentSelection(): string {
   return state.editorView.state.doc.sliceString(from, to);
 }
 
-export function stripActions(content: string): string {
-  // 仅用于清理旧版本会话消息中的 <action> 协议残留（协议已废弃，新消息不会再包含）
-  return content.replace(/<action>[\s\S]*?<\/action>/g, "").trim();
-}
+// recall / 旧 <action> 协议标记解析已抽为纯函数模块（可单测，见 recall-tags.test.ts）
+import { stripActions, parseRecallTags, stripRecallTags } from "./recall-tags";
+export { stripActions, parseRecallTags, stripRecallTags };
 
 // ── 会话历史「块索引 + recall」：基于 Reordering Context System 最小验证实现 ──
 // 策略：前 2 轮不优化（全文）；第 3、5、7…（奇数轮）完成后调用一次 LLM，
@@ -109,24 +108,6 @@ interface HistoryTurn {
 /** 任务规划的执行步骤消息（不计入对话轮次计数） */
 function isPlanStepText(text: string): boolean {
   return /^步骤\s*\d+\/\d+/.test((text || "").trim());
-}
-
-/** 提取回复中的 [recall:b轮次号] 标记（可多个） */
-export function parseRecallTags(text: string): Set<number> {
-  const ids = new Set<number>();
-  const re = /\[recall:([^\]]*)\]/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    for (const part of m[1].split(/[,，\s]+/)) {
-      const n = parseInt(part.replace(/^b/i, ""), 10);
-      if (!Number.isNaN(n)) ids.add(n);
-    }
-  }
-  return ids;
-}
-
-export function stripRecallTags(text: string): string {
-  return text.replace(/\[recall:[^\]]*\]/gi, "").trim();
 }
 
 /** 从当前会话历史（aiMessages）配对出（用户 → 助手）轮次 */
