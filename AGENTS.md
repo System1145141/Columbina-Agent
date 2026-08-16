@@ -80,6 +80,10 @@
 - 三个入口：Git 面板提交区「AI 审查」按钮、AI 面板「Git 变更」上下文、命令面板「AI: 审查代码变更」。
 - **提交前审查提醒**：AI 审查（Git 变更上下文）正常完成后记录各 root 的变更指纹（staged+modified+untracked+conflicted 文件列表）；Git 提交时比对指纹，未审查或审查后有新变更时弹窗提示先审查（可仍直接提交）；被停止/异常的审查不记录指纹。
 
+**AI 一键修复与代码生成**
+- **一键修复 LSP 诊断**（`agent-bridge.requestErrorFix`）：问题面板每个文件组「✨ 全部修复」/ 单条「✨」/ 命令面板「AI: 修复当前文件的问题」三个入口；先打开目标文件跳到首个问题行（scope=file 注入即目标文件），prompt 指示 Agent `read_file` 定位根因 → `edit_file` 最小化修复 → `get_diagnostics` 验证 → 逐条说明；只修 severity 1/2；Agent 运行中按钮禁用。
+- **自然语言生成完整代码**（`agent-bridge.requestCodeGeneration`）：命令面板「AI: 自然语言生成代码文件」输入需求 → Agent 先用 list_dir/search_files 摸清项目约定，回复开头输出目录结构树（含每文件职责，即结构预览）→ `write_file` 逐个创建（多文件协作一并生成、不留 TODO）→ 给出运行说明；run 结束后本次新写入文件批量打开为标签（最多 5 个）。`executeWriteFile` 成功分支记录 `lastRunWrittenFiles` 支撑批量打开。
+
 **上下文与记忆**
 - 项目级轻量 RAG：异步队列索引项目文件摘要，Agent 能理解项目结构。
 - 结合现有 L0/L1/L2 记忆，Agent 记得用户编码习惯与项目决策。
@@ -145,17 +149,16 @@
 
 ### 近期：AI Agent 体验深化
 
-1. **自动错误修复**：LSP 诊断到错误时 AI 面板显示「一键修复」，Agent 读取相关文件、生成修复 patch，用户确认后应用。
-2. **自然语言生成完整代码**：AI 面板输入需求生成完整代码文件，支持多文件生成与目录结构建议。
-3. **更多跨文件重构类型**：提取函数、移动文件（基于 LSP 引用分析，diff 预览 + 可整体撤销）。
-4. **人格深化**：支持多风格切换（styles/*.md）、世界书按需召回（embedding 匹配）、与 Live2D 表情/状态栏心情联动。
+1. **更多跨文件重构类型**：提取函数、移动文件（基于 LSP 引用分析，diff 预览 + 可整体撤销）。
+2. **人格深化**：支持多风格切换（styles/*.md）、世界书按需召回（embedding 匹配）、与 Live2D 表情/状态栏心情联动。
+3. **recall 回归测试**：扩充 experiments/recall-experiment 题量，固化「块索引 + recall」行为，防止渲染层解析被未来改动破坏。
 
 ### 工程化：稳定性与发布
 
-5. **自动化测试**：Vitest 单元测试（file-service / state / workspace-service / git-service / lsp-client）+ 主进程集成测试（Git、LSP、文件监听）+ Playwright 渲染进程关键交互；核心服务覆盖率 > 60%。
-6. **错误监控与日志**：捕获主/渲染进程未处理异常与 unhandledRejection，日志落盘 `userData/logs`。
-7. **发布流水线**：electron-builder + GitHub Actions 自动构建 Windows / macOS / Linux 安装包，可选 auto-update。
-8. **设置导出/导入**：导出 settings / workspaces / 快捷键为 JSON，支持导入恢复。
+4. **自动化测试**：Vitest 单元测试（file-service / state / workspace-service / git-service / lsp-client）+ 主进程集成测试（Git、LSP、文件监听）+ Playwright 渲染进程关键交互；核心服务覆盖率 > 60%；renderer 补 tsconfig 纳入类型检查。
+5. **错误监控与日志**：捕获主/渲染进程未处理异常与 unhandledRejection，日志落盘 `userData/logs`。
+6. **发布流水线**：electron-builder + GitHub Actions 自动构建 Windows / macOS / Linux 安装包，可选 auto-update。
+7. **设置导出/导入**：导出 settings / workspaces / 快捷键为 JSON，支持导入恢复。
 
 ### 后续可选
 

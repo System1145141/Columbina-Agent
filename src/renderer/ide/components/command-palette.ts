@@ -13,7 +13,7 @@ import {
   findReferences,
   formatDocument,
 } from "./lsp-integration";
-import { runAgentPlan, undoLastRefactor, runAgentTurn, requestErrorFix } from "../services/agent-bridge";
+import { runAgentPlan, undoLastRefactor, runAgentTurn, requestErrorFix, requestCodeGeneration } from "../services/agent-bridge";
 import {
   toggleSearchPanel,
   toggleProblemsPanel,
@@ -152,6 +152,18 @@ function getBaseCommands(): CommandItem[] {
         if (!diags || diags.length === 0) return;
         toggleAiPanel();
         void requestErrorFix(tab.filePath, diags);
+      },
+    },
+    {
+      id: "ai-generate-code",
+      label: "AI: 自然语言生成代码文件",
+      icon: "🏗️",
+      run: () => {
+        void showPromptDialog("描述要生成的代码（功能 / 语言 / 框架 / 文件划分）").then((req) => {
+          if (!req || !req.trim()) return;
+          toggleAiPanel();
+          void requestCodeGeneration(req.trim());
+        });
       },
     },
     {

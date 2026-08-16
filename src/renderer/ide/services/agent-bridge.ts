@@ -42,6 +42,9 @@ import type { LspDiagnostic } from "./lsp-client";
 
 let runCommandInTerminalImpl: ((command: string, cwd?: string) => Promise<string | null>) | null = null;
 
+/** 最近一次 Agent run 中 write_file 成功写入的文件路径（requestCodeGeneration 结束后批量打开用） */
+let lastRunWrittenFiles: string[] = [];
+
 export function registerRunCommandInTerminal(fn: (command: string, cwd?: string) => Promise<string | null>): void {
   runCommandInTerminalImpl = fn;
 }
@@ -563,6 +566,7 @@ async function executeWriteFile(action: AgentAction): Promise<AgentActionResult>
   const output = encodeLineEndings(action.content || "", lineEnding);
   const result = await writeFile(action.filePath, output);
   if (result.ok) {
+    lastRunWrittenFiles.push(action.filePath);
     const tab = state.tabs.get(action.filePath);
     if (tab) {
       tab.initialContent = normalizeLineEndings(output);
@@ -1364,6 +1368,34 @@ export async function requestErrorFix(filePath: string, diagnostics: LspDiagnost
       `- 最后逐条简要说明问题原因与修法。`,
     "file",
   );
+}
+
+/**
+ * 自然语言生成完整代码（多文件）。
+ * - 回复开头先输出计划创建的目录结构树（含每个文件一句话职责）——即「目录结构建议预览」，
+ *   随后逐个 write_file 创建（每个仍走确认卡 / Solo 自动批准，可撤销）
+ * - run 结束后把本次新写入的文件批量打开为标签（最多 5 个，最后写入的置为活动标签）
+ */
+export async function requestCodeGeneration(requirement: string): Promise<void> {
+  if (!requirement.trim() || state.aiRunning) return;
+
+  if (!state.aiPanelVisible) showAiPanel();
+  lastRunWrittenFiles = [];
+
+  await runAgentTurn(
+    `请根据以下需求生成完整、可直接运行的代码文件：\n\n${requirement.trim()}\n\n要求：\n` +
+      `- 先用 list_dir / search_files 了解目标项目的结构与既有约定（语言、框架、目录布局、命名风格），再决定新文件位置；\n` +
+      `- 回复开头先用代码块给出计划创建的目录结构树，每个文件附一句话职责说明；\n` +
+      `- 然后用 write_file 逐个创建文件：代码完整可运行、相互导入路径一致、遵循项目既有约定；\n` +
+      `- 需要多文件协作时（入口 + 模块 + 类型 + 配置 + 依赖清单）一并生成，不要留占位 TODO；\n` +
+      `- 最后给出安装依赖与运行/使用的说明。`,
+    "project",
+  );
+
+  const generated = lastRunWrittenFiles;
+  for (const filePath of generated.slice(0, 5)) {
+    await openFile(filePath);
+  }
 }
 
 // Task planning
