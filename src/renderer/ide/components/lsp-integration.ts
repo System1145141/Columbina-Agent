@@ -3,9 +3,9 @@ import { autocompletion, type Completion, type CompletionContext, type Completio
 import { hoverTooltip, keymap, ViewPlugin, EditorView, type ViewUpdate } from "@codemirror/view";
 import { StateEffect, StateField, EditorState, type Extension, type Text } from "@codemirror/state";
 import { getLspClient, removeLspClient, type LspClient, type LspDiagnostic, type LspRange } from "../services/lsp-client";
-import { state, subscribe, notify, setLspDiagnostics, getLspDiagnostics, getRootForPath, getLanguageIdForFile, EXT_TO_LANGUAGE_ID, type IdeSearchResult, type OutlineSymbol, type FileSnapshot } from "../services/state";
-import { getFileExtension, openFileAt, readFile, writeFile, encodeLineEndings, detectLineEnding } from "../services/file-service";
-import { showReferencesResults } from "./file-tree";
+import { state, subscribe, notify, setLspDiagnostics, getLspDiagnostics, getRootForPath, getLanguageIdForFile, EXT_TO_LANGUAGE_ID, type IdeSearchResult, type OutlineSymbol, type FileSnapshot, updateTabPath } from "../services/state";
+import { getFileExtension, openFileAt, readFile, writeFile, encodeLineEndings, detectLineEnding, rename, move, parentDir, basename } from "../services/file-service";
+import { showReferencesResults, refreshTreeItem } from "./file-tree";
 import { showRefactorPreview, type RefactorPreviewChange } from "./refactor-preview";
 
 let lastLspRootsKey = "";
@@ -448,10 +448,13 @@ export async function previewRenameSymbol(
  * - 已打开文件：应用到编辑器/标签内容并按行尾写盘；
  * - 未打开文件：直接读原始内容应用后写回；
  * - 写盘前为每个文件保存快照，整体压入 refactorUndoStack 支持一键撤销。
+ * - opts.extraSnapshots：随组附加的额外快照（如移动文件时旧路径的原始内容）；
+ *   opts.movedFile：标记本组含文件移动，撤销时回写旧路径后清理新路径。
  */
 export async function applyRefactorChanges(
   changes: Map<string, LspTextEdit[]>,
-  label: string
+  label: string,
+  opts?: { extraSnapshots?: FileSnapshot[]; movedFile?: { oldPath: string; newPath: string } }
 ): Promise<{ ok: boolean; files: string[] }> {
   const files: string[] = [];
   const snapshots: FileSnapshot[] = [];
@@ -512,8 +515,9 @@ export async function applyRefactorChanges(
     notify();
   }
 
-  if (snapshots.length > 0) {
-    state.refactorUndoStack.push({ label, snapshots });
+  if (snapshots.length > 0 || opts?.extraSnapshots?.length) {
+    const allSnapshots = [...(opts?.extraSnapshots || []), ...snapshots];
+    state.refactorUndoStack.push({ label, snapshots: allSnapshots, movedFile: opts?.movedFile });
     if (state.refactorUndoStack.length > 20) state.refactorUndoStack.shift();
   }
   return { ok: !anyFailed && files.length > 0, files };
@@ -539,6 +543,181 @@ export async function renameSymbol(view: EditorView, newName: string): Promise<v
 
   const res = await applyRefactorChanges(changes, `重命名符号为 ${newName}`);
   showStatusMessage(res.ok ? `已重命名 ${res.files.length} 个文件` : "重命名失败，请查看控制台");
+}
+
+// ── 提取函数（refactor.extract.function codeAction）──
+
+interface LspCodeAction {
+  title?: string;
+  kind?: string;
+  edit?: LspWorkspaceEdit;
+  command?: unknown;
+}
+
+/**
+ * 把选中代码提取为函数（LSP codeAction "refactor.extract.function"）：
+ * 请求重构 codeAction → 取带 edit 的提取动作 → diff 预览 → applyRefactorChanges（可整体撤销）。
+ * @param 坐标均为 1 基；文件需已打开（didOpen 同步后服务器才有最新内容）。
+ */
+export async function extractFunctionAt(
+  filePath: string,
+  startLine: number,
+  startCol: number,
+  endLine: number,
+  endCol: number
+): Promise<{ ok: boolean; output?: string }> {
+  const ctx = getLspContext(filePath);
+  if (!ctx) return { ok: false, output: "语言服务器未启动或不支持该文件类型，无法提取" };
+  const started = await ctx.client.start();
+  if (!started.ok) return { ok: false, output: "语言服务器启动失败，无法提取" };
+
+  try {
+    const actions = (await sendLspRequest(ctx.client, "textDocument/codeAction", {
+      textDocument: { uri: filePathToUri(filePath) },
+      range: {
+        start: { line: Math.max(0, startLine - 1), character: Math.max(0, startCol - 1) },
+        end: { line: Math.max(0, endLine - 1), character: Math.max(0, endCol - 1) },
+      },
+      context: { only: ["refactor.extract.function"] },
+    })) as LspCodeAction[] | null;
+
+    const list = Array.isArray(actions) ? actions : [];
+    const picked =
+      list.find((a) => a?.kind?.startsWith("refactor.extract.function") && a.edit) ||
+      list.find((a) => typeof a?.kind === "string" && a.kind.startsWith("refactor.extract") && a.edit);
+    if (!picked || !picked.edit) {
+      return { ok: false, output: "当前选中代码无法提取为函数（语言服务器不支持该位置的重构，或选择范围无效）" };
+    }
+
+    const changes = collectWorkspaceChanges(picked.edit);
+    if (changes.size === 0) {
+      return { ok: false, output: "提取函数未产生任何编辑（可能是语言服务器返回了空 edit）" };
+    }
+
+    const title = `提取函数（${picked.title || picked.kind}）`;
+    const preview: RefactorPreviewChange[] = Array.from(changes.entries()).map(([p, edits]) => ({ filePath: p, edits }));
+    const confirmed = await showRefactorPreview(preview, title);
+    if (!confirmed) return { ok: false, output: "用户已取消提取" };
+
+    const res = await applyRefactorChanges(changes, title);
+    return res.ok
+      ? { ok: true, output: `已提取函数，更新 ${res.files.length} 个文件` }
+      : { ok: false, output: "部分文件应用失败，请查看控制台" };
+  } catch (err) {
+    console.error("[LSP] extractFunctionAt failed:", err);
+    return { ok: false, output: `提取函数失败: ${String(err)}` };
+  }
+}
+
+/** 编辑器入口：对当前选区执行提取函数 */
+export async function extractFunctionFromSelection(): Promise<void> {
+  const view = state.editorView;
+  const filePath = view ? editorFilePaths.get(view) : undefined;
+  if (!view || !filePath) return;
+  const sel = view.state.selection.main;
+  if (sel.from === sel.to) {
+    showStatusMessage("请先选中要提取的代码");
+    return;
+  }
+  const start = cmPosToLsp(view.state.doc, sel.from);
+  const end = cmPosToLsp(view.state.doc, sel.to);
+  const res = await extractFunctionAt(filePath, start.line + 1, start.character + 1, end.line + 1, end.character + 1);
+  showStatusMessage(res.output || (res.ok ? "已提取" : "提取失败"));
+}
+
+// ── 移动/重命名文件（workspace/willRenameFiles 更新导入引用）──
+
+/** 计算移动文件引起的跨文件导入更新（不应用）；无引用或服务器不支持时返回空 Map */
+export async function previewMoveFile(
+  oldPath: string,
+  newPath: string
+): Promise<Map<string, LspTextEdit[]>> {
+  const ctx = getLspContext(oldPath);
+  if (!ctx) return new Map();
+  try {
+    const started = await ctx.client.start();
+    if (!started.ok) return new Map();
+    const result = (await sendLspRequest(ctx.client, "workspace/willRenameFiles", {
+      files: [{ oldUri: filePathToUri(oldPath), newUri: filePathToUri(newPath) }],
+    })) as LspWorkspaceEdit | null;
+    if (!result) return new Map();
+    return collectWorkspaceChanges(result);
+  } catch (err) {
+    console.warn("[LSP] willRenameFiles failed (按无引用更新处理):", err);
+    return new Map();
+  }
+}
+
+/**
+ * 移动/重命名文件并同步更新所有引用处的导入路径：
+ * 1. willRenameFiles 计算 import 更新（移动前请求，服务器基于旧 URI）；
+ * 2. 预览（有引用更新时走 diff 预览弹窗，否则 confirm 兜底）；
+ * 3. 物理移动（同目录 rename / 跨目录 move，必要时二者串联）；
+ * 4. 标签路径同步 + 目录树刷新 + 应用引用更新；
+ * 5. 旧路径内容快照 + movedFile 标记一并压入 refactorUndoStack，可整体撤销。
+ */
+export async function moveFileWithRefs(oldPath: string, rawNewPath: string): Promise<{ ok: boolean; output?: string }> {
+  const newPath = rawNewPath.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (!newPath || newPath === oldPath) return { ok: false, output: "目标路径与当前路径相同" };
+
+  const changes = await previewMoveFile(oldPath, newPath);
+  const preview: RefactorPreviewChange[] = Array.from(changes.entries()).map(([p, edits]) => ({ filePath: p, edits }));
+  const label = `移动文件 ${basename(oldPath)} → ${newPath}`;
+
+  if (changes.size > 0) {
+    const confirmed = await showRefactorPreview(preview, `${label}（含 ${changes.size} 个文件的导入更新）`);
+    if (!confirmed) return { ok: false, output: "用户已取消移动" };
+  } else if (!confirm(`${label}？\n未检测到需要更新的导入引用，仅移动文件本身。`)) {
+    return { ok: false, output: "用户已取消移动" };
+  }
+
+  // 旧路径内容快照（撤销时回写旧路径）
+  let oldContent: string;
+  try {
+    oldContent = await readFile(oldPath);
+  } catch (err) {
+    return { ok: false, output: `读取原文件失败: ${String(err)}` };
+  }
+
+  // 物理移动：同目录用 rename（可顺带改名），跨目录先 move 再改名
+  const srcParent = parentDir(oldPath);
+  const dstParent = parentDir(newPath);
+  const dstName = basename(newPath);
+  try {
+    if (srcParent === dstParent) {
+      const r = await rename(oldPath, dstName);
+      if (!r.ok) return { ok: false, output: `移动失败: ${r.error || "未知错误"}` };
+    } else {
+      const m = await move(oldPath, dstParent);
+      if (!m.ok) return { ok: false, output: `移动失败: ${m.error || "未知错误"}` };
+      if (dstName !== basename(oldPath)) {
+        const r = await rename(newPath, dstName);
+        if (!r.ok) return { ok: false, output: `改名失败: ${r.error || "未知错误"}` };
+      }
+    }
+  } catch (err) {
+    return { ok: false, output: `移动失败: ${String(err)}` };
+  }
+
+  // 标签路径同步 + 目录树刷新（源/目标两个目录）
+  if (state.tabs.has(oldPath)) updateTabPath(oldPath, newPath, dstName);
+  await refreshTreeItem(srcParent);
+  if (dstParent && dstParent !== srcParent) await refreshTreeItem(dstParent);
+
+  // 应用引用更新（与旧路径快照、movedFile 合并为同一撤销组）
+  const extraSnapshots: FileSnapshot[] = [
+    { filePath: oldPath, content: oldContent, lineEnding: detectLineEnding(oldContent), sessionId: state.activeAiSessionId || undefined },
+  ];
+  if (changes.size > 0) {
+    const res = await applyRefactorChanges(changes, label, { extraSnapshots, movedFile: { oldPath, newPath } });
+    return res.ok
+      ? { ok: true, output: `已移动到 ${newPath}，并更新 ${res.files.length} 个文件的导入` }
+      : { ok: false, output: "文件已移动，但部分导入更新失败，请查看控制台" };
+  }
+
+  state.refactorUndoStack.push({ label, snapshots: extraSnapshots, movedFile: { oldPath, newPath } });
+  if (state.refactorUndoStack.length > 20) state.refactorUndoStack.shift();
+  return { ok: true, output: `已移动到 ${newPath}（无导入引用需要更新）` };
 }
 
 export async function findReferences(view?: EditorView): Promise<void> {

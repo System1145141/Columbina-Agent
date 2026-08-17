@@ -24,9 +24,9 @@
 - **右键「添加到对话」**：编辑器选区（带文件与行号标注）、终端选区、文件树整个文件，均可一键插入 AI 输入框（`【添加到对话｜来源】` + 代码块，语言高亮），自动打开 AI 面板并聚焦；独立 `ai-context.ts` 模块避免组件循环依赖。
 - **界面为分隔线布局（无气泡）**：用户消息纯文本 + 分隔线；助手消息 =「深度思考」可折叠块（流式累积 AG-UI `REASONING_MESSAGE_CONTENT` 思维链，模型不返回 reasoning 时隐藏）+ 涉及文件标签（write/edit/delete 高亮为已修改）+ 正文；**正文与思维链均流式增量渲染**（订阅 AG-UI 事件逐字更新，`<action>`/`[recall]` 标记实时剥离，不污染显示）。
 - **消息时间线（segments）**：深度思考与工具调用按真实执行时序交替存储/渲染（`AiMessage.segments`：reasoning 段独立折叠块 + tool 段独立工具行，多轮工具调用不再合并思维链）；最新思考块默认展开、用户折叠状态持久化到段（重渲染不重置）；旧消息（无 segments）回退合并显示。
-- **真实 tool-call 流式**：IDE 模式全部 16 个工具原生化为主进程原生 function calling——渲染层随每次 run 传工作区 roots（`AguiRunInput.ideTools`，`confirmed=false` 时仅只读工具用于摘要/规划等后台 run），主进程 `buildIdeTools` 构建 ToolDefinition 注入 FC 循环；AI 面板订阅 `TOOL_CALL_START/RESULT/END` 事件流式展示调用过程（⏳ 运行中 → ✓/✗ 结果预览）。**只读工具**（read_file / search_files / list_dir / list_files，risk=fs-read）自动执行、无需确认；**写操作工具**（write_file / edit_file / delete_file / run_command / rename_symbol / generate_tests / review_changes / get_diagnostics / check_command_status / stop_command / todo / plugin）声明 `needsConfirm`，FC 循环执行前经**确认桥**（`toolApprovalHandler`）向 AI 面板弹确认卡片，用户点「确认执行/拒绝」后由渲染层执行既有逻辑（快照撤销 / 标签同步 / diff 预览 / LSP / 终端 / todo）并回填结果（120s 未响应自动拒绝，run 取消/出错时清空悬挂请求）；`<action>` 文本协议已完全废弃（解析、确认卡、消息 actions/actionResults 字段与渲染均已删除，工具调用完全走原生 function calling + 确认桥；`stripActions` 仅保留用于清理旧版本会话消息残留）。
+- **真实 tool-call 流式**：IDE 模式全部 18 个工具原生化为主进程原生 function calling——渲染层随每次 run 传工作区 roots（`AguiRunInput.ideTools`，`confirmed=false` 时仅只读工具用于摘要/规划等后台 run），主进程 `buildIdeTools` 构建 ToolDefinition 注入 FC 循环；AI 面板订阅 `TOOL_CALL_START/RESULT/END` 事件流式展示调用过程（⏳ 运行中 → ✓/✗ 结果预览）。**只读工具**（read_file / search_files / list_dir / list_files，risk=fs-read）自动执行、无需确认；**写操作工具**（write_file / edit_file / delete_file / run_command / rename_symbol / extract_function / move_file / generate_tests / review_changes / get_diagnostics / check_command_status / stop_command / todo / plugin）声明 `needsConfirm`，FC 循环执行前经**确认桥**（`toolApprovalHandler`）向 AI 面板弹确认卡片，用户点「确认执行/拒绝」后由渲染层执行既有逻辑（快照撤销 / 标签同步 / diff 预览 / LSP / 终端 / todo）并回填结果（120s 未响应自动拒绝，run 取消/出错时清空悬挂请求）；`<action>` 文本协议已完全废弃（解析、确认卡、消息 actions/actionResults 字段与渲染均已删除，工具调用完全走原生 function calling + 确认桥；`stripActions` 仅保留用于清理旧版本会话消息残留）。
 
-**Agent 工具集（16 种；read_file / search_files / list_dir / list_files 自动执行，其余经确认卡片把关后执行）**
+**Agent 工具集（18 种；read_file / search_files / list_dir / list_files 自动执行，其余经确认卡片把关后执行）**
 
 | 工具 | 能力 |
 |------|------|
@@ -43,6 +43,8 @@
 | stop_command | 终止终端任务 |
 | todo | 维护待办清单（replace / mark / clear，AI 面板展示卡片） |
 | rename_symbol | 跨文件重命名符号（基于 LSP 引用分析） |
+| extract_function | 提取选中代码为函数（LSP codeAction refactor.extract.function，diff 预览 + 可整体撤销） |
+| move_file | 移动/重命名文件并自动更新导入引用（LSP willRenameFiles，diff 预览 + 可整体撤销） |
 | generate_tests | 生成单元测试（自动检测项目测试框架） |
 | review_changes | 审查当前 Git 变更（收集各工作区 diff） |
 | plugin | 调用插件提供的工具 |
@@ -68,6 +70,8 @@
 
 **跨文件重构**
 - `rename_symbol`：LSP `textDocument/rename` 计算 WorkspaceEdit → diff 预览弹窗（按文件分组展示每处 `行:列 旧文本→新文本`）→ 用户确认 → 应用 → 可整体撤销（撤销栈上限 20 组，写盘 + 同步标签/编辑器）。
+- `extract_function`（提取函数）：`textDocument/codeAction`（`only: refactor.extract.function`）取带 edit 的重构动作 → 同一预览确认与撤销链路；入口 = 编辑器右键「提取选中代码为函数」/ 命令面板 / Agent 工具（选区起止行列 1 基；Agent 路径先 openFile 保证 didOpen 同步）。
+- `move_file`（移动文件）：`workspace/willRenameFiles`（移动前请求，基于旧 URI）计算所有引用文件的导入更新 → 有更新走 diff 预览、无更新 confirm 兜底 → 物理移动（同目录 rename / 跨目录 move，可顺带改名）→ 标签路径同步（updateTabPath）+ 目录树刷新 → 旧路径内容快照与 `movedFile` 标记并入同一撤销组；撤销时回写旧路径、删除新路径并同步标签；入口 = 文件树右键「移动并更新引用…」/ 命令面板「移动当前文件并更新引用」/ Agent 工具。
 - 编辑器内 F2 重命名走同一预览确认流程。
 
 **测试生成**
@@ -149,9 +153,7 @@
 
 ### 近期：AI Agent 体验深化
 
-1. **更多跨文件重构类型**：提取函数、移动文件（基于 LSP 引用分析，diff 预览 + 可整体撤销）。
-2. **人格深化**：支持多风格切换（styles/*.md）、世界书按需召回（embedding 匹配）、与 Live2D 表情/状态栏心情联动。
-3. **recall 回归测试**：扩充 experiments/recall-experiment 题量，固化「块索引 + recall」行为，防止渲染层解析被未来改动破坏。
+1. **人格深化**：支持多风格切换（styles/*.md）、世界书按需召回（embedding 匹配）、与 Live2D 表情/状态栏心情联动。
 
 ### 工程化：稳定性与发布
 

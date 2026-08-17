@@ -120,6 +120,7 @@ function showTreeContextMenu(x: number, y: number, entry: IdeDirEntry) {
       items.push({ label: "在集成终端中打开", action: () => void openTerminalInDir(entry.path) });
     } else {
       items.push({ label: "添加到对话（整个文件）", action: () => void addFileEntryToConversation(entry.path) });
+      items.push({ label: "移动并更新引用…", action: () => void promptMoveWithRefs(entry) });
     }
     items.push({ label: "重命名", action: () => void promptRename(entry) });
     items.push({ label: "移动到…", action: () => void promptMove(entry) });
@@ -302,6 +303,17 @@ async function promptMove(entry: IdeDirEntry) {
 
   await refreshTreeItem(srcParent || getActiveRootPath());
   await refreshTreeItem(normalizedTarget);
+}
+
+/** 移动/重命名文件并自动更新所有引用处的导入路径（LSP willRenameFiles，diff 预览 + 可整体撤销） */
+async function promptMoveWithRefs(entry: IdeDirEntry) {
+  const target = await showPromptDialog("移动到（完整新路径，可改文件名；将自动更新导入引用）:", entry.path);
+  if (!target || !target.trim() || target.trim() === entry.path) return;
+  // 动态 import 断开 file-tree ↔ lsp-integration 循环依赖（仅点击时加载）
+  const { moveFileWithRefs } = await import("./lsp-integration");
+  const res = await moveFileWithRefs(entry.path, target.trim());
+  state.statusMessage = res.output || (res.ok ? "已移动" : "移动失败");
+  notify();
 }
 
 async function copyPath(entry: IdeDirEntry) {

@@ -23,6 +23,7 @@ import {
   renameSymbol,
   findReferences,
   formatDocument,
+  extractFunctionFromSelection,
 } from "./lsp-integration";
 import { inlineCompletionExtension } from "./inline-completion";
 import { showPromptDialog } from "./file-tree";
@@ -608,6 +609,7 @@ function showEditorContextMenu(x: number, y: number) {
   ];
 
   if (hasSelection) {
+    items.push({ label: "提取选中代码为函数", action: () => void extractFunctionFromSelection() });
     items.push({ label: "询问 Columbina", action: () => openInlineChat() });
     items.push({ label: "解释选中代码", action: () => { openInlineChat(); void runInlineChat("解释这段代码"); } });
     items.push({ label: "重构选中代码", action: () => { openInlineChat(); void runInlineChat("重构这段代码，提高可读性"); } });

@@ -21,7 +21,7 @@ import {
 } from "./state";
 import type { EditorView } from "@codemirror/view";
 import { ensureActiveSession } from "./ai-sessions";
-import { previewRenameSymbol, applyRefactorChanges } from "../components/lsp-integration";
+import { previewRenameSymbol, applyRefactorChanges, extractFunctionAt, moveFileWithRefs } from "../components/lsp-integration";
 import { showRefactorPreview, type RefactorPreviewChange, type RefactorPreviewEdit } from "../components/refactor-preview";
 import {
   basename,
@@ -421,6 +421,8 @@ export function isSoloWriteTool(toolName: string): boolean {
     "edit_file",
     "delete_file",
     "rename_symbol",
+    "extract_function",
+    "move_file",
     "run_command",
     "stop_command",
     "todo",
@@ -623,6 +625,38 @@ async function executeRenameSymbol(action: AgentAction): Promise<AgentActionResu
     return { actionId: action.id, ok: false, error: "部分文件应用失败，请查看控制台" };
   } catch (err) {
     return { actionId: action.id, ok: false, error: `重命名失败: ${String(err)}` };
+  }
+}
+
+async function executeExtractFunction(action: AgentAction): Promise<AgentActionResult> {
+  if (!action.filePath || typeof action.line !== "number" || typeof action.col !== "number") {
+    return { actionId: action.id, ok: false, error: "缺少 filePath / line / col" };
+  }
+  const endLine = typeof action.endLine === "number" ? action.endLine : action.line;
+  const endCol = typeof action.endCol === "number" ? action.endCol : action.col;
+  try {
+    // 先打开文件：didOpen 同步后语言服务器才有最新内容，codeAction 才能基于当前代码计算
+    await openFile(action.filePath, action.line, action.col);
+    const res = await extractFunctionAt(action.filePath, action.line, action.col, endLine, endCol);
+    return res.ok
+      ? { actionId: action.id, ok: true, output: res.output || "已提取函数" }
+      : { actionId: action.id, ok: false, output: res.output, error: res.output };
+  } catch (err) {
+    return { actionId: action.id, ok: false, error: `提取函数失败: ${String(err)}` };
+  }
+}
+
+async function executeMoveFile(action: AgentAction): Promise<AgentActionResult> {
+  if (!action.filePath || !action.targetPath) {
+    return { actionId: action.id, ok: false, error: "缺少 filePath / targetPath" };
+  }
+  try {
+    const res = await moveFileWithRefs(action.filePath, action.targetPath);
+    return res.ok
+      ? { actionId: action.id, ok: true, output: res.output || "已移动" }
+      : { actionId: action.id, ok: false, output: res.output, error: res.output };
+  } catch (err) {
+    return { actionId: action.id, ok: false, error: `移动文件失败: ${String(err)}` };
   }
 }
 
@@ -899,9 +933,21 @@ export const AGENT_TOOLS: AgentTool[] = [
   },
   {
     name: "rename_symbol",
-    description: "跨文件重命名符号（基于 LSP 引用分析，所有引用文件同步更新；会生成 diff 预览，需用户确认后应用，可整体撤销）\n   { \"type\": \"rename_symbol\", \"filePath\": \"符号所在文件路径\", \"line\": \"符号所在行号(从1开始)\", \"col\": \"符号所在列号(从1开始)\", \"newName\": \"新名称\" }",
-    formatLabel: (a) => `重命名符号: ${a.newName || ""}（${a.filePath || ""}:${a.line || "?"}:${a.col || "?"}）`,
+    description: "跨文件重命名符号（基于 LSP 引用分析，diff 预览确认后应用，可整体撤销）\n   { \"type\": \"rename_symbol\", \"filePath\": \"符号所在文件\", \"line\": 行号1基, \"col\": 列号1基, \"newName\": \"新名称\" }",
+    formatLabel: (a) => `重命名符号: ${a.newName || ""} @ ${a.filePath || ""}:${a.line || 0}`,
     execute: executeRenameSymbol,
+  },
+  {
+    name: "extract_function",
+    description: "把选中代码段提取为函数（LSP 重构 codeAction，diff 预览确认后应用，可整体撤销）\n   { \"type\": \"extract_function\", \"filePath\": \"文件路径\", \"line\": 起始行1基, \"col\": 起始列1基, \"endLine\": 结束行1基, \"endCol\": 结束列1基 }",
+    formatLabel: (a) => `提取函数: ${a.filePath || ""}:${a.line || 0}-${a.endLine || a.line || 0}`,
+    execute: executeExtractFunction,
+  },
+  {
+    name: "move_file",
+    description: "移动/重命名文件并自动更新所有引用处的导入路径（LSP willRenameFiles，diff 预览确认后应用，可整体撤销）\n   { \"type\": \"move_file\", \"filePath\": \"原路径\", \"targetPath\": \"目标完整新路径\" }",
+    formatLabel: (a) => `移动文件: ${a.filePath || ""} → ${a.targetPath || ""}`,
+    execute: executeMoveFile,
   },
   {
     name: "generate_tests",
@@ -1030,11 +1076,12 @@ export async function undoLastWrite(): Promise<void> {
   }
 }
 
-/** 撤销最近一次跨文件重构（整体回滚所有快照文件） */
+/** 撤销最近一次跨文件重构（整体回滚所有快照文件；含文件移动时一并清理新路径） */
 export async function undoLastRefactor(): Promise<boolean> {
   const group = state.refactorUndoStack[state.refactorUndoStack.length - 1];
   if (!group) return false;
-  if (!confirm(`撤销重构「${group.label}」？将恢复 ${group.snapshots.length} 个文件到重构前状态`)) return false;
+  const moveNote = group.movedFile ? `，并移除移动后的新路径文件 ${basename(group.movedFile.newPath)}` : "";
+  if (!confirm(`撤销重构「${group.label}」？将恢复 ${group.snapshots.length} 个文件到重构前状态${moveNote}`)) return false;
   state.refactorUndoStack.pop();
 
   let failed = 0;
@@ -1058,6 +1105,26 @@ export async function undoLastRefactor(): Promise<boolean> {
           });
         }
       }
+    } catch (err) {
+      failed++;
+    }
+  }
+
+  // 文件移动类重构：快照已把内容回写到旧路径，这里清理新路径文件与标签并刷新目录树
+  if (group.movedFile) {
+    const { oldPath, newPath } = group.movedFile;
+    try {
+      const del = await window.ide?.delete(newPath);
+      if (!del?.ok) failed++;
+      if (state.tabs.has(newPath)) {
+        state.tabs.delete(newPath);
+        if (state.activeTabId === newPath) state.activeTabId = "";
+      }
+      const { parentDir } = await import("./file-service");
+      const { refreshTreeItem } = await import("../components/file-tree");
+      await refreshTreeItem(parentDir(oldPath));
+      const dstParent = parentDir(newPath);
+      if (dstParent && dstParent !== parentDir(oldPath)) await refreshTreeItem(dstParent);
     } catch (err) {
       failed++;
     }

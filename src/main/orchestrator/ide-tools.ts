@@ -417,6 +417,45 @@ export function buildIdeConfirmedTools(): ToolDefinition[] {
       },
     },
     {
+      id: "extract_function",
+      name: "提取函数",
+      description:
+        "把一段代码提取为独立函数（LSP 重构 codeAction，选区起止行列指定；diff 预览确认后应用，可整体撤销）。\n\n" +
+        "参数：filePath（必填），line/col（必填，选区起点，1 基），endLine/endCol（必填，选区终点，1 基）。提取前请先用 read_file 确认选区覆盖完整语句。",
+      enabled: true,
+      risk: "fs-write",
+      needsConfirm: true,
+      inputSchema: {
+        type: "object",
+        properties: {
+          filePath: { type: "string", description: "文件路径" },
+          line: { type: "number", description: "选区起始行（1 基）" },
+          col: { type: "number", description: "选区起始列（1 基）" },
+          endLine: { type: "number", description: "选区结束行（1 基）" },
+          endCol: { type: "number", description: "选区结束列（1 基）" },
+        },
+        required: ["filePath", "line", "col", "endLine", "endCol"],
+      },
+    },
+    {
+      id: "move_file",
+      name: "移动文件",
+      description:
+        "移动/重命名文件并自动更新所有引用处的导入路径（LSP willRenameFiles；diff 预览确认后应用，可整体撤销）。\n\n" +
+        "参数：filePath（必填，原路径），targetPath（必填，目标完整新路径，可含新文件名）。",
+      enabled: true,
+      risk: "fs-write",
+      needsConfirm: true,
+      inputSchema: {
+        type: "object",
+        properties: {
+          filePath: { type: "string", description: "原文件路径" },
+          targetPath: { type: "string", description: "目标完整新路径" },
+        },
+        required: ["filePath", "targetPath"],
+      },
+    },
+    {
       id: "generate_tests",
       name: "生成测试",
       description:

@@ -176,6 +176,8 @@ export interface AgentAction {
     | "search_files"
     | "run_command"
     | "rename_symbol"
+    | "extract_function"
+    | "move_file"
     | "generate_tests"
     | "review_changes"
     | "edit_file"
@@ -195,6 +197,11 @@ export interface AgentAction {
   line?: number;
   col?: number;
   newName?: string;
+  /** extract_function：选区终点（1 基，起点复用 line/col） */
+  endLine?: number;
+  endCol?: number;
+  /** move_file：目标完整新路径 */
+  targetPath?: string;
   /** edit_file：多块精确替换（occurrence 1 基，缺省替换全部） */
   edits?: { search: string; replace: string; occurrence?: number }[];
   /** list_files：glob 模式（相对 root） */
@@ -233,6 +240,8 @@ export interface FileSnapshot {
 export interface RefactorUndoGroup {
   label: string;
   snapshots: FileSnapshot[];
+  /** 移动/重命名文件类重构：撤销时回写旧路径快照后需删除新路径文件并同步标签 */
+  movedFile?: { oldPath: string; newPath: string };
 }
 
 export interface InlineChatSuggestion {

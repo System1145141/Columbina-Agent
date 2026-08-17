@@ -12,6 +12,8 @@ import {
   renameSymbol,
   findReferences,
   formatDocument,
+  extractFunctionFromSelection,
+  moveFileWithRefs,
 } from "./lsp-integration";
 import { runAgentPlan, undoLastRefactor, runAgentTurn, requestErrorFix, requestCodeGeneration } from "../services/agent-bridge";
 import {
@@ -163,6 +165,25 @@ function getBaseCommands(): CommandItem[] {
           if (!req || !req.trim()) return;
           toggleAiPanel();
           void requestCodeGeneration(req.trim());
+        });
+      },
+    },
+    {
+      id: "extract-function",
+      label: "重构: 提取选中代码为函数",
+      icon: "🔧",
+      run: () => void extractFunctionFromSelection(),
+    },
+    {
+      id: "move-current-file",
+      label: "移动当前文件并更新引用…",
+      icon: "📂",
+      run: () => {
+        const tab = state.activeTabId ? state.tabs.get(state.activeTabId) : null;
+        if (!tab || tab.kind === "diff") return;
+        void showPromptDialog("移动到（完整新路径，可改文件名）:", tab.filePath).then((target) => {
+          if (!target || !target.trim() || target.trim() === tab.filePath) return;
+          void moveFileWithRefs(tab.filePath, target.trim());
         });
       },
     },
