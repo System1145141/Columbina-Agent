@@ -157,10 +157,10 @@
 
 ### 工程化：稳定性与发布
 
-4. **自动化测试**：Vitest 单元测试（file-service / state / workspace-service / git-service / lsp-client）+ 主进程集成测试（Git、LSP、文件监听）+ Playwright 渲染进程关键交互；核心服务覆盖率 > 60%；renderer 补 tsconfig 纳入类型检查。
-5. **错误监控与日志**：捕获主/渲染进程未处理异常与 unhandledRejection，日志落盘 `userData/logs`。
-6. **发布流水线**：electron-builder + GitHub Actions 自动构建 Windows / macOS / Linux 安装包，可选 auto-update。
-7. **设置导出/导入**：导出 settings / workspaces / 快捷键为 JSON，支持导入恢复。
+4. **自动化测试**：主进程集成测试（Git、LSP、文件监听）+ Playwright 渲染进程关键交互；核心服务覆盖率进一步提升（已有 129 个测试文件 / 980+ 用例，含 file-service 行尾、lsp-client URI 转换、history-indexes 轮次对齐、memory-scheduler 每日衰减）；settings.ts（约 90 个存量类型错误）与 strictNullChecks 债务逐步收敛。
+5. **错误监控与日志**：✅ 已完成——主进程 `error-monitor.ts`（uncaughtException/unhandledRejection 捕获，`userData/logs/app-YYYY-MM-DD.log` 按天滚动，超 5MB 轮转、保留 7 份）+ 渲染层 8 窗口统一挂载（window.onerror/unhandledrejection/console.error 镜像，经 `ERROR_LOG` IPC 转发主进程落盘，preload 缺失时静默降级）。
+6. **发布流水线**：electron-builder + GitHub Actions（已有 release.yml 三平台构建 + ci.yml push/PR 触发 build + typecheck:renderer + test）→ 待补 auto-update。
+7. **设置导出/导入**：✅ 已完成——通用设置面板「导出…/导入…」，聚合 model-settings / app-settings / IDE 工作区布局为带 `_format: columbina-settings` 标记的 JSON；刻意排除记忆、聊天记录与凭证类文件；导入回写后提示重启生效。
 
 ### 后续可选
 

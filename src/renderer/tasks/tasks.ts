@@ -1,3 +1,4 @@
+import { installRendererErrorMonitor } from "../error-monitor";
 import "../ui/base.css";
 import "./tasks.css";
 import "../ui/theme";
@@ -5,6 +6,7 @@ import { getSchedulePanelItems, type ScheduledTask } from "./task-filter";
 import { t, setLang, setI18nVars, loadLangBundle, type Lang } from "../../shared/i18n";
 import { applyI18n } from "../../shared/i18n/dom";
 import { APP_VERSION } from "../../shared/version";
+installRendererErrorMonitor("tasks");
 
 // ── 类型（后端契约） ──────────────────────────────────────────
 interface TokenDayData {
@@ -20,12 +22,15 @@ interface TokenDayData {
 // ── preload 桥接（全部由共享 preload 暴露） ─────────────────
 declare global {
   interface Window {
-    tasks?: { minimize: () => void; close: () => void };
+    tasks?: {
+      minimize: () => void;
+      close: () => void;
+      onSchedulerChanged?: (callback: () => void) => () => void;
+    };
     tokenUsage?: { get: (days: number) => Promise<TokenDayData[]> };
-    cyreneScheduler?: { list: () => Promise<{ ok: boolean; value?: ScheduledTask[]; error?: string }> };
+    columbinaScheduler?: { list: () => Promise<{ ok: boolean; value?: ScheduledTask[]; error?: string }> };
     schedulerEvents?: { onEvent: (cb: (event: unknown) => void) => () => void };
-    tasks?: { onSchedulerChanged?: (callback: () => void) => () => void };
-    sidebar?: { openSettings: (section?: string) => void };
+    // window.sidebar 的完整声明见 sidebar/sidebar.ts（含 openSettings）
   }
 }
 

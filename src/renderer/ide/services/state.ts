@@ -829,7 +829,7 @@ declare global {
       showGitHeadContent: (folderPath: string, filePath: string) => Promise<{ ok: boolean; content: string }>;
       saveWorkspace: (filePath: string | null, state: Record<string, unknown>) => Promise<{ ok: boolean; filePath?: string; error?: string }>;
       saveWorkspaceSync: (filePath: string | null, state: Record<string, unknown>) => { ok: boolean; filePath?: string; error?: string };
-      openWorkspace: () => Promise<{ ok: boolean; workspace?: Record<string, unknown>; filePath?: string; error?: string }>;
+      openWorkspace: (filePath?: string) => Promise<{ ok: boolean; workspace?: Record<string, unknown>; filePath?: string; error?: string }>;
       getWorkspaceState: () => Promise<{ workspace?: Record<string, unknown>; filePath?: string }>;
       relocateRoot: (oldPath: string) => Promise<string | null>;
       setWorkspaceRoots: (roots: string[]) => void;
@@ -860,6 +860,12 @@ declare global {
         connected?: boolean;
       }>;
       saveSelectedModelIds: (selectedModelIds: Record<string, string>) => Promise<unknown>;
+      onChanged?: (callback: (config: {
+        models?: { id: string; nickname?: string; model?: string; provider?: string }[];
+        defaultModelId?: string;
+        selectedModelIds?: Record<string, string>;
+        connected?: boolean;
+      }) => void) => () => void;
     };
   }
 }

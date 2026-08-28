@@ -14,6 +14,7 @@ import {
 import { openFile, basename, unwatchAllOpenTabs } from "./file-service";
 import { showAiPanel, hideAiPanel, showSearchPanel, hideSearchPanel, showGitPanel, hideGitPanel } from "./layout";
 import { showTerminalPanel, hideTerminalPanel } from "../components/terminal-panel";
+import { alignHistoryIndexes } from "./history-indexes";
 
 interface WorkspacePanelState {
   aiVisible: boolean;
@@ -49,29 +50,12 @@ function isPathUnderRoot(filePath: string, rootPath: string): boolean {
 }
 
 /**
- * 消息截断后对齐历史索引的 seq 编号：
- * 截断只丢最老消息，被丢弃的 user 消息数即 seq 偏移量（buildHistoryTurns 按 user 消息计数）。
- * 旧 seq <= 偏移量的索引对应已丢弃轮次，删除；其余重编号并同步索引行内的「轮次N:」前缀。
- * 修复：消息 slice(-MAX) 截断后 historyIndexes 若不修剪，recall 会召回错误轮次。
+ * 消息截断后对齐历史索引的 seq 编号（实现抽至 history-indexes.ts 以便单测）。
  */
-function alignHistoryIndexes(
-  allMessages: AiMessage[],
-  keptMessages: AiMessage[],
-  indexes?: Record<number, string>
+function alignHistoryIndexesForSession(
+  session: AiSession
 ): Record<number, string> | undefined {
-  if (!indexes || Object.keys(indexes).length === 0) return indexes;
-  const dropped = allMessages
-    .slice(0, Math.max(0, allMessages.length - keptMessages.length))
-    .filter((m) => m.role === "user").length;
-  if (dropped <= 0) return indexes;
-  const next: Record<number, string> = {};
-  for (const [k, v] of Object.entries(indexes)) {
-    const oldSeq = Number(k);
-    if (!Number.isFinite(oldSeq) || oldSeq <= dropped) continue;
-    const newSeq = oldSeq - dropped;
-    next[newSeq] = v.replace(/^轮次\d+:/, `轮次${newSeq}:`);
-  }
-  return Object.keys(next).length > 0 ? next : undefined;
+  return alignHistoryIndexes(session.messages, session.messages.slice(-MAX_PERSISTED_AI_MESSAGES), session.historyIndexes);
 }
 
 function collectWorkspaceState(): Record<string, unknown> {
@@ -99,7 +83,7 @@ function collectWorkspaceState(): Record<string, unknown> {
       updatedAt: s.updatedAt,
       messages: s.messages.slice(-MAX_PERSISTED_AI_MESSAGES),
       // 消息截断后同步对齐索引 seq，防止 recall 召回错误轮次
-      historyIndexes: alignHistoryIndexes(s.messages, s.messages.slice(-MAX_PERSISTED_AI_MESSAGES), s.historyIndexes),
+      historyIndexes: alignHistoryIndexesForSession(s),
       stats: s.stats ? { ...s.stats } : undefined,
       lastRun: s.lastRun ? { usage: s.lastRun.usage ? { ...s.lastRun.usage } : undefined, durationMs: s.lastRun.durationMs } : undefined,
     })),
@@ -249,7 +233,7 @@ export async function openWorkspace(filePath?: string): Promise<boolean> {
       notify();
       return false;
     }
-    await applyWorkspace(result.workspace as WorkspaceData, result.filePath);
+    await applyWorkspace(result.workspace as unknown as WorkspaceData, result.filePath);
     state.statusMessage = `已打开工作区: ${result.filePath ? basename(result.filePath) : ""}`;
     notify();
     return true;
@@ -264,7 +248,7 @@ export async function restoreWorkspace(): Promise<void> {
   try {
     const result = await window.ide!.getWorkspaceState();
     if (!result.workspace) return;
-    await applyWorkspace(result.workspace as WorkspaceData, result.filePath);
+    await applyWorkspace(result.workspace as unknown as WorkspaceData, result.filePath);
   } catch (err) {
     console.error("[IDE] restore workspace failed:", err);
   }

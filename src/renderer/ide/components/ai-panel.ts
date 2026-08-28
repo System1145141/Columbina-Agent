@@ -4,6 +4,7 @@ import {
   runAgentPlan,
   confirmTaskPlan,
   cancelTaskPlan,
+  editTaskPlanStep,
   undoLastWrite,
   loadAgentModels,
   setAgentModel,

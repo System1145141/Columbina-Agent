@@ -1,3 +1,4 @@
+import { installRendererErrorMonitor } from "../error-monitor";
 import { state } from "./services/state";
 import { loadIdeSettings, toggleSearchPanel, toggleTerminalPanel, changeEditorFontSize, toggleOutlinePanel, toggleProblemsPanel } from "./services/layout";
 import { restoreWorkspace, saveWorkspaceSync } from "./services/workspace-service";
@@ -15,6 +16,7 @@ import { initGitPanel } from "./components/git-panel";
 import { initProblemsPanel } from "./components/problems-panel";
 import { initOutlinePanel } from "./components/outline-panel";
 import { initializePlugins } from "./plugins/manager";
+installRendererErrorMonitor("ide");
 
 function initWindowControls(): void {
   document.getElementById("min-btn")?.addEventListener("click", () => window.ide?.minimize());

@@ -1,4 +1,5 @@
 import { EditorView, ViewPlugin, ViewUpdate, Decoration, DecorationSet, WidgetType, KeyBinding, keymap } from "@codemirror/view";
+import { RangeSet } from "@codemirror/state";
 import { subscribe, clearInlineCompletion, state, notify } from "../services/state";
 import {
   scheduleInlineCompletion,
@@ -74,7 +75,8 @@ const inlineCompletionPlugin = ViewPlugin.fromClass(
     private onGlobalStateChange() {
       if (this.syncFromState()) {
         requestAnimationFrame(() => {
-          if (this.view.isDestroyed) return;
+          // EditorView.destroyed 为私有成员；以 DOM 是否仍挂在文档判断视图存活
+          if (!this.view.dom.isConnected) return;
           this.view.update([]);
         });
       }
@@ -82,7 +84,8 @@ const inlineCompletionPlugin = ViewPlugin.fromClass(
 
     private syncFromState(): boolean {
       const next = buildDecorations(this.view);
-      if (!next.eq(this.decorations)) {
+      // RangeSet 无实例 eq，用静态数组比较
+      if (!RangeSet.eq([next], [this.decorations])) {
         this.decorations = next;
         return true;
       }

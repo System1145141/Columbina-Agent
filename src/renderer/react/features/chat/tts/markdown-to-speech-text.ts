@@ -137,10 +137,13 @@ function inlineText(tokens: Token[], options: SpeechTextOptions, warnings: strin
   return tokens.map((token) => {
     switch (token.type) {
       case "text":
-      case "escape":
-        return token.tokens?.length
-          ? inlineText(token.tokens, options, warnings)
+      case "escape": {
+        // text/escape 的类型收窄后不含 tokens 字段，按联合兜底取子 token
+        const sub = (token as { tokens?: Token[] }).tokens;
+        return sub?.length
+          ? inlineText(sub, options, warnings)
           : sanitizePlainText(token.text, options, warnings);
+      }
       case "strong":
       case "em":
       case "del":
@@ -159,8 +162,10 @@ function inlineText(tokens: Token[], options: SpeechTextOptions, warnings: strin
         return "，";
       case "html":
         return "";
-      default:
-        return token.tokens?.length ? inlineText(token.tokens, options, warnings) : "";
+      default: {
+        const sub = (token as { tokens?: Token[] }).tokens;
+        return sub?.length ? inlineText(sub, options, warnings) : "";
+      }
     }
   }).filter(Boolean).join("");
 }
@@ -224,15 +229,17 @@ function blockText(tokens: Token[], options: SpeechTextOptions, warnings: string
         break;
       }
       case "table":
-        blocks.push(tableText(token, options, warnings));
+        blocks.push(tableText(token as Parameters<typeof tableText>[0], options, warnings));
         break;
       case "html":
       case "space":
       case "hr":
       case "def":
         break;
-      default:
-        if (token.tokens?.length) blocks.push(...blockText(token.tokens, options, warnings));
+      default: {
+        const sub = (token as { tokens?: Token[] }).tokens;
+        if (sub?.length) blocks.push(...blockText(sub, options, warnings));
+      }
     }
   }
   return blocks.filter(Boolean);

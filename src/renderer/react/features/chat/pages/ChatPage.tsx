@@ -462,7 +462,7 @@ export function ChatPage() {
 
     return api.onEvent((event) => {
       if (event.type === "CUSTOM" && event.name === "cyrene.todos") {
-        const incoming = (event.value as TodoState) ?? { todos: [] };
+        const incoming = (event.value ?? { todos: [] }) as TodoState;
         const mode = incoming.mode;
         if (mode === "work" || mode === "daily" || mode === "learn") {
           setTodoStateByMode((prev) => ({ ...prev, [mode]: incoming }));
@@ -627,7 +627,8 @@ export function ChatPage() {
     localPreviewUrlsRef.current.clear();
   }, []);
 
-  useEffect(() => window.chat?.onScreenshotInsert?.((data) => {
+  useEffect(() => window.chat?.onScreenshotInsert?.((raw) => {
+    const data = raw as { filePath: string; mime: string; previewUrl: string; hasAnnotations: boolean };
     const targetScope = activeScopeRef.current;
     const attachment: ComposerAttachment = {
       kind: "image",
@@ -948,7 +949,7 @@ export function ChatPage() {
   }
 
   async function runModel(input: {
-    targetMode: "chat" | "work" | "daily" | "code";
+    targetMode: "chat" | "work" | "daily" | "code" | "learn";
     sessionId: string;
     userMessageId: string;
     assistantId: string;
@@ -1254,7 +1255,7 @@ export function ChatPage() {
     activeAguiOffRef.current = off;
 
     try {
-      const general = await window.chat?.getGeneralSettings?.();
+      const general = (await window.chat?.getGeneralSettings?.()) as { currentStyleId?: string } | undefined;
       const runMessages = input.session.messages.slice(-16).map((item) => ({
         role: item.role,
         content: item.content,
@@ -1492,7 +1493,7 @@ export function ChatPage() {
    * 与 vanilla 行为一致：接力结束后切回用户最初选择的角色。
    */
   async function runHandoffChain(input: {
-    targetMode: "chat" | "work" | "daily" | "code";
+    targetMode: "chat" | "work" | "daily" | "code" | "learn";
     sessionId: string;
     firstAssistantId: string;
     firstContent: string | undefined;
@@ -1870,7 +1871,7 @@ export function ChatPage() {
         ...pendingQueueBySessionRef.current,
         [sessionId]: [
           ...(pendingQueueBySessionRef.current[sessionId] ?? []),
-          { id: userMessageId, rawContent: message, visibleContent, attachments: attachmentsForMessage, userSticker },
+          { id: userMessageId, rawContent: message, visibleContent: visibleMessage, attachments: attachmentsForMessage, userSticker },
         ],
       };
       pendingQueueBySessionRef.current = nextQueue;

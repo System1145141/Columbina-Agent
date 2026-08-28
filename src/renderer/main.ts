@@ -1,3 +1,4 @@
+import { installRendererErrorMonitor } from "./error-monitor";
 import { Live2DManager } from "./live2d/manager";
 import "./ui/theme";
 import { InteractionController } from "./live2d/interaction";
@@ -8,6 +9,7 @@ import { SpeakingMotionController } from "./live2d/speaking-motion";
 import { OpenerBubbleController } from "./live2d/opener-bubble";
 import { ClickThroughController } from "./live2d/click-through";
 import { resolveAsset } from "../shared/renderer-base";
+installRendererErrorMonitor("pet");
 
 const canvas = document.getElementById("live2d-canvas") as HTMLCanvasElement;
 if (!canvas) throw new Error("Canvas #live2d-canvas not found");
@@ -29,16 +31,12 @@ if (!window.columbina) {
 
 declare global {
   interface Window {
-    live2dSpeech?: {
-      onPrepare: (callback: () => void) => () => void;
-      onMouthStart: (callback: (payload: { durationMs: number }) => void) => () => void;
-      onMouthStop: (callback: () => void) => () => void;
-    };
     live2dAction?: {
       onPlayAction: (callback: (target: import("../shared/live2d-actions").Live2DTarget) => void) => () => void;
     };
   }
 }
+// live2dSpeech 的完整声明见 src/renderer/global.d.ts（多窗口共享权威声明）
 
 let interaction: InteractionController | null = null;
 let focus: MouseFocusController | null = null;
@@ -113,8 +111,9 @@ const manager = new Live2DManager({
     // 启动竞态修复：主进程在渲染进程就绪前发的 PET_ZOOM 事件会被丢弃。
     // 注册监听后主动从磁盘读一次 petZoom 并应用，确保重启后模型大小生效。
     window.settings?.getGeneral().then((cfg) => {
-      if (cfg?.petZoom && cfg.petZoom !== 1) {
-        manager.applyZoom(cfg.petZoom);
+      const zoom = cfg?.petZoom;
+      if (typeof zoom === "number" && zoom !== 1) {
+        manager.applyZoom(zoom);
       }
     }).catch(() => { /* 设置读取失败不影响加载 */ });
 

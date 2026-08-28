@@ -1,6 +1,6 @@
 import { Conversations, type ConversationItemType } from "@ant-design/x";
 import { DeleteOutlined, EditOutlined, PushpinOutlined } from "@ant-design/icons";
-import { Input, Menu, Modal, Popover } from "antd";
+import { Input, Menu, Modal, Popover, type InputRef } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChatSessionMeta, ConversationMode } from "../../../../../shared/chat-types-react";
 import { t } from "../../../../../shared/i18n";
@@ -149,7 +149,7 @@ export function ConversationSidebar({
     value: string;
   } | null>(null);
 
-  const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const renameInputRef = useRef<InputRef | null>(null);
 
   useEffect(() => {
     if (!editing) return;

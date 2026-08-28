@@ -1037,7 +1037,7 @@ export function ChatMessageList({
   useEffect(() => {
     let active = true;
     void window.chat?.getEnabledStickers?.().then((stickers) => {
-      if (active) setEnabledStickers(stickers);
+      if (active) setEnabledStickers(stickers as EnabledSticker[]);
     }).catch(() => {
       if (active) setEnabledStickers([]);
     });

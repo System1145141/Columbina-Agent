@@ -1,3 +1,4 @@
+import { installRendererErrorMonitor } from "../error-monitor";
 // 通话窗口渲染端 —— 粒子背景 + 麦克风采集 + VAD 静默检测 + 状态机 + TTS 播放。
 //
 // 状态：LISTENING（用户说话）→ THINKING（agent 思考）→ SPEAKING（昔涟说话）→ LISTENING
@@ -7,6 +8,7 @@ import "../ui/theme";
 import { t, setLang, setI18nVars, loadLangBundle, type Lang } from "../../shared/i18n";
 import { applyI18n } from "../../shared/i18n/dom";
 import { APP_VERSION } from "../../shared/version";
+installRendererErrorMonitor("call");
 
 // ── 粒子背景 ──
 const canvas = document.getElementById("particles") as HTMLCanvasElement | null;
@@ -235,7 +237,7 @@ function initWaveformCanvas(): void {
   }
 }
 
-let analyserData: Uint8Array | null = null;
+let analyserData: Uint8Array<ArrayBuffer> | null = null;
 
 function drawWaveform(): void {
   if (!waveformCtx || !waveformCanvas) { requestAnimationFrame(drawWaveform); return; }
@@ -580,10 +582,6 @@ declare global {
     tts?: {
       loadSettings: () => Promise<Record<string, unknown>>;
     };
-    live2dSpeech?: {
-      prepare: () => void;
-      startMouth: (durationMs: number) => void;
-      stopMouth: () => void;
-    };
+    // live2dSpeech 的完整声明见 src/renderer/global.d.ts（多窗口共享权威声明）
   }
 }

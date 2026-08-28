@@ -1,9 +1,11 @@
+import { installRendererErrorMonitor } from "../error-monitor";
 import "../ui/base.css";
 import "./sidebar.css";
 import "../ui/theme";
 import { t, setLang, setI18nVars, loadLangBundle, type Lang } from "../../shared/i18n";
 import { applyI18n } from "../../shared/i18n/dom";
 import { APP_VERSION } from "../../shared/version";
+installRendererErrorMonitor("sidebar");
 
 interface ModelEntry {
   id: string;
@@ -64,10 +66,11 @@ interface SidebarApi {
 declare global {
   interface Window {
     sidebar?: SidebarApi;
-    modelConfig?: ModelConfigApi;
     runtimeState?: RuntimeStateApi;
   }
 }
+// modelConfig 的声明见 ide/services/state.ts 的 declare global（含 get/saveSelectedModelIds/onChanged），
+// 此处不再重复声明避免 TS2717 冲突。
 
 // 没有 preload 时给浏览器跑留个 no-op，方便 vite 单独打开 sidebar 调试
 if (!window.sidebar) {
@@ -186,11 +189,12 @@ function applyModelConfig(config: ModelConfig | null): void {
 async function initModelConfig(): Promise<void> {
   try {
     const config = await window.modelConfig?.get();
-    applyModelConfig(config ?? null);
+    // preload 返回的是宽松形状，本地 ModelConfig 描述的是应用语义；边界处收敛
+    applyModelConfig((config ?? null) as unknown as ModelConfig | null);
   } catch {
     applyModelConfig(null);
   }
-  window.modelConfig?.onChanged((config) => applyModelConfig(config));
+  window.modelConfig?.onChanged((config) => applyModelConfig(config as unknown as ModelConfig));
 }
 // 置顶 toggle：点 📌 切换 alwaysOnTop，按钮高亮态反映当前是否已置顶。
 pinBtn.addEventListener("click", async () => {

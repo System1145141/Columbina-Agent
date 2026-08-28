@@ -1,3 +1,4 @@
+import { installRendererErrorMonitor } from "../error-monitor";
 import "../ui/base.css";
 import "./style.css";
 import "../ui/theme";
@@ -5,6 +6,7 @@ import { resolveAsset } from "../../shared/renderer-base";
 import { setLang, setI18nVars, loadLangBundle, type Lang } from "../../shared/i18n";
 import { applyI18n } from "../../shared/i18n/dom";
 import { APP_VERSION } from "../../shared/version";
+installRendererErrorMonitor("sticker-manager");
 
 type StickerItem = {
   id: string;

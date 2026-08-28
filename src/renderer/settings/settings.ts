@@ -1,3 +1,4 @@
+import { installRendererErrorMonitor } from "../error-monitor";
 import "../ui/base.css";
 import "./settings.css";
 import "../ui/theme";
@@ -1750,6 +1751,36 @@ async function renderSchedulerList(): Promise<void> {
     schedulerList.appendChild(card);
   }
 }
+
+// 设置导出/导入（通用设置面板）：导出聚合 JSON / 导入回写后提示重启
+const settingsExportBtn = document.getElementById("settings-export-btn") as HTMLButtonElement | null;
+const settingsImportBtn = document.getElementById("settings-import-btn") as HTMLButtonElement | null;
+
+settingsExportBtn?.addEventListener("click", async () => {
+  settingsExportBtn.disabled = true;
+  try {
+    const res = await window.settings!.exportBundle();
+    if (res.ok) window.alert("设置已导出");
+    else if (!res.canceled) window.alert(`导出失败: ${res.error || "未知错误"}`);
+  } finally {
+    settingsExportBtn.disabled = false;
+  }
+});
+
+settingsImportBtn?.addEventListener("click", async () => {
+  if (!window.confirm("导入设置将覆盖现有的模型配置、通用设置与 IDE 工作区布局，继续吗？")) return;
+  settingsImportBtn.disabled = true;
+  try {
+    const res = await window.settings!.importBundle();
+    if (res.ok) {
+      window.alert(`已导入 ${res.imported.length} 项设置（${res.imported.join("、")}）。重启应用后生效。`);
+    } else if (!res.canceled) {
+      window.alert(`导入失败: ${res.error || "未知错误"}`);
+    }
+  } finally {
+    settingsImportBtn.disabled = false;
+  }
+});
 
 generalForm.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -4145,6 +4176,7 @@ window.chatStore?.onActiveSessionChanged((sessionId) => {
    ============================================================ */
 
 import { Chart, registerables, type ChartConfiguration } from "chart.js";
+installRendererErrorMonitor("settings");
 
 Chart.register(...registerables);
 

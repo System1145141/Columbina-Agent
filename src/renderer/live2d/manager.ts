@@ -96,7 +96,6 @@ export class Live2DManager {
       view: canvas,
       width,
       height,
-      transparent: true,
       backgroundAlpha: 0,
       antialias: true,
       // Preserve the drawing buffer so callers can read pixels back out of

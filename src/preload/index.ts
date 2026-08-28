@@ -342,6 +342,8 @@ const settingsApi = {
   },
   getGeneral: () => ipcRenderer.invoke(IPC.SETTINGS_GET_GENERAL),
   saveGeneral: (config: unknown) => ipcRenderer.invoke(IPC.SETTINGS_SAVE_GENERAL, config),
+  exportBundle: () => ipcRenderer.invoke(IPC.SETTINGS_EXPORT_BUNDLE) as Promise<{ ok: boolean; canceled?: boolean; error?: string }>,
+  importBundle: () => ipcRenderer.invoke(IPC.SETTINGS_IMPORT_BUNDLE) as Promise<{ ok: boolean; canceled?: boolean; imported: string[]; error?: string }>,
   openSidebar: () => ipcRenderer.send(IPC.SETTINGS_OPEN_SIDEBAR),
   closeSidebar: () => ipcRenderer.send(IPC.SETTINGS_CLOSE_SIDEBAR),
   openTasks: () => ipcRenderer.send(IPC.SETTINGS_OPEN_TASKS),
@@ -728,4 +730,10 @@ contextBridge.exposeInMainWorld("getI18nBundle", i18nApi.getBundle);
 
 // UI 移植（阶段 A 骨架）：React 聊天窗口的接口适配层（Phase B 填充映射实现）
 contextBridge.exposeInMainWorld("reactBridge", createReactBridge());
+
+// 错误监控：渲染层未处理异常转发主进程落盘（userData/logs）
+contextBridge.exposeInMainWorld("errorMonitor", {
+  log: (payload: { source: string; kind: string; message: string; stack?: string; extra?: Record<string, unknown> }) =>
+    ipcRenderer.send(IPC.ERROR_LOG, payload),
+});
 

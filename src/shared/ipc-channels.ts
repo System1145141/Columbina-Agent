@@ -34,6 +34,7 @@ export const IPC = {
   AGUI_RUN: "agui:run",
   AGUI_EVENT: "agui:event",
   AGUI_CANCEL: "agui:cancel",
+  ERROR_LOG: "error:log", // 渲染层 → 主进程：未处理异常转发落盘
   SCHEDULER_EVENT: "scheduler:event",
 
   // sidebar window (status / schedule / settings entry)
@@ -59,6 +60,8 @@ export const IPC = {
   SETTINGS_TEST_VISION: "settings:test-vision",
   SETTINGS_GET_GENERAL: "settings:get-general",
   SETTINGS_SAVE_GENERAL: "settings:save-general",
+  SETTINGS_EXPORT_BUNDLE: "settings:export-bundle",
+  SETTINGS_IMPORT_BUNDLE: "settings:import-bundle",
   I18N_GET_BUNDLE: "i18n:get-bundle",
   I18N_LANGUAGE_CHANGED: "i18n:language-changed", // renderer → main：用户切换语言
   I18N_RELOAD: "i18n:reload",                     // main → renderer：要求重新加载语言包

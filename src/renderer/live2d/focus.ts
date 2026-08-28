@@ -1,5 +1,4 @@
 import type { Live2DModel } from "pixi-live2d-display/cubism4";
-import { ColumbinaModelFacade } from "./manager";
 
 export interface FocusOptions {
   pollIntervalMs?: number;

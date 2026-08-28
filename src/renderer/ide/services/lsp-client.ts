@@ -63,7 +63,7 @@ function uriToFilePath(uri: string): string {
   }
 }
 
-class LspClient {
+export class LspClient {
   private languageId: string;
   private workspacePath: string;
   private requestId = 0;
@@ -88,7 +88,8 @@ class LspClient {
     this.started = true;
     this.unsub = window.ide?.onLspData((payload) => {
       if (payload.languageId !== this.languageId || payload.workspacePath !== this.workspacePath) return;
-      this.handleLspData(payload);
+      // window.ide 声明中 message 为 unknown（避免 state.ts 反向依赖本模块类型），此处收敛为 LspMessage
+      this.handleLspData(payload as { languageId: string; workspacePath: string; message: LspMessage });
     });
     return { ok: true };
   }
@@ -214,4 +215,4 @@ export function stopAllLspClients(): void {
   clients.clear();
 }
 
-export { filePathToUri };
+export { filePathToUri, uriToFilePath };

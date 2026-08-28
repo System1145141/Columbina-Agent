@@ -22,5 +22,8 @@ jobs:
       - name: Build (main + preload + renderer)
         run: npm run build
 
+      - name: Typecheck renderer
+        run: npm run typecheck:renderer
+
       - name: Unit tests
         run: npm test

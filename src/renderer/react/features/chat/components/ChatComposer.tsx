@@ -93,7 +93,7 @@ function StickerPicker({ onChoose }: { onChoose: (id: string) => void }) {
     if (!open) return;
     let active = true;
     void window.chat?.getEnabledStickers?.().then((items) => {
-      if (active) setStickers(items);
+      if (active) setStickers(items as EnabledSticker[]);
     }).catch(() => {
       if (active) setStickers([]);
     });
@@ -224,7 +224,7 @@ export function ChatComposer({
   useEffect(() => {
     let active = true;
     void window.chat?.getEnabledStickers?.().then((items) => {
-      if (active) setEnabledStickers(items);
+      if (active) setEnabledStickers(items as EnabledSticker[]);
     }).catch(() => {
       if (active) setEnabledStickers([]);
     });

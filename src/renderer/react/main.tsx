@@ -1,9 +1,11 @@
+import { installRendererErrorMonitor } from "../error-monitor";
 import React from "react";
 import { createRoot } from "react-dom/client";
 import "../ui/theme";
 import { App } from "./App";
 import { AppProviders } from "./app/providers/AppProviders";
 import { setLang, loadLangBundle, type Lang } from "../../shared/i18n";
+installRendererErrorMonitor("chat");
 
 const container = document.getElementById("cyrene-react-root");
 if (!container) {

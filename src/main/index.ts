@@ -57,6 +57,7 @@ import { parseLocalStickerFileFromUrl, resolveLocalStickerPath } from "./sticker
 import { normalizeWindowVisibilitySettings } from "./window-visibility-settings";
 import type { StickerConfigItem } from "../shared/sticker-types";
 import { initReranker, getRerankerInstallStatus } from "./rag/reranker";
+import { initErrorMonitor, logRendererError } from "./error-monitor";
 import { setupLspIpc, stopAllLanguageServers } from "./lsp-manager";
 import { setupGitIpc } from "./git-service";
 import { detectFileEncoding, decodeFileBuffer, encodeFileString } from "./file-encoding";
@@ -787,6 +788,61 @@ function getSettingsPath(): string {
 
 function getGeneralSettingsPath(): string {
   return path.join(app.getPath("userData"), "app-settings.json");
+}
+
+/**
+ * 设置导出/导入：聚合可移植的设置文件（模型配置 / 通用设置 / 工作区布局）为一个 JSON。
+ * 刻意排除：记忆（含个人画像）、聊天记录、凭证类（音乐 cookie / 渠道配置）、日志——
+ * 导出文件可能被分享，敏感数据不随行。
+ */
+function getPortableSettingsFiles(): Record<string, string> {
+  return {
+    "model-settings": getSettingsPath(),
+    "app-settings": getGeneralSettingsPath(),
+    "workspace-layout": getIdeAutosaveWorkspacePath(),
+  };
+}
+
+async function exportSettingsBundle(targetPath: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const bundle: Record<string, unknown> = {
+      _format: "columbina-settings",
+      _version: 1,
+      _exportedAt: new Date().toISOString(),
+    };
+    for (const [key, filePath] of Object.entries(getPortableSettingsFiles())) {
+      try {
+        bundle[key] = JSON.parse(fs.readFileSync(filePath, "utf8"));
+      } catch {
+        // 缺失的文件跳过（用户可能从未改过该设置）
+      }
+    }
+    fs.writeFileSync(targetPath, JSON.stringify(bundle, null, 2), "utf8");
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+async function importSettingsBundle(sourcePath: string): Promise<{ ok: boolean; imported: string[]; error?: string }> {
+  const imported: string[] = [];
+  try {
+    const raw = fs.readFileSync(sourcePath, "utf8");
+    const bundle = JSON.parse(raw) as Record<string, unknown>;
+    if (bundle._format !== "columbina-settings") {
+      return { ok: false, imported, error: "不是有效的 Columbina 设置导出文件" };
+    }
+    const files = getPortableSettingsFiles();
+    for (const key of Object.keys(files)) {
+      const value = bundle[key];
+      if (value === undefined || value === null || typeof value !== "object") continue;
+      fs.writeFileSync(files[key], JSON.stringify(value, null, 2), "utf8");
+      imported.push(key);
+    }
+    return { ok: true, imported };
+  } catch (err) {
+    return { ok: false, imported, error: String(err) };
+  }
 }
 
 
@@ -4092,6 +4148,28 @@ ipcMain.handle(IPC.SETTINGS_SAVE_GENERAL, (_event, settings: Partial<GeneralSett
   return saveGeneralSettings(settings);
 });
 
+// 设置导出/导入：弹系统文件对话框选择目标文件后聚合/回写可移植设置
+ipcMain.handle(IPC.SETTINGS_EXPORT_BUNDLE, async () => {
+  const result = await dialog.showSaveDialog({
+    title: "导出设置",
+    defaultPath: path.join(app.getPath("documents"), "columbina-settings.json"),
+    filters: [{ name: "Columbina Settings", extensions: ["json"] }],
+  });
+  if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+  return exportSettingsBundle(result.filePath);
+});
+
+ipcMain.handle(IPC.SETTINGS_IMPORT_BUNDLE, async () => {
+  const result = await dialog.showOpenDialog({
+    title: "导入设置",
+    properties: ["openFile"],
+    filters: [{ name: "Columbina Settings", extensions: ["json"] }],
+  });
+  if (result.canceled || result.filePaths.length === 0) return { ok: false, canceled: true, imported: [] };
+  const res = await importSettingsBundle(result.filePaths[0]);
+  return res;
+});
+
 // i18n: 按语言返回翻译 JSON 包
 ipcMain.handle(IPC.I18N_GET_BUNDLE, async (_event, lang: string) => {
   try {
@@ -5615,6 +5693,15 @@ app.whenReady().then(async () => {
   if (generalSettings.sidebarVisible) createSidebarWindow();
   if (generalSettings.tasksVisible) createTasksWindow();
   createTray();
+  // 错误监控最先初始化：后续任何启动阶段异常都能落盘
+  initErrorMonitor();
+  ipcMain.handle(IPC.ERROR_LOG, (_event, payload: { source: string; kind: string; message: string; stack?: string; extra?: Record<string, unknown> }) => {
+    try {
+      logRendererError(payload);
+    } catch {
+      // 监控失败不影响业务
+    }
+  });
   // 权限模块初始化：必须在 createWindow 之后但任意工具调用之前
   initPermissionFromDisk();
   registerPermissionIpc();

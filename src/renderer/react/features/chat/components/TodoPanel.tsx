@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { TodoState } from "../../../../shared/todo-types";
+import type { TodoState } from "../../../../../shared/todo-types";
 import { t } from "../../../../../shared/i18n";
 import reminderPngUrl from "../../../assets/status-moods/提醒.png?url";
 import "./TodoPanel.css";

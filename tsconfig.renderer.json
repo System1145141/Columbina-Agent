@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "noEmit": true,
+    // 存量代码从未做过类型检查：先以「非严格」基线纳入 CI（可捕获 TS2304 未定义名 /
+    // TS2307 缺失模块 / TS2339 属性拼写等真实缺陷），strictNullChecks / 隐式 any
+    // 的存量债务后续逐步收敛后再开启。
+    "strict": false,
+    "strictNullChecks": false,
+    "noImplicitAny": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "useDefineForClassFields": true,
+    "types": ["vite/client", "node"]
+  },
+  "include": ["src/renderer/**/*.ts", "src/renderer/**/*.tsx", "src/shared/**/*.ts"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    // TODO(typing-debt): settings.ts 存量约 90 个类型错误（window.* API 声明缺失为主），
+    // 待补齐 preload API 类型后纳入。
+    "src/renderer/settings/settings.ts"
+  ]
+}

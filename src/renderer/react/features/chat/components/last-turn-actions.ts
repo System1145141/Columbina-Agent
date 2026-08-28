@@ -6,6 +6,9 @@ interface RevisableMessage {
   loading?: boolean;
   streaming?: boolean;
   reasoningStreaming?: boolean;
+  /** 编辑末轮用户消息时需要展示/取回原文 */
+  content?: string;
+  responseStarted?: boolean;
 }
 
 export interface RevisableLastTurn {
